@@ -1,0 +1,20 @@
+# Runtime data (logs, sqlite db, pid lock)
+data/
+src/data/
+run.lock
+
+# Build artifacts
+*.zip
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# macOS
+.DS_Store

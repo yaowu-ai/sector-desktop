@@ -1,0 +1,31 @@
+defaults:
+  daily_actions:
+    fyp_browse_minutes: [2, 5]    # 单次 FYP 浏览时长范围
+    like_probability: 0.35        # 每个视频点赞概率（保守起步，1 周后视情调到 0.5+）
+    follows_per_session: [0, 1]   # 每 session 关注数上限
+  active_hours: [[9, 12], [19, 23]]
+  timezone: America/New_York
+
+bitbrowser:
+  api_url: "http://127.0.0.1:54345"
+
+# 调度器配置（仅在跑 scheduler.py 时生效；main.py 一次性运行不受影响）
+scheduler:
+  fires_per_day: 3   # 每天在 active_hours 内随机触发的次数
+
+# 通知配置（默认关闭）。批次结束后推送 OK/ERR 摘要
+notify:
+  enabled: false
+  type: serverchan       # serverchan / bark / webhook
+  serverchan:
+    sendkey: ""          # 从 https://sct.ftqq.com 获取
+  bark:
+    url: ""              # 例: https://api.day.app/yourkey
+  webhook:
+    url: ""              # 通用 POST，body: {"title":..., "content":...}
+
+accounts:
+  - id: tiktok_1
+    enabled: true
+    bitbrowser_profile_id: "158edc80dfc94b5eb80e2dbb6b682ebd"
+    notes: "测试号 #1"
