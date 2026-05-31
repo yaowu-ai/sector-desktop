@@ -18,6 +18,7 @@ from notify import send as notify_send
 
 ROOT = Path(__file__).parent.parent
 CONFIG_PATH = ROOT / "config" / "accounts.yaml"
+COMMENTS_PATH = ROOT / "config" / "comments.txt"
 DATA_DIR = ROOT / "data"
 DATA_DIR.mkdir(exist_ok=True)
 LOG_DB = DATA_DIR / "actions.db"
@@ -102,6 +103,18 @@ def load_config():
         return yaml.safe_load(f)
 
 
+def load_comments():
+    """Read the comment pool (one per line; blank / #-prefixed lines ignored)."""
+    if not COMMENTS_PATH.exists():
+        return []
+    out = []
+    for raw in COMMENTS_PATH.read_text(encoding="utf-8").splitlines():
+        s = raw.strip()
+        if s and not s.startswith("#"):
+            out.append(s)
+    return out
+
+
 def find_account(config, account_id):
     for acc in config["accounts"]:
         if acc["id"] == account_id:
@@ -117,12 +130,22 @@ def run_session(account, config, conn):
     like_prob = float(da.get("like_probability", 0.35))
     follows_target = random.randint(*da.get("follows_per_session", [0, 1]))
 
+    cmt_cfg = da.get("comment", {}) or {}
+    comments_pool = load_comments() if cmt_cfg.get("enabled") else []
+    comments_target = (
+        random.randint(*cmt_cfg.get("comments_per_session", [1, 2]))
+        if comments_pool else 0
+    )
+    comment_prob = float(cmt_cfg.get("probability", 0.25))
+    comment_min_videos = int(cmt_cfg.get("min_video_comments", 1000))
+
     summary = {
         "account_id": account_id,
         "status": "unknown",
         "videos": 0,
         "likes": 0,
         "follows": 0,
+        "comments": 0,
         "duration_target_min": round(duration, 1),
         "duration_actual_min": 0.0,
         "error": None,
@@ -139,7 +162,7 @@ def run_session(account, config, conn):
 
     session_log(
         f"{account_id} | START | target={duration:.1f}min "
-        f"like_p={like_prob} follows_max={follows_target}"
+        f"like_p={like_prob} follows_max={follows_target} comments_max={comments_target}"
     )
     log_action(conn, account_id, "open", "start")
 
@@ -159,27 +182,36 @@ def run_session(account, config, conn):
                 duration_minutes=duration,
                 like_prob=like_prob,
                 follows_target=follows_target,
+                comments_target=comments_target,
+                comments_pool=comments_pool,
+                comment_prob=comment_prob,
+                comment_min_videos=comment_min_videos,
             )
             videos = result["videos"]
             likes = result["likes"]
             follows = result["follows"]
+            comments = result["comments"]
 
             log_action(conn, account_id, "fyp_browse", "ok", f"videos={videos}")
             if likes > 0:
                 log_action(conn, account_id, "like", "ok", f"count={likes}")
             if follows > 0:
                 log_action(conn, account_id, "follow", "ok", f"count={follows}")
+            if comments > 0:
+                log_action(conn, account_id, "comment", "ok", f"count={comments}")
 
             summary["videos"] = videos
             summary["likes"] = likes
             summary["follows"] = follows
+            summary["comments"] = comments
             summary["status"] = "ok"
 
             browser.close()
         actual = (time.time() - started) / 60
         summary["duration_actual_min"] = round(actual, 1)
         session_log(
-            f"{account_id} | OK | {videos}v / {likes}L / {follows}F in {actual:.1f}min"
+            f"{account_id} | OK | {videos}v / {likes}L / {follows}F / {comments}C "
+            f"in {actual:.1f}min"
         )
     except Exception as e:
         summary["status"] = "error"
@@ -214,7 +246,8 @@ def build_batch_message(summaries):
         if s["status"] == "ok":
             lines.append(
                 f"  - {s['account_id']}: OK "
-                f"({s['videos']}v / {s['likes']}L / {s['follows']}F, {s['duration_actual_min']}min)"
+                f"({s['videos']}v / {s['likes']}L / {s['follows']}F / {s.get('comments', 0)}C, "
+                f"{s['duration_actual_min']}min)"
             )
         elif s["status"] == "error":
             lines.append(f"  - {s['account_id']}: ERROR - {s['error']}")

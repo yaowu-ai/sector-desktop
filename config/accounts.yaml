@@ -3,6 +3,11 @@ defaults:
     fyp_browse_minutes: [2, 5]    # 单次 FYP 浏览时长范围
     like_probability: 0.35        # 每个视频点赞概率（保守起步，1 周后视情调到 0.5+）
     follows_per_session: [0, 1]   # 每 session 关注数上限
+    comment:
+      enabled: true
+      comments_per_session: [1, 2]  # 每 session 评论数上限（最多 1~2 条）
+      min_video_comments: 1000      # 仅评论“评论数 > 此值”的视频
+      probability: 0.25             # 命中候选视频后，单视频尝试评论的概率
   active_hours: [[9, 12], [19, 23]]
   timezone: America/New_York
 
@@ -27,5 +32,5 @@ notify:
 accounts:
   - id: tiktok_1
     enabled: true
-    bitbrowser_profile_id: "158edc80dfc94b5eb80e2dbb6b682ebd"
+    bitbrowser_profile_id: "fed10d2dfd4b43278d22c1823761f94c"
     notes: "测试号 #1"

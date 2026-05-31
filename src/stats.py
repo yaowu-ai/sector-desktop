@@ -49,7 +49,7 @@ def aggregate(since=None):
         if account_id not in stats:
             stats[account_id] = {
                 "ok": 0, "err": 0, "skip": 0,
-                "videos": 0, "likes": 0, "follows": 0,
+                "videos": 0, "likes": 0, "follows": 0, "comments": 0,
             }
         s = stats[account_id]
 
@@ -64,6 +64,8 @@ def aggregate(since=None):
             s["likes"] += parse_count(detail, "count")
         elif action == "follow" and status == "ok":
             s["follows"] += parse_count(detail, "count")
+        elif action == "comment" and status == "ok":
+            s["comments"] += parse_count(detail, "count")
 
     return stats
 
@@ -71,27 +73,30 @@ def aggregate(since=None):
 def print_table(stats, title):
     print()
     print(title)
-    print("=" * 72)
-    print(f"{'Account':<15} {'OK':>5} {'ERR':>5} {'SKIP':>5} {'Videos':>8} {'Likes':>7} {'Follows':>8}")
-    print("-" * 72)
+    print("=" * 80)
+    print(f"{'Account':<15} {'OK':>5} {'ERR':>5} {'SKIP':>5} {'Videos':>8} "
+          f"{'Likes':>7} {'Follows':>8} {'Cmts':>6}")
+    print("-" * 80)
 
     if not stats:
         print("(no data yet)")
-        print("=" * 72)
+        print("=" * 80)
         return
 
-    totals = {"ok": 0, "err": 0, "skip": 0, "videos": 0, "likes": 0, "follows": 0}
+    totals = {"ok": 0, "err": 0, "skip": 0, "videos": 0,
+              "likes": 0, "follows": 0, "comments": 0}
     for acc_id in sorted(stats.keys()):
         s = stats[acc_id]
         print(f"{acc_id:<15} {s['ok']:>5} {s['err']:>5} {s['skip']:>5} "
-              f"{s['videos']:>8} {s['likes']:>7} {s['follows']:>8}")
+              f"{s['videos']:>8} {s['likes']:>7} {s['follows']:>8} {s['comments']:>6}")
         for k in totals:
             totals[k] += s[k]
 
-    print("-" * 72)
+    print("-" * 80)
     print(f"{'Total':<15} {totals['ok']:>5} {totals['err']:>5} {totals['skip']:>5} "
-          f"{totals['videos']:>8} {totals['likes']:>7} {totals['follows']:>8}")
-    print("=" * 72)
+          f"{totals['videos']:>8} {totals['likes']:>7} {totals['follows']:>8} "
+          f"{totals['comments']:>6}")
+    print("=" * 80)
 
 
 if __name__ == "__main__":

@@ -25,15 +25,17 @@ TikTok 多账号养号自动化脚本。在云电脑上通过比特浏览器（�
 
 ```
 config/accounts.yaml      账号与行为配置（唯一配置源）
+config/comments.txt       默认评论池（每行一条，可自由增删）
 src/
   main.py                 入口：批量/单账号执行，PID 文件锁，SQLite 动作日志
   scheduler.py            定时调度服务（FastAPI lifespan + AsyncIOScheduler）
   bitbrowser.py           BitBrowser 本地 API 客户端
-  actions.py              养号动作：fyp_browse / try_like / try_follow
+  actions.py              养号动作：fyp_browse / try_like / try_follow / try_comment
   human_mouse.py          贝塞尔曲线模拟真人鼠标移动
   notify.py               批次结束推送（ServerChan / Bark / Webhook）
-  stats.py                动作统计：按账号汇总浏览/点赞/关注次数
+  stats.py                动作统计：按账号汇总浏览/点赞/关注/评论次数
   test_like.py            点赞动作诊断脚本
+  test_comment.py         评论动作诊断脚本（dump 选择器 + 试发评论）
 data/                     运行时生成（已 gitignore）
   actions.db              SQLite 动作日志
   sessions.log            可读的会话日志
@@ -61,6 +63,11 @@ defaults:
     fyp_browse_minutes: [2, 5]     # 单次 FYP 浏览时长范围（分钟）
     like_probability: 0.35         # 每个视频点赞概率
     follows_per_session: [0, 1]    # 每 session 关注数上限
+    comment:
+      enabled: true
+      comments_per_session: [1, 2]   # 每 session 评论数上限（最多 1~2 条）
+      min_video_comments: 1000       # 仅评论“评论数 > 此值”的视频
+      probability: 0.25              # 命中候选视频后，单视频尝试评论的概率
   active_hours: [[9, 12], [19, 23]]
   timezone: America/New_York
 
@@ -94,7 +101,14 @@ python stats.py --days 7   # 近 7 天
 
 # 点赞动作诊断（浏览器已打开时也可用）
 python test_like.py
+
+# 评论动作诊断：找高评论视频、dump 选择器 HTML、试发评论
+python test_comment.py                  # 找 >1000 评论的视频并试发
+python test_comment.py --min 100 --no-post   # 调低门槛、只定位不发评论
 ```
+
+> 评论池在 `config/comments.txt`，每行一条。养号阶段仅评论“评论数 > `min_video_comments`”
+> 的高流量视频，每 session 最多 1~2 条，降低被判垃圾评论的风险。
 
 ### 定时调度
 
