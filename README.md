@@ -25,12 +25,14 @@ TikTok 多账号养号自动化脚本。在云电脑上通过比特浏览器（�
 
 ```
 config/accounts.yaml      账号与行为配置（唯一配置源）
-config/comments.txt       默认评论池（每行一条，可自由增删）
+config/comments.txt       FYP 默认评论池（每行一条，可自由增删）
+config/comments_brand.txt 品牌向评论池（目标号互动用）
 src/
   main.py                 入口：批量/单账号执行，PID 文件锁，SQLite 动作日志
   scheduler.py            定时调度服务（FastAPI lifespan + AsyncIOScheduler）
   bitbrowser.py           BitBrowser 本地 API 客户端
   actions.py              养号动作：fyp_browse / try_like / try_follow / try_comment
+  target_engage.py        目标号互动：抓新视频 + 点赞/评论自家品牌官方号
   human_mouse.py          贝塞尔曲线模拟真人鼠标移动
   notify.py               批次结束推送（ServerChan / Bark / Webhook）
   stats.py                动作统计：按账号汇总浏览/点赞/关注/评论次数
@@ -95,9 +97,11 @@ python main.py
 python main.py --account tiktok_1
 
 # 查看统计
-python stats.py            # 全部
+python stats.py            # 全部（FYP 浏览/点赞/关注/评论）
 python stats.py --today    # 今天
 python stats.py --days 7   # 近 7 天
+python stats.py --target           # 目标号互动汇总（按号 + 按目标）
+python stats.py --target --today   # 今天的目标号互动（可配合 --today/--days）
 
 # 点赞动作诊断（浏览器已打开时也可用）
 python test_like.py
@@ -110,6 +114,32 @@ python test_comment.py --min 100 --no-post   # 调低门槛、只定位不发评
 > 评论池在 `config/comments.txt`，每行一条。养号阶段仅评论“评论数 > `min_video_comments`”
 > 的高流量视频，每 session 最多 1~2 条，降低被判垃圾评论的风险。
 
+### 目标号互动（捧场自家品牌）
+
+让 `participants` 里的号每次 session **先刷 FYP，再去检查目标官方号有没有新视频**，
+按概率点赞/评论。配置在 `accounts.yaml` 的 `target_accounts` 段：
+
+```yaml
+target_accounts:
+  enabled: true
+  handles: [mechlinkthai2025, mechlink_indonesia, mechlink0]   # 目标官方号
+  participants: [tiktok_6, ..., tiktok_15]   # 执行号（10 个）
+  first_run_latest_n: 1       # 无记录时只处理最新 1 条
+  max_videos_per_run: 3       # 单次单目标最多处理几条新视频
+  like_probability: 0.9
+  comment_probability: 0.5    # 不强制全员评论，打散抱团
+  comments_file: comments_brand.txt
+```
+
+**判新机制**：抓目标号主页每条视频 URL 里的 `video_id`（雪花号，越大越新），
+与 SQLite `target_engagements` 表里的水位线（该号对该目标已处理过的最大 id）比对，
+`id > 水位线` 才算新。置顶旧视频因 id 较小不会被误判为新。某号对某目标**无记录时
+只处理最新 1 条**作为起点，之后每天自然跟进新发布的，同一天多次触发不会重复处理。
+
+> ⚠️ 10 个号集中给同一品牌点赞/评论本质是「互动抱团」，是平台重点打击对象。
+> 已内置缓解：点赞/评论各自独立按概率（非全员）、班次错峰、每次先刷 FYP 混淆。
+> **建议先用 2~3 个号灰度 2~3 天，确认点赞/评论留存（没被限流回滚）再扩到 10 个。**
+
 ### 定时调度
 
 ```bash
@@ -117,13 +147,23 @@ cd src
 python scheduler.py
 ```
 
-启动后每天 00:05 在 `active_hours` 内随机生成 `fires_per_day` 个触发时间，
-每次触发执行一遍所有启用账号。服务监听 `127.0.0.1:9601`：
+启动后每天 00:05 为**每个账号**在它自己的 `active_hours` 内随机生成 `fires_per_day`
+个触发时间，每次只跑那一个账号。服务监听 `127.0.0.1:9601`：
 
 - `GET /health` — 查看已排期的触发时间、锁状态
 - 触发前自动探测 BitBrowser API，不可达则跳过本次
+- 进程内串行：同一时刻只驱动一个 profile（`session_lock`）
+- 调度与手动 `python main.py` 通过 `data/run.lock` 互斥，不会同时跑
 
-调度与手动 `python main.py` 通过 `data/run.lock` 互斥，不会同时跑。
+**共享 IP 错峰（班次模型）**：20 号 / 10 IP 时，每个 IP 挂 2 个号——一个排上午班
+`[[9,12]]`、一个排晚上班 `[[19,23]]`。两班次时间不重叠，所以同一 IP 的两个号绝不会
+同时在线（隔离靠 `active_hours` 错班，配合进程内 `session_lock` 串行执行）。
+
+- `ip_group`：同一个 IP 的两个号填相同字母（A~J），**仅用于启动校验**——若同 IP 的
+  两个号被排进重叠的 `active_hours`，scheduler 启动时会告警。
+- `active_hours`：决定账号属于哪个班次。
+> 默认 `accounts.yaml` 已是 20 号 / 2 班次模板，仅 `tiktok_1` 启用；填好各号的
+> `bitbrowser_profile_id` 并把 `enabled` 改 `true` 即可逐个上线。
 
 ## 通知（可选）
 

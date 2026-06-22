@@ -13,7 +13,8 @@ import yaml
 from patchright.sync_api import sync_playwright
 
 from bitbrowser import BitBrowserClient
-from actions import fyp_browse
+from actions import fyp_browse, human_pause
+from target_engage import fetch_recent_videos, engage_target_video
 from notify import send as notify_send
 
 ROOT = Path(__file__).parent.parent
@@ -77,8 +78,37 @@ def init_db():
             account_id TEXT, action TEXT, status TEXT, detail TEXT, ts TEXT
         )
     """)
+    # Per (our account, target handle, video) engagement record. Doubles as the
+    # watermark source: the max video_id we've already processed for a target.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS target_engagements (
+            our_account TEXT, handle TEXT, video_id TEXT,
+            liked INTEGER, commented INTEGER, ts TEXT,
+            PRIMARY KEY (our_account, handle, video_id)
+        )
+    """)
     conn.commit()
     return conn
+
+
+def get_target_watermark(conn, account_id, handle):
+    """Largest video_id this account has already processed for `handle`, or None."""
+    cur = conn.execute(
+        "SELECT video_id FROM target_engagements WHERE our_account=? AND handle=?",
+        (account_id, handle),
+    )
+    ids = [int(r[0]) for r in cur.fetchall() if r[0] and str(r[0]).isdigit()]
+    return max(ids) if ids else None
+
+
+def record_target_engagement(conn, account_id, handle, video_id, liked, commented):
+    conn.execute(
+        "INSERT OR REPLACE INTO target_engagements "
+        "(our_account, handle, video_id, liked, commented, ts) VALUES (?,?,?,?,?,?)",
+        (account_id, handle, str(video_id), int(liked), int(commented),
+         datetime.now().isoformat()),
+    )
+    conn.commit()
 
 
 def log_action(conn, account_id, action, status, detail=""):
@@ -103,16 +133,87 @@ def load_config():
         return yaml.safe_load(f)
 
 
-def load_comments():
-    """Read the comment pool (one per line; blank / #-prefixed lines ignored)."""
-    if not COMMENTS_PATH.exists():
+def load_comment_file(name):
+    """Read a comment pool file under config/ (one per line; blank / # ignored)."""
+    path = ROOT / "config" / name
+    if not path.exists():
         return []
     out = []
-    for raw in COMMENTS_PATH.read_text(encoding="utf-8").splitlines():
+    for raw in path.read_text(encoding="utf-8").splitlines():
         s = raw.strip()
         if s and not s.startswith("#"):
             out.append(s)
     return out
+
+
+def load_comments():
+    """Read the FYP comment pool."""
+    return load_comment_file(COMMENTS_PATH.name)
+
+
+def run_target_engagement(page, account, config, conn):
+    """For a participant account, engage NEW videos on each target brand handle.
+
+    New = video_id beyond our watermark for that handle. With no prior record we
+    take only the newest `first_run_latest_n`. Like / comment fire by probability,
+    capped at `max_videos_per_run` per handle. Returns {videos, likes, comments}.
+    """
+    counts = {"videos": 0, "likes": 0, "comments": 0}
+    tcfg = config.get("target_accounts", {}) or {}
+    account_id = account["id"]
+    if not tcfg.get("enabled") or account_id not in (tcfg.get("participants") or []):
+        return counts
+
+    handles = tcfg.get("handles") or []
+    first_n = int(tcfg.get("first_run_latest_n", 1))
+    max_per_run = int(tcfg.get("max_videos_per_run", 3))
+    like_p = float(tcfg.get("like_probability", 0.9))
+    comment_p = float(tcfg.get("comment_probability", 0.5))
+    pool = load_comment_file(tcfg.get("comments_file", "comments_brand.txt"))
+
+    for handle in handles:
+        try:
+            recent = fetch_recent_videos(page, handle)
+        except Exception as e:
+            session_log(f"{account_id} | target {handle} | ERR fetch: {e}")
+            log_action(conn, account_id, "target_fetch", "error", f"{handle}: {e}")
+            continue
+        if not recent:
+            log_action(conn, account_id, "target_fetch", "empty", handle)
+            continue
+
+        wm = get_target_watermark(conn, account_id, handle)
+        if wm is None:
+            todo = recent[:first_n]
+        else:
+            todo = [v for v in recent if int(v) > wm]
+        todo = todo[:max_per_run]
+        if not todo:
+            continue
+
+        # Oldest-first among the new ones, so the watermark advances monotonically.
+        for vid in sorted(todo, key=lambda x: int(x)):
+            try:
+                res = engage_target_video(page, handle, vid, pool, like_p, comment_p)
+            except Exception as e:
+                session_log(f"{account_id} | target {handle}/{vid} | ERR: {e}")
+                log_action(conn, account_id, "target_engage", "error", f"{handle}/{vid}: {e}")
+                continue
+            record_target_engagement(conn, account_id, handle, vid,
+                                     res["liked"], res["commented"])
+            counts["videos"] += 1
+            counts["likes"] += int(res["liked"])
+            counts["comments"] += int(res["commented"])
+            log_action(conn, account_id, "target_engage", "ok",
+                       f"{handle}/{vid} like={res['liked']} comment={res['commented']}")
+            human_pause(3, 8)
+
+    if counts["videos"]:
+        session_log(
+            f"{account_id} | TARGET | {counts['videos']}v / "
+            f"{counts['likes']}L / {counts['comments']}C"
+        )
+    return counts
 
 
 def find_account(config, account_id):
@@ -146,6 +247,9 @@ def run_session(account, config, conn):
         "likes": 0,
         "follows": 0,
         "comments": 0,
+        "target_videos": 0,
+        "target_likes": 0,
+        "target_comments": 0,
         "duration_target_min": round(duration, 1),
         "duration_actual_min": 0.0,
         "error": None,
@@ -206,12 +310,19 @@ def run_session(account, config, conn):
             summary["comments"] = comments
             summary["status"] = "ok"
 
+            # After FYP browsing, participants engage target brand accounts' new videos.
+            tgt = run_target_engagement(page, account, config, conn)
+            summary["target_videos"] = tgt["videos"]
+            summary["target_likes"] = tgt["likes"]
+            summary["target_comments"] = tgt["comments"]
+
             browser.close()
         actual = (time.time() - started) / 60
         summary["duration_actual_min"] = round(actual, 1)
         session_log(
             f"{account_id} | OK | {videos}v / {likes}L / {follows}F / {comments}C "
-            f"in {actual:.1f}min"
+            f"(+target {summary['target_videos']}v/{summary['target_likes']}L/"
+            f"{summary['target_comments']}C) in {actual:.1f}min"
         )
     except Exception as e:
         summary["status"] = "error"
@@ -244,9 +355,13 @@ def build_batch_message(summaries):
     ]
     for s in summaries:
         if s["status"] == "ok":
+            tgt = ""
+            if s.get("target_videos"):
+                tgt = (f", target {s['target_videos']}v/"
+                       f"{s.get('target_likes', 0)}L/{s.get('target_comments', 0)}C")
             lines.append(
                 f"  - {s['account_id']}: OK "
-                f"({s['videos']}v / {s['likes']}L / {s['follows']}F / {s.get('comments', 0)}C, "
+                f"({s['videos']}v / {s['likes']}L / {s['follows']}F / {s.get('comments', 0)}C{tgt}, "
                 f"{s['duration_actual_min']}min)"
             )
         elif s["status"] == "error":
