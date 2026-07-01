@@ -45,6 +45,8 @@ target_accounts:
   like_probability: 0.9       # 每条新视频点赞概率
   comment_probability: 0.5    # 每条新视频评论概率（不强制全员）
   comments_file: comments_brand.txt   # 品牌向评论池
+  follow: true                # 是否关注目标号（每号对每个目标只关一次）
+  follow_probability: 0.5     # 遇到“尚未关注的目标”时按此概率关注（分散到不同天，不一次全关）
 
 # 通知配置（默认关闭）。批次结束后推送 OK/ERR 摘要
 notify:

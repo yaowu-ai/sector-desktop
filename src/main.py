@@ -14,7 +14,7 @@ from patchright.sync_api import sync_playwright
 
 from bitbrowser import BitBrowserClient
 from actions import fyp_browse, human_pause
-from target_engage import fetch_recent_videos, engage_target_video
+from target_engage import fetch_recent_videos, engage_target_video, follow_target_profile
 from notify import send as notify_send
 
 ROOT = Path(__file__).parent.parent
@@ -87,8 +87,35 @@ def init_db():
             PRIMARY KEY (our_account, handle, video_id)
         )
     """)
+    # Per (our account, target handle) follow record — each account follows a
+    # target at most once. `followed=1` means a verified / pre-existing follow.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS target_follows (
+            our_account TEXT, handle TEXT, followed INTEGER, ts TEXT,
+            PRIMARY KEY (our_account, handle)
+        )
+    """)
     conn.commit()
     return conn
+
+
+def has_followed_target(conn, account_id, handle):
+    """True if this account already follows (or recorded following) `handle`."""
+    cur = conn.execute(
+        "SELECT followed FROM target_follows WHERE our_account=? AND handle=?",
+        (account_id, handle),
+    )
+    row = cur.fetchone()
+    return bool(row and row[0])
+
+
+def record_target_follow(conn, account_id, handle, followed):
+    conn.execute(
+        "INSERT OR REPLACE INTO target_follows (our_account, handle, followed, ts) "
+        "VALUES (?,?,?,?)",
+        (account_id, handle, int(followed), datetime.now().isoformat()),
+    )
+    conn.commit()
 
 
 def get_target_watermark(conn, account_id, handle):
@@ -156,9 +183,10 @@ def run_target_engagement(page, account, config, conn):
 
     New = video_id beyond our watermark for that handle. With no prior record we
     take only the newest `first_run_latest_n`. Like / comment fire by probability,
-    capped at `max_videos_per_run` per handle. Returns {videos, likes, comments}.
+    capped at `max_videos_per_run` per handle.
+    Returns {videos, likes, comments, follows}.
     """
-    counts = {"videos": 0, "likes": 0, "comments": 0}
+    counts = {"videos": 0, "likes": 0, "comments": 0, "follows": 0}
     tcfg = config.get("target_accounts", {}) or {}
     account_id = account["id"]
     if not tcfg.get("enabled") or account_id not in (tcfg.get("participants") or []):
@@ -169,6 +197,8 @@ def run_target_engagement(page, account, config, conn):
     max_per_run = int(tcfg.get("max_videos_per_run", 3))
     like_p = float(tcfg.get("like_probability", 0.9))
     comment_p = float(tcfg.get("comment_probability", 0.5))
+    do_follow = bool(tcfg.get("follow", False))
+    follow_p = float(tcfg.get("follow_probability", 0.5))
     pool = load_comment_file(tcfg.get("comments_file", "comments_brand.txt"))
 
     for handle in handles:
@@ -181,6 +211,25 @@ def run_target_engagement(page, account, config, conn):
         if not recent:
             log_action(conn, account_id, "target_fetch", "empty", handle)
             continue
+
+        # Follow the target once, by probability (spreads follows across days).
+        # fetch_recent_videos left us on the profile page — follow from here.
+        if do_follow and not has_followed_target(conn, account_id, handle) \
+                and random.random() < follow_p:
+            follow_errored = False
+            try:
+                status = follow_target_profile(page, handle)
+            except Exception as e:
+                status = "fail"
+                follow_errored = True
+                log_action(conn, account_id, "target_follow", "error", f"{handle}: {e}")
+            if status in ("followed", "already"):
+                record_target_follow(conn, account_id, handle, True)
+                if status == "followed":
+                    counts["follows"] += 1
+                    log_action(conn, account_id, "target_follow", "ok", handle)
+            elif not follow_errored:
+                log_action(conn, account_id, "target_follow", "fail", handle)
 
         wm = get_target_watermark(conn, account_id, handle)
         if wm is None:
@@ -208,10 +257,10 @@ def run_target_engagement(page, account, config, conn):
                        f"{handle}/{vid} like={res['liked']} comment={res['commented']}")
             human_pause(3, 8)
 
-    if counts["videos"]:
+    if counts["videos"] or counts["follows"]:
         session_log(
             f"{account_id} | TARGET | {counts['videos']}v / "
-            f"{counts['likes']}L / {counts['comments']}C"
+            f"{counts['likes']}L / {counts['comments']}C / {counts['follows']}Fo"
         )
     return counts
 
@@ -250,6 +299,7 @@ def run_session(account, config, conn):
         "target_videos": 0,
         "target_likes": 0,
         "target_comments": 0,
+        "target_follows": 0,
         "duration_target_min": round(duration, 1),
         "duration_actual_min": 0.0,
         "error": None,
@@ -315,6 +365,7 @@ def run_session(account, config, conn):
             summary["target_videos"] = tgt["videos"]
             summary["target_likes"] = tgt["likes"]
             summary["target_comments"] = tgt["comments"]
+            summary["target_follows"] = tgt["follows"]
 
             browser.close()
         actual = (time.time() - started) / 60
@@ -356,9 +407,10 @@ def build_batch_message(summaries):
     for s in summaries:
         if s["status"] == "ok":
             tgt = ""
-            if s.get("target_videos"):
+            if s.get("target_videos") or s.get("target_follows"):
                 tgt = (f", target {s['target_videos']}v/"
-                       f"{s.get('target_likes', 0)}L/{s.get('target_comments', 0)}C")
+                       f"{s.get('target_likes', 0)}L/{s.get('target_comments', 0)}C/"
+                       f"{s.get('target_follows', 0)}Fo")
             lines.append(
                 f"  - {s['account_id']}: OK "
                 f"({s['videos']}v / {s['likes']}L / {s['follows']}F / {s.get('comments', 0)}C{tgt}, "

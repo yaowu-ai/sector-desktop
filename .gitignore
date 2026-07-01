@@ -3,6 +3,10 @@ data/
 src/data/
 run.lock
 
+# Local proxy credential lists
+ip_*
+config/private/
+
 # Build artifacts
 *.zip
 

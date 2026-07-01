@@ -96,6 +96,17 @@ python main.py
 # 只跑某一个账号
 python main.py --account tiktok_1
 
+# 创建绑定固定代理的比特浏览器窗口（默认 socks5）
+python create_browser.py --name tiktok_2 \
+  --proxy "192.0.2.10:12324:用户名:密码"
+
+# HTTP 代理；省略 --proxy 会隐藏输入，避免密码进入 shell 历史
+python create_browser.py --name tiktok_2 --type http
+
+# 批量读取代理文件；自动读取现有 tiktok_N 窗口的最大编号并从 N+1 创建
+# 文件每行格式：host:port:用户名:密码（空行和 # 注释会忽略）
+python create_browser.py --file ../config/private/proxies/ip_0630
+
 # 查看统计
 python stats.py            # 全部（FYP 浏览/点赞/关注/评论）
 python stats.py --today    # 今天
@@ -129,7 +140,14 @@ target_accounts:
   like_probability: 0.9
   comment_probability: 0.5    # 不强制全员评论，打散抱团
   comments_file: comments_brand.txt
+  follow: true                # 关注目标号（每号对每个目标只关一次）
+  follow_probability: 0.5     # 遇到未关注的目标按此概率关注（分散到不同天）
 ```
+
+**关注目标号**：参与号还会关注这几个品牌官方号——每号对每个目标**只关一次**
+（`target_follows` 表记录，关过/已关就不再关），且**按概率分散到不同天**完成，不是
+10 个号同一天一起关。关注状态经校验（按钮文案变 Following / 关注键消失才算成功），
+失败不记录、下次可重试。
 
 **判新机制**：抓目标号主页每条视频 URL 里的 `video_id`（雪花号，越大越新），
 与 SQLite `target_engagements` 表里的水位线（该号对该目标已处理过的最大 id）比对，

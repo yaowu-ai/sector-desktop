@@ -94,22 +94,49 @@ def aggregate_target(since=None):
             ).fetchall()
     except sqlite3.OperationalError:
         rows = []   # table not created yet (no target runs)
+
+    try:
+        if since:
+            follow_rows = conn.execute(
+                "SELECT our_account, handle FROM target_follows "
+                "WHERE followed=1 AND ts >= ?", (since.isoformat(),),
+            ).fetchall()
+        else:
+            follow_rows = conn.execute(
+                "SELECT our_account, handle FROM target_follows WHERE followed=1"
+            ).fetchall()
+    except sqlite3.OperationalError:
+        follow_rows = []
     conn.close()
+
+    def _acc(acc):
+        return by_account.setdefault(
+            acc, {"videos": 0, "likes": 0, "comments": 0, "follows": 0, "handles": set()})
+
+    def _hdl(handle):
+        return by_handle.setdefault(
+            handle, {"videos": 0, "likes": 0, "comments": 0, "follows": 0, "accounts": set()})
 
     by_account, by_handle = {}, {}
     for acc, handle, liked, commented in rows:
-        a = by_account.setdefault(
-            acc, {"videos": 0, "likes": 0, "comments": 0, "handles": set()})
+        a = _acc(acc)
         a["videos"] += 1
         a["likes"] += int(liked or 0)
         a["comments"] += int(commented or 0)
         a["handles"].add(handle)
 
-        h = by_handle.setdefault(
-            handle, {"videos": 0, "likes": 0, "comments": 0, "accounts": set()})
+        h = _hdl(handle)
         h["videos"] += 1
         h["likes"] += int(liked or 0)
         h["comments"] += int(commented or 0)
+        h["accounts"].add(acc)
+
+    for acc, handle in follow_rows:
+        a = _acc(acc)
+        a["follows"] += 1
+        a["handles"].add(handle)
+        h = _hdl(handle)
+        h["follows"] += 1
         h["accounts"].add(acc)
 
     return by_account, by_handle
@@ -126,26 +153,29 @@ def print_target_table(by_account, by_handle, title):
         return
 
     print("By account")
-    print(f"{'Account':<15} {'Targets':>8} {'Videos':>8} {'Likes':>7} {'Comments':>9}")
+    print(f"{'Account':<15} {'Targets':>8} {'Videos':>8} {'Likes':>7} "
+          f"{'Comments':>9} {'Follows':>8}")
     print("-" * 80)
-    tot = {"videos": 0, "likes": 0, "comments": 0}
+    tot = {"videos": 0, "likes": 0, "comments": 0, "follows": 0}
     for acc in sorted(by_account):
         s = by_account[acc]
         print(f"{acc:<15} {len(s['handles']):>8} {s['videos']:>8} "
-              f"{s['likes']:>7} {s['comments']:>9}")
+              f"{s['likes']:>7} {s['comments']:>9} {s['follows']:>8}")
         for k in tot:
             tot[k] += s[k]
     print("-" * 80)
-    print(f"{'Total':<15} {'':>8} {tot['videos']:>8} {tot['likes']:>7} {tot['comments']:>9}")
+    print(f"{'Total':<15} {'':>8} {tot['videos']:>8} {tot['likes']:>7} "
+          f"{tot['comments']:>9} {tot['follows']:>8}")
 
     print()
     print("By target")
-    print(f"{'Handle':<20} {'Accounts':>9} {'Videos':>8} {'Likes':>7} {'Comments':>9}")
+    print(f"{'Handle':<20} {'Accounts':>9} {'Videos':>8} {'Likes':>7} "
+          f"{'Comments':>9} {'Follows':>8}")
     print("-" * 80)
     for handle in sorted(by_handle):
         s = by_handle[handle]
         print(f"{handle:<20} {len(s['accounts']):>9} {s['videos']:>8} "
-              f"{s['likes']:>7} {s['comments']:>9}")
+              f"{s['likes']:>7} {s['comments']:>9} {s['follows']:>8}")
     print("=" * 80)
 
 

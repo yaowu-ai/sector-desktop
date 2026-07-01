@@ -57,6 +57,61 @@ def fetch_recent_videos(page, handle, max_items=12, scan_limit=60):
     return ids[:max_items]
 
 
+def _profile_follow_text(page):
+    """Text of the profile's follow/following button, lowercased ('' if none)."""
+    btn = page.locator('[data-e2e="follow-button"]').first
+    if btn.count() == 0:
+        return None
+    try:
+        return (btn.inner_text(timeout=500) or "").strip().lower()
+    except Exception:
+        return ""
+
+
+def _already_following_profile(page):
+    """True if the profile clearly shows a following state."""
+    if page.locator('[data-e2e="following-button"]').first.count():
+        return True
+    txt = _profile_follow_text(page)
+    return txt is not None and "following" in txt
+
+
+def follow_target_profile(page, handle):
+    """Follow @handle from its profile page (once). Returns one of:
+        "followed"  verified not-following -> following
+        "already"   we already follow it (skip, record so we stop checking)
+        "fail"      button not found / no verified state change
+
+    Verification is text/state based (button text -> 'Following', or a
+    following-button appears) so it survives data-e2e tweaks, mirroring
+    actions.try_follow's "only count a real transition" rule.
+    """
+    if f"/@{handle}" not in (page.url or ""):
+        page.goto(f"https://www.tiktok.com/@{handle}", timeout=60000)
+        human_pause(3, 5)
+
+    viewport = page.viewport_size or {"width": 1280, "height": 800}
+    mouse_state = MouseState(viewport["width"] // 2, viewport["height"] // 2)
+
+    if _already_following_profile(page):
+        return "already"
+
+    btn = page.locator('[data-e2e="follow-button"]').first
+    if btn.count() == 0:
+        return "fail"
+
+    if not human_click_locator(page, btn, mouse_state):
+        return "fail"
+    human_pause(0.6, 1.5)
+
+    if _already_following_profile(page):
+        return "followed"
+    # follow button gone after click → treat as success on some layouts
+    if page.locator('[data-e2e="follow-button"]').first.count() == 0:
+        return "followed"
+    return "fail"
+
+
 def _comment_on_video_page(page, mouse_state, text):
     """Type + post a comment on an open /video/ page. Returns True if posted.
 
