@@ -2,7 +2,7 @@ defaults:
   daily_actions:
     fyp_browse_minutes: [2, 5]    # 单次 FYP 浏览时长范围
     like_probability: 0.35        # 每个视频点赞概率（保守起步，1 周后视情调到 0.5+）
-    follows_per_session: [0, 1]   # 每 session 关注数上限
+    follows_per_session: [1, 1]   # 每 session 关注数上限
     comment:
       enabled: true
       comments_per_session: [1, 2]  # 每 session 评论数上限（最多 1~2 条）
@@ -45,8 +45,6 @@ target_accounts:
   like_probability: 0.9       # 每条新视频点赞概率
   comment_probability: 0.5    # 每条新视频评论概率（不强制全员）
   comments_file: comments_brand.txt   # 品牌向评论池
-  follow: true                # 是否关注目标号（每号对每个目标只关一次）
-  follow_probability: 0.5     # 遇到“尚未关注的目标”时按此概率关注（分散到不同天，不一次全关）
 
 # 通知配置（默认关闭）。批次结束后推送 OK/ERR 摘要
 notify:
@@ -73,121 +71,121 @@ accounts:
     enabled: true
     ip_group: 1
     active_hours: [[9, 12]]
-    bitbrowser_profile_id: "fed10d2dfd4b43278d22c1823761f94c"
+    bitbrowser_profile_id: "158edc80dfc94b5eb80e2dbb6b682ebd"
     notes: "IP-1 上午（测试号 #1）"
   - id: tiktok_2
-    enabled: false
+    enabled: true
     ip_group: 2
     active_hours: [[9, 12]]
-    bitbrowser_profile_id: "REPLACE_ME"
+    bitbrowser_profile_id: "6d4e715b6dc140dca3b10d42bc76a9dd"
     notes: "IP-2 上午"
   - id: tiktok_3
-    enabled: false
+    enabled: true
     ip_group: 3
     active_hours: [[9, 12]]
-    bitbrowser_profile_id: "REPLACE_ME"
+    bitbrowser_profile_id: "da877c0cb6354bcb817ef1e22d1edf7e"
     notes: "IP-3 上午"
   - id: tiktok_4
-    enabled: false
+    enabled: true
     ip_group: 4
     active_hours: [[9, 12]]
-    bitbrowser_profile_id: "REPLACE_ME"
+    bitbrowser_profile_id: "565cfe6e78444061aac3769678181c46"
     notes: "IP-4 上午"
   - id: tiktok_5
-    enabled: false
+    enabled: true
     ip_group: 5
     active_hours: [[9, 12]]
-    bitbrowser_profile_id: "REPLACE_ME"
+    bitbrowser_profile_id: "6d123e192f364640905b3c37efcdacc0"
     notes: "IP-5 上午"
   - id: tiktok_6
-    enabled: false
+    enabled: true
     ip_group: 6
     active_hours: [[9, 12]]
-    bitbrowser_profile_id: "REPLACE_ME"
+    bitbrowser_profile_id: "a4750b6b16e643b2ac9b07621041887b"
     notes: "IP-6 上午"
   - id: tiktok_7
-    enabled: false
+    enabled: true
     ip_group: 7
     active_hours: [[9, 12]]
-    bitbrowser_profile_id: "REPLACE_ME"
+    bitbrowser_profile_id: "fce0548830504b5691af7fe15c24e68b"
     notes: "IP-7 上午"
   - id: tiktok_8
-    enabled: false
+    enabled: true
     ip_group: 8
     active_hours: [[9, 12]]
-    bitbrowser_profile_id: "REPLACE_ME"
+    bitbrowser_profile_id: "bf48381708024d21ba721889e03b99f1"
     notes: "IP-8 上午"
   - id: tiktok_9
-    enabled: false
+    enabled: true
     ip_group: 9
     active_hours: [[9, 12]]
-    bitbrowser_profile_id: "REPLACE_ME"
+    bitbrowser_profile_id: "fc26bc856bfd44f087699bf58650bc3c"
     notes: "IP-9 上午"
   - id: tiktok_10
-    enabled: false
+    enabled: true
     ip_group: 10
     active_hours: [[9, 12]]
-    bitbrowser_profile_id: "REPLACE_ME"
+    bitbrowser_profile_id: "c79b51bcc836412a8438f7a700d837e1"
     notes: "IP-10 上午"
 
   # ========== 晚上班 [[19, 23]] —— 与上午班共享同一批 IP 1~10 ==========
   - id: tiktok_11
-    enabled: false
+    enabled: true
     ip_group: 1
     active_hours: [[19, 23]]
-    bitbrowser_profile_id: "REPLACE_ME"
+    bitbrowser_profile_id: "20aa9bd9bfc3423c846849ad6a8a9db6"
     notes: "IP-1 晚上（与 tiktok_1 共享 IP）"
   - id: tiktok_12
-    enabled: false
+    enabled: true
     ip_group: 2
     active_hours: [[19, 23]]
-    bitbrowser_profile_id: "REPLACE_ME"
+    bitbrowser_profile_id: "50aa400fc55247fd8f11917730d6bd64"
     notes: "IP-2 晚上（与 tiktok_2 共享 IP）"
   - id: tiktok_13
-    enabled: false
+    enabled: true
     ip_group: 3
     active_hours: [[19, 23]]
-    bitbrowser_profile_id: "REPLACE_ME"
+    bitbrowser_profile_id: "fc1556b19e0b4368bf9bfb76a7e99a9c"
     notes: "IP-3 晚上（与 tiktok_3 共享 IP）"
   - id: tiktok_14
-    enabled: false
+    enabled: true
     ip_group: 4
     active_hours: [[19, 23]]
-    bitbrowser_profile_id: "REPLACE_ME"
+    bitbrowser_profile_id: "74621719d0604d4aab72371ac2ca5257"
     notes: "IP-4 晚上（与 tiktok_4 共享 IP）"
   - id: tiktok_15
-    enabled: false
+    enabled: true
     ip_group: 5
     active_hours: [[19, 23]]
-    bitbrowser_profile_id: "REPLACE_ME"
+    bitbrowser_profile_id: "34ce43efcfbc478b88c5eebe5ee89e40"
     notes: "IP-5 晚上（与 tiktok_5 共享 IP）"
   - id: tiktok_16
-    enabled: false
+    enabled: true
     ip_group: 6
     active_hours: [[19, 23]]
-    bitbrowser_profile_id: "REPLACE_ME"
+    bitbrowser_profile_id: "3ed27de3cf7e4891b0e4958b42522dbb"
     notes: "IP-6 晚上（与 tiktok_6 共享 IP）"
   - id: tiktok_17
-    enabled: false
+    enabled: true
     ip_group: 7
     active_hours: [[19, 23]]
-    bitbrowser_profile_id: "REPLACE_ME"
+    bitbrowser_profile_id: "1a042c4b15f24de3afabea1f7e676217"
     notes: "IP-7 晚上（与 tiktok_7 共享 IP）"
   - id: tiktok_18
-    enabled: false
+    enabled: true
     ip_group: 8
     active_hours: [[19, 23]]
-    bitbrowser_profile_id: "REPLACE_ME"
+    bitbrowser_profile_id: "a314aa9f1a2449418dccdfcd5048ddda"
     notes: "IP-8 晚上（与 tiktok_8 共享 IP）"
   - id: tiktok_19
-    enabled: false
+    enabled: true
     ip_group: 9
     active_hours: [[19, 23]]
-    bitbrowser_profile_id: "REPLACE_ME"
+    bitbrowser_profile_id: "53ca05a11317467ea36c136dfa243dcd"
     notes: "IP-9 晚上（与 tiktok_9 共享 IP）"
   - id: tiktok_20
-    enabled: false
+    enabled: true
     ip_group: 10
     active_hours: [[19, 23]]
-    bitbrowser_profile_id: "REPLACE_ME"
+    bitbrowser_profile_id: "671725b05dc14062ac985243e48c554d"
     notes: "IP-10 晚上（与 tiktok_10 共享 IP）"

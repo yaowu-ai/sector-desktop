@@ -125,10 +125,12 @@ def create_batch(client, args, parser):
                 check_result = client.check_proxy(
                     args.type, host, port, username, password, check_exists=True
                 )
-                if proxy_is_used(check_result) and not args.allow_used:
-                    print("      跳过：该代理已被现有窗口使用")
-                    skipped.append((line_number, host, port, "代理已使用"))
-                    continue
+                if proxy_is_used(check_result):
+                    if args.skip_used:
+                        print("      跳过：该代理已被现有窗口使用")
+                        skipped.append((line_number, host, port, "代理已使用"))
+                        continue
+                    print("      注意：该代理已被使用，将按配置继续复用")
 
             print(f"      创建 {name} ...")
             profile_id = client.create_browser(
@@ -193,10 +195,16 @@ def main():
         action="store_true",
         help="跳过创建前的代理连通性检测",
     )
-    parser.add_argument(
+    reuse_group = parser.add_mutually_exclusive_group()
+    reuse_group.add_argument(
+        "--skip-used",
+        action="store_true",
+        help="跳过已被其他窗口使用的代理；默认允许复用",
+    )
+    reuse_group.add_argument(
         "--allow-used",
         action="store_true",
-        help="批量模式允许使用已被其他窗口使用的代理",
+        help=argparse.SUPPRESS,
     )
     args = parser.parse_args()
 

@@ -104,8 +104,32 @@ python create_browser.py --name tiktok_2 \
 python create_browser.py --name tiktok_2 --type http
 
 # 批量读取代理文件；自动读取现有 tiktok_N 窗口的最大编号并从 N+1 创建
+# 默认允许多个窗口复用已使用的代理；如需跳过则增加 --skip-used
 # 文件每行格式：host:port:用户名:密码（空行和 # 注释会忽略）
 python create_browser.py --file ../config/private/proxies/ip_0630
+
+# 打开 BitBrowser、进入 Google 登录、填写邮箱并点击 Next（停留在密码页）
+python gmail_setup.py --browser-name tiktok_25 --email account@gmail.com
+
+# 填写并提交密码；推荐隐藏输入，避免密码进入命令历史
+# 自动接受 Workspace 首次登录的 I understand 条款页
+# 登录完成后自动点击 Google Account 的 Google password
+# 遇到两步验证或其他安全挑战时会停留在对应页面
+python gmail_setup.py --browser-name tiktok_25 --email account@gmail.com --ask-password
+
+# I understand 默认等待 60 秒；超时后直接继续 Google password 流程
+python gmail_setup.py --browser-name tiktok_25 --email account@gmail.com \
+  --ask-password --terms-timeout 60
+
+# 未指定新密码时使用脚本内置的统一新密码并提交修改
+python gmail_setup.py --browser-name tiktok_25 --email account@gmail.com \
+  --ask-password
+
+# 批量读取邮箱文件；从指定窗口名开始逐个登录/改密，操作完自动关闭再打开下一个
+# 文件每行格式：账号----密码----可忽略备注（空行和 # 注释会忽略）
+# 例：第 1 行跑 tiktok_25，第 2 行跑 tiktok_26
+python gmail_setup.py --file ../config/private/mails/mail_0702 \
+  --browser-name tiktok_25
 
 # 查看统计
 python stats.py            # 全部（FYP 浏览/点赞/关注/评论）

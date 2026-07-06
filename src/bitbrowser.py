@@ -116,12 +116,9 @@ class BitBrowserClient:
 
     def create_browser(self, name, proxy_type, host, port, username="", password="",
                        group_id=None, timeout=30):
-        """Create a TikTok browser profile with a fixed custom proxy."""
+        """Create a browser profile with a fixed custom proxy."""
         payload = {
             "name": name,
-            "platform": "https://www.tiktok.com",
-            "platformIcon": "tiktok.com",
-            "url": "https://www.tiktok.com/foryou",
             "proxyMethod": 2,
             "proxyType": proxy_type,
             "host": host,
