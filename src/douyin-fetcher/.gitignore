@@ -1,0 +1,33 @@
+# Local credentials and browser state
+.douyin-cookie.txt
+.douyin-chat-cookie.txt
+.douyin-*-cookie.txt
+.douyin-browser-profile/
+
+# Generated crawler data
+comments.json
+comments-sort.json
+chats.json
+chats-sort.json
+*.xlsx
+*.xlsx.inspect.ndjson
+*.inspect.ndjson
+*.ndjson
+outputs/
+
+# Codex/workspace scratch files
+.codex-build-comments-xlsx/
+.codex_spreadsheet/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local environments
+.venv/
+venv/
+.env
+*.log
