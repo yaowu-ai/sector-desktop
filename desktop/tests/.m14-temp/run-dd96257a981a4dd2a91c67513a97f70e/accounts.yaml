@@ -1,0 +1,30 @@
+bitbrowser:
+  api_url: http://127.0.0.1:54345
+defaults:
+  daily_actions:
+    fyp_browse_minutes: [1, 2]
+    like_probability: 0.5
+    follows_per_session: [0, 1]
+target_accounts:
+  enabled: true
+  handles: [brand_one]
+  participants: [acct_1]
+  first_run_latest_n: 1
+  max_videos_per_run: 1
+  like_probability: 0.9
+  comment_probability: 0.4
+  comments_file: comments_brand.txt
+  follow: false
+  follow_probability: 0.0
+accounts:
+  - id: acct_1
+    enabled: true
+    bitbrowser_profile_id: profile_1
+    active_hours: [[9, 12]]
+  - id: ig_1
+    platform: instagram
+    enabled: true
+    bitbrowser_profile_id: profile_ig_1
+    active_hours: [[9, 12]]
+notify:
+  enabled: false

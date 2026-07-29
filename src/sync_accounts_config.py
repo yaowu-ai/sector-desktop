@@ -16,20 +16,24 @@ Example:
     python sync_accounts_config.py --api-url http://127.0.0.1:54345
 """
 import argparse
+import json
 import sys
 from collections import Counter
 from pathlib import Path
 
 import yaml
 
+from runtime_config import resolve_config_path
+from platform_config import load_runtime_config, scheduler_config
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG_PATH = ROOT / "config" / "accounts.yaml"
+JSON_STREAM = sys.stdout
 
 
 def load_config(path):
     with open(path, encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        return load_runtime_config(yaml.safe_load(f))
 
 
 def account_numbers(start, end):
@@ -107,6 +111,7 @@ def build_account_block(number, prefix, profile_id, morning_start, morning_end,
 
     return (
         f"  - id: {prefix}_{number}\n"
+        f"    platform: tiktok\n"
         f"    enabled: true\n"
         f"    ip_group: {ip_group}\n"
         f"    active_hours: {hours}\n"
@@ -124,7 +129,7 @@ def _windows_overlap(a, b):
 
 
 def validate_candidate_config(candidate_text):
-    cfg = yaml.safe_load(candidate_text)
+    cfg = load_runtime_config(yaml.safe_load(candidate_text))
     accounts = cfg.get("accounts") or []
 
     ids = [a.get("id") for a in accounts]
@@ -144,8 +149,7 @@ def validate_candidate_config(candidate_text):
             f"accounts.yaml 将出现重复 bitbrowser_profile_id: {duplicated_profiles}"
         )
 
-    defaults = cfg.get("defaults") or {}
-    default_hours = defaults.get("active_hours") or [[9, 12], [19, 23]]
+    default_hours = scheduler_config(cfg, "tiktok").get("active_hours") or [[9, 12], [19, 23]]
     by_group = {}
     for account in accounts:
         if not account.get("enabled", True):
@@ -188,6 +192,14 @@ def append_missing_accounts(config_path, profile_map, args):
     ]
     if not missing_numbers:
         print("accounts.yaml 已包含目标范围内的所有账号，无需补充")
+        if args.json:
+            print_json({
+                "status": "no_op",
+                "config_path": str(config_path),
+                "missing_accounts": [],
+                "appended_accounts": [],
+                "dry_run": bool(args.dry_run),
+            })
         return 0
 
     required_names = [f"{args.prefix}_{number}" for number in missing_numbers]
@@ -245,10 +257,27 @@ def append_missing_accounts(config_path, profile_map, args):
     if args.dry_run:
         print("\n--- dry-run: 将追加以下内容，不写入文件 ---")
         print(addition.rstrip())
+        if args.json:
+            print_json({
+                "status": "dry_run",
+                "config_path": str(config_path),
+                "missing_accounts": required_names,
+                "appended_accounts": [],
+                "addition": addition,
+                "dry_run": True,
+            })
         return 0
 
     config_path.write_text(candidate + "\n", encoding="utf-8")
     print(f"已补充: {config_path}")
+    if args.json:
+        print_json({
+            "status": "written",
+            "config_path": str(config_path),
+            "missing_accounts": required_names,
+            "appended_accounts": required_names,
+            "dry_run": False,
+        })
     return 0
 
 
@@ -258,7 +287,7 @@ def main():
     )
     parser.add_argument(
         "--config",
-        default=str(DEFAULT_CONFIG_PATH),
+        default=None,
         help="accounts.yaml 路径，默认 ../config/accounts.yaml",
     )
     parser.add_argument(
@@ -283,9 +312,15 @@ def main():
         action="store_true",
         help="只打印将追加的配置，不写入 accounts.yaml",
     )
+    parser.add_argument("--json", action="store_true",
+                        help="Print machine-readable JSON summary")
     args = parser.parse_args()
+    if args.json:
+        global JSON_STREAM
+        JSON_STREAM = sys.stdout
+        sys.stdout = sys.stderr
 
-    config_path = Path(args.config)
+    config_path = resolve_config_path(args.config)
     if not config_path.is_file():
         parser.error(f"配置文件不存在: {config_path}")
 
@@ -308,7 +343,17 @@ def main():
         return append_missing_accounts(config_path, profile_map, args)
     except (requests.RequestException, RuntimeError, ValueError, KeyError) as exc:
         print(f"[error] {exc}", file=sys.stderr)
+        if args.json:
+            print_json({
+                "status": "error",
+                "config_path": str(config_path),
+                "error": str(exc),
+            })
         return 1
+
+
+def print_json(payload):
+    print(json.dumps(payload, ensure_ascii=False, indent=2), file=JSON_STREAM)
 
 
 if __name__ == "__main__":

@@ -9,12 +9,13 @@ The existing data/run.lock file lock keeps this mutually exclusive with
 any manual `python main.py` invocation.
 """
 import asyncio
+import argparse
 import logging
 import os
 import random
 import sys
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import requests
@@ -23,7 +24,11 @@ import yaml
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
 
-from main import LOCK_FILE, acquire_lock, pid_alive, release_lock, run
+from core import runtime as main_runtime
+from core.runner import run
+from core.runtime import acquire_lock, pid_alive, release_lock
+from runtime_config import resolve_config_path
+from platform_config import account_platform, load_runtime_config, scheduler_config
 
 
 def setup_windows_event_loop():
@@ -40,7 +45,7 @@ logging.basicConfig(
 logger = logging.getLogger("scheduler")
 
 ROOT = Path(__file__).parent.parent
-CONFIG_PATH = ROOT / "config" / "accounts.yaml"
+CONFIG_PATH = resolve_config_path()
 
 scheduler = AsyncIOScheduler(
     job_defaults={
@@ -58,15 +63,22 @@ session_lock = asyncio.Lock()
 
 def load_config():
     with open(CONFIG_PATH, encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        return load_runtime_config(yaml.safe_load(f))
+
+
+def configure_runtime(config_path=None):
+    global CONFIG_PATH
+
+    main_runtime.configure_runtime(config_path)
+    CONFIG_PATH = main_runtime.CONFIG_PATH
 
 
 def is_locked_externally():
     """Lock owned by another live PID (manual main.py run)."""
-    if not LOCK_FILE.exists():
+    if not main_runtime.LOCK_FILE.exists():
         return False
     try:
-        pid = int(LOCK_FILE.read_text().strip() or 0)
+        pid = int(main_runtime.LOCK_FILE.read_text().strip() or 0)
     except (ValueError, OSError):
         return False
     return bool(pid) and pid_alive(pid) and pid != os.getpid()
@@ -90,8 +102,10 @@ def bitbrowser_responsive():
 
 def resolve_active_hours(account, cfg):
     """Account-specific active_hours, falling back to defaults."""
+    platform = account_platform(account)
+    platform_scheduler = scheduler_config(cfg, platform)
     return account.get("active_hours") or \
-        cfg["defaults"].get("active_hours", [[9, 12], [19, 23]])
+        platform_scheduler.get("active_hours", [[9, 12], [19, 23]])
 
 
 async def account_session_task(account_id):
@@ -137,18 +151,18 @@ def generate_fire_times(active_hours, count, base_date=None):
     """N random datetimes within `active_hours` of `base_date`."""
     if base_date is None:
         base_date = datetime.now()
-    base = base_date.replace(microsecond=0)
+    base = base_date.replace(hour=0, minute=0, second=0, microsecond=0)
 
     fires = []
     for _ in range(count):
         window = random.choice(active_hours)
         start_h, end_h = window
-        total_minutes = max(1, (end_h - start_h) * 60)
+        start_minute = int(round(float(start_h) * 60))
+        end_minute = int(round(float(end_h) * 60))
+        total_minutes = max(1, end_minute - start_minute)
         offset = random.randint(0, total_minutes - 1)
-        h = start_h + offset // 60
-        m = offset % 60
         s = random.randint(0, 59)
-        fires.append(base.replace(hour=h, minute=m, second=s))
+        fires.append(base + timedelta(minutes=start_minute + offset, seconds=s))
     return sorted(fires)
 
 
@@ -161,6 +175,16 @@ def _windows_overlap(a, b):
     return False
 
 
+def executable_accounts(cfg):
+    return [
+        account
+        for account in cfg["accounts"]
+        if account.get("enabled", True)
+        and account.get("scheduled", True)
+        and str(account.get("platform", "tiktok")).strip().lower() == "tiktok"
+    ]
+
+
 def validate_ip_groups(cfg):
     """Warn if two enabled accounts share an ip_group (same IP) AND overlapping
     active_hours — that risks two profiles on one IP being active at once.
@@ -168,7 +192,7 @@ def validate_ip_groups(cfg):
     The shift model relies on same-IP accounts living in non-overlapping windows
     (e.g. one morning, one evening). This catches a misassignment early.
     """
-    accounts = [a for a in cfg["accounts"] if a.get("enabled", True)]
+    accounts = executable_accounts(cfg)
     by_group = {}
     for acc in accounts:
         g = acc.get("ip_group")
@@ -196,9 +220,9 @@ def schedule_today_fires():
     via `session_lock`, so within a shift distinct-IP accounts are simply queued.
     """
     cfg = load_config()
-    sched_cfg = cfg.get("scheduler", {})
+    sched_cfg = scheduler_config(cfg, "tiktok")
     fires_per_day = int(sched_cfg.get("fires_per_day", 3))
-    accounts = [a for a in cfg["accounts"] if a.get("enabled", True)]
+    accounts = executable_accounts(cfg)
 
     now = datetime.now()
     total = 0
@@ -265,7 +289,7 @@ app = FastAPI(lifespan=lifespan)
 
 @app.get("/")
 async def root():
-    return {"service": "tiktok-bot scheduler"}
+    return {"service": "account-matrix scheduler"}
 
 
 @app.get("/health")
@@ -280,4 +304,17 @@ async def health():
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=9601, log_level="info")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", default=None,
+                        help="Path to accounts.yaml; default: config/accounts.yaml")
+    parser.add_argument("--data-dir", default=None,
+                        help="Runtime data directory; default: data next to config")
+    parser.add_argument("--host", default="127.0.0.1",
+                        help="Scheduler host; default: 127.0.0.1")
+    parser.add_argument("--port", type=int, default=9601,
+                        help="Scheduler port; default: 9601")
+    args = parser.parse_args()
+    if args.data_dir:
+        os.environ["AM_DATA_DIR"] = args.data_dir
+    configure_runtime(args.config)
+    uvicorn.run(app, host=args.host, port=args.port, log_level="info")

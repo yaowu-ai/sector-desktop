@@ -1,0 +1,5 @@
+# Default general comment pool.
+# Replace these examples after installation.
+Nice video.
+Thanks for sharing.
+Great work.

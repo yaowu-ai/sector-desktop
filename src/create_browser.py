@@ -11,6 +11,7 @@ password is not stored in shell history.
 """
 import argparse
 import getpass
+import json
 import re
 import sys
 from pathlib import Path
@@ -21,6 +22,7 @@ from bitbrowser import BitBrowserClient
 
 
 PROXY_TYPES = ("http", "https", "socks5")
+JSON_STREAM = sys.stdout
 
 
 def parse_proxy(value):
@@ -104,6 +106,13 @@ def create_batch(client, args, parser):
         profiles = client.list_browsers(name=f"{args.prefix}_")
     except (requests.RequestException, RuntimeError) as exc:
         print(f"[error] 读取现有窗口失败: {exc}", file=sys.stderr)
+        if args.json:
+            print_json({
+                "mode": "batch",
+                "created": [],
+                "skipped": [],
+                "failed": [{"reason": str(exc)}],
+            })
         return 1
 
     next_number = next_browser_number(profiles, args.prefix)
@@ -128,7 +137,11 @@ def create_batch(client, args, parser):
                 if proxy_is_used(check_result):
                     if args.skip_used:
                         print("      跳过：该代理已被现有窗口使用")
-                        skipped.append((line_number, host, port, "代理已使用"))
+                        skipped.append({
+                            "line_number": line_number,
+                            "proxy": mask_proxy(host, port, username),
+                            "reason": "代理已使用",
+                        })
                         continue
                     print("      注意：该代理已被使用，将按配置继续复用")
 
@@ -144,19 +157,35 @@ def create_batch(client, args, parser):
             )
         except (requests.RequestException, RuntimeError) as exc:
             print(f"      失败: {exc}", file=sys.stderr)
-            failed.append((line_number, host, port, str(exc)))
+            failed.append({
+                "line_number": line_number,
+                "name": name,
+                "proxy": mask_proxy(host, port, username),
+                "reason": str(exc),
+            })
             continue
 
         print(f"      成功: {name} -> {profile_id}")
-        created.append((name, profile_id, host, port))
+        created.append({
+            "name": name,
+            "profile_id": profile_id,
+            "proxy": mask_proxy(host, port, username),
+        })
         next_number += 1
 
     print("\n批量创建完成")
     print(f"成功={len(created)} 跳过={len(skipped)} 失败={len(failed)}")
     if created:
         print("\n新窗口:")
-        for name, profile_id, host, port in created:
-            print(f"  {name}: {profile_id} ({host}:{port})")
+        for item in created:
+            print(f"  {item['name']}: {item['profile_id']} ({item['proxy']})")
+    if args.json:
+        print_json({
+            "mode": "batch",
+            "created": created,
+            "skipped": skipped,
+            "failed": failed,
+        })
     return 1 if failed else 0
 
 
@@ -206,7 +235,13 @@ def main():
         action="store_true",
         help=argparse.SUPPRESS,
     )
+    parser.add_argument("--json", action="store_true",
+                        help="Print machine-readable JSON summary")
     args = parser.parse_args()
+    if args.json:
+        global JSON_STREAM
+        JSON_STREAM = sys.stdout
+        sys.stdout = sys.stderr
 
     if args.file and args.proxy:
         parser.error("--file 和 --proxy 不能同时使用")
@@ -262,9 +297,13 @@ def main():
         )
     except requests.RequestException as exc:
         print(f"[error] 无法连接比特浏览器 Local API: {exc}", file=sys.stderr)
+        if args.json:
+            print_json({"mode": "single", "created": None, "error": str(exc)})
         return 1
     except RuntimeError as exc:
         print(f"[error] {exc}", file=sys.stderr)
+        if args.json:
+            print_json({"mode": "single", "created": None, "error": str(exc)})
         return 1
 
     print("\n创建成功")
@@ -274,7 +313,26 @@ def main():
     print(f"profile_id: {profile_id}")
     print("\n将 profile_id 填入 config/accounts.yaml 对应账号的 "
           "bitbrowser_profile_id。")
+    if args.json:
+        print_json({
+            "mode": "single",
+            "created": {
+                "name": args.name,
+                "profile_id": profile_id,
+                "proxy_type": args.type,
+                "proxy": mask_proxy(host, port, username),
+            },
+            "error": None,
+        })
     return 0
+
+
+def mask_proxy(host, port, username):
+    return f"{host}:{port}:{username}:***"
+
+
+def print_json(payload):
+    print(json.dumps(payload, ensure_ascii=False, indent=2), file=JSON_STREAM)
 
 
 if __name__ == "__main__":

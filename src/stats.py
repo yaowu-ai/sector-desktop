@@ -7,12 +7,13 @@ Usage:
     python stats.py --target     # brand-target engagement summary (combinable with --today/--days)
 """
 import argparse
+import json
 import sqlite3
 from datetime import datetime, timedelta
-from pathlib import Path
 
-ROOT = Path(__file__).parent.parent
-LOG_DB = ROOT / "data" / "actions.db"
+from runtime_config import resolve_data_dir
+
+LOG_DB = resolve_data_dir() / "actions.db"
 
 
 def parse_count(detail, key):
@@ -208,6 +209,52 @@ def print_table(stats, title):
     print("=" * 80)
 
 
+def target_summary_json(by_account, by_handle, scope, since):
+    return {
+        "scope": scope,
+        "since": since.isoformat() if since else None,
+        "by_account": [
+            {
+                "account_id": account_id,
+                "videos": stats["videos"],
+                "likes": stats["likes"],
+                "comments": stats["comments"],
+                "follows": stats["follows"],
+                "handles": sorted(stats["handles"]),
+            }
+            for account_id, stats in sorted(by_account.items())
+        ],
+        "by_handle": [
+            {
+                "handle": handle,
+                "videos": stats["videos"],
+                "likes": stats["likes"],
+                "comments": stats["comments"],
+                "follows": stats["follows"],
+                "accounts": sorted(stats["accounts"]),
+            }
+            for handle, stats in sorted(by_handle.items())
+        ],
+    }
+
+
+def fyp_summary_json(stats, scope, since):
+    totals = {"ok": 0, "err": 0, "skip": 0, "videos": 0,
+              "likes": 0, "follows": 0, "comments": 0}
+    by_account = []
+    for account_id, values in sorted(stats.items()):
+        row = {"account_id": account_id, **values}
+        by_account.append(row)
+        for key in totals:
+            totals[key] += values[key]
+    return {
+        "scope": scope,
+        "since": since.isoformat() if since else None,
+        "by_account": by_account,
+        "total": totals,
+    }
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--days", type=int, default=None,
@@ -216,6 +263,8 @@ if __name__ == "__main__":
                         help="Today only (since 00:00 local)")
     parser.add_argument("--target", action="store_true",
                         help="Brand-target engagement summary instead of FYP stats")
+    parser.add_argument("--json", action="store_true",
+                        help="Print machine-readable JSON instead of tables")
     args = parser.parse_args()
 
     since = None
@@ -229,7 +278,21 @@ if __name__ == "__main__":
 
     if args.target:
         by_account, by_handle = aggregate_target(since)
-        print_target_table(by_account, by_handle, f"Target Engagement - {scope}")
+        if args.json:
+            print(json.dumps(
+                target_summary_json(by_account, by_handle, scope, since),
+                ensure_ascii=False,
+                indent=2,
+            ))
+        else:
+            print_target_table(by_account, by_handle, f"Target Engagement - {scope}")
     else:
         stats = aggregate(since)
-        print_table(stats, f"TikTok Bot Stats - {scope}")
+        if args.json:
+            print(json.dumps(
+                fyp_summary_json(stats, scope, since),
+                ensure_ascii=False,
+                indent=2,
+            ))
+        else:
+            print_table(stats, f"TikTok Bot Stats - {scope}")

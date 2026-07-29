@@ -15,11 +15,17 @@ from pathlib import Path
 import yaml
 from patchright.sync_api import sync_playwright
 
-from bitbrowser import BitBrowserClient
+from browser_providers import provider_for_account
 from human_mouse import MouseState, human_click_locator
+from runtime_config import resolve_config_path
 
 ROOT = Path(__file__).parent.parent
-CONFIG = yaml.safe_load(open(ROOT / "config" / "accounts.yaml", encoding="utf-8"))
+
+
+def load_config(config_path=None):
+    path = resolve_config_path(config_path)
+    with open(path, encoding="utf-8") as f:
+        return yaml.safe_load(f)
 
 
 def find_active_like_button(page):
@@ -158,23 +164,27 @@ def run_strategy(page, viewport, mouse_state, label, fn):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--account", default="tiktok_1")
+    parser.add_argument("--config", default=None,
+                        help="Path to accounts.yaml; default: config/accounts.yaml")
     args = parser.parse_args()
 
-    account = next((a for a in CONFIG["accounts"] if a["id"] == args.account), None)
+    config = load_config(args.config)
+    account = next((a for a in config["accounts"] if a["id"] == args.account), None)
     if not account:
         print(f"Account {args.account} not found")
         sys.exit(1)
 
-    bb = BitBrowserClient(CONFIG["bitbrowser"]["api_url"])
-    profile_id = account["bitbrowser_profile_id"]
+    provider = provider_for_account(account, config)
+    provider.validate_account(account, config)
 
-    was_already_open = bb.is_open(profile_id)
+    was_already_open = provider.is_open(account, config)
     if was_already_open:
-        print(f"[info] Profile {profile_id} is already open — attaching.")
+        print("[info] Profile is already open — attaching.")
     else:
         print(f"[info] Opening {args.account}...")
 
-    cdp_url = bb.open_browser(profile_id)
+    session = provider.start_session(account, config)
+    cdp_url = session.cdp_endpoint
     if not was_already_open:
         time.sleep(3)
 
@@ -219,9 +229,9 @@ def main():
             browser.close()
     finally:
         if was_already_open:
-            print("[info] Leaving browser open since it was open before this test.")
+            print("[info] Leaving browser open since it was already open.")
         else:
-            bb.close_browser(profile_id)
+            provider.close_session(session, config)
             print("[info] Browser closed.")
 
 

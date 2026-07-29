@@ -2,6 +2,7 @@
 data/
 src/data/
 run.lock
+config/backups/
 
 # Local proxy credential lists
 ip_*
@@ -9,6 +10,25 @@ config/private/
 
 # Build artifacts
 *.zip
+build/
+runtime/dist/
+runtime/dist-smoke-data/
+.runtime-build-venv/
+desktop/node_modules/
+desktop/dist/
+desktop/src-tauri/target/
+desktop/.m20-tmp/
+desktop/.m9-appdata/
+desktop/.m9-install-test/
+desktop/src-tauri/resources/runtime/*
+!desktop/src-tauri/resources/runtime/.gitkeep
+desktop/tests/.m20-*.log
+desktop/tests/actions.db
+desktop/tests/actions.db-*
+desktop/tests/m20-data/actions.db
+desktop/tests/m20-data/actions.db-*
+desktop/tests/direct-*.txt
+desktop/tests/runtime-smoke-output/
 
 # Python
 __pycache__/

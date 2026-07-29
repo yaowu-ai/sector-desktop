@@ -1,0 +1,5 @@
+# Default brand/target comment pool.
+# Replace these examples after installation.
+Useful update.
+Thanks for the details.
+This is helpful.
