@@ -87,7 +87,8 @@ pub fn initialize_user_environment(
     app_version: &str,
     resource_dir: Option<PathBuf>,
 ) -> Result<AppInitializationStatus, String> {
-    if let Some(dir) = resource_dir.clone() {
+    let resolved_resource_dir = resolve_resource_dir(resource_dir.as_deref());
+    if let Some(dir) = resolved_resource_dir.clone() {
         let _ = RESOURCE_DIR.set(dir);
     }
     let dirs = user_runtime_dirs()?;
@@ -107,7 +108,7 @@ pub fn initialize_user_environment(
     fs::create_dir_all(&dirs.logs_dir)
         .map_err(|err| format!("failed to create {}: {}", normalize(&dirs.logs_dir), err))?;
 
-    let template_dir = template_config_dir(resource_dir)?;
+    let template_dir = template_config_dir(resolved_resource_dir.as_deref())?;
     let mut templates_copied = Vec::new();
     for name in ["accounts.yaml", "comments.txt", "comments_brand.txt"] {
         let source = template_dir.join(name);
@@ -422,10 +423,26 @@ fn bundled_runtime_manifest_path() -> Result<PathBuf, String> {
 
 fn bundled_runtime_dir() -> Result<PathBuf, String> {
     if let Some(resource_dir) = RESOURCE_DIR.get() {
-        return Ok(resource_dir.join("runtime"));
+        let runtime_dir = resource_dir.join("runtime");
+        if runtime_dir.is_dir() {
+            return Ok(runtime_dir);
+        }
     }
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    Ok(manifest_dir.join("resources").join("runtime"))
+    for resource_dir in resource_dir_candidates(None) {
+        let runtime_dir = resource_dir.join("runtime");
+        if runtime_dir.is_dir() {
+            return Ok(runtime_dir);
+        }
+    }
+
+    Err(format!(
+        "runtime directory is missing; searched: {}",
+        resource_dir_candidates(None)
+            .into_iter()
+            .map(|dir| normalize(&dir.join("runtime")))
+            .collect::<Vec<_>>()
+            .join(", ")
+    ))
 }
 
 fn read_runtime_version(path: &Path) -> Option<String> {
@@ -616,27 +633,54 @@ fn home_dir() -> Result<PathBuf, String> {
         .ok_or_else(|| "HOME is not set".to_string())
 }
 
-fn template_config_dir(resource_dir: Option<PathBuf>) -> Result<PathBuf, String> {
-    let resource_candidate = resource_dir
-        .map(|dir| dir.join("templates").join("config"))
-        .filter(|dir| dir.is_dir());
-    if let Some(dir) = resource_candidate {
-        return Ok(dir);
-    }
-
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let dev_dir = manifest_dir
-        .join("resources")
-        .join("templates")
-        .join("config");
-    if dev_dir.is_dir() {
-        return Ok(dev_dir);
+fn template_config_dir(resource_dir: Option<&Path>) -> Result<PathBuf, String> {
+    let candidates = resource_dir_candidates(resource_dir);
+    for resource_dir in &candidates {
+        let template_dir = resource_dir.join("templates").join("config");
+        if template_dir.is_dir() {
+            return Ok(template_dir);
+        }
     }
 
     Err(format!(
-        "template config directory is missing: {}",
-        normalize(&dev_dir)
+        "template config directory is missing; searched: {}",
+        candidates
+            .into_iter()
+            .map(|dir| normalize(&dir.join("templates").join("config")))
+            .collect::<Vec<_>>()
+            .join(", ")
     ))
+}
+
+fn resolve_resource_dir(resource_dir: Option<&Path>) -> Option<PathBuf> {
+    resource_dir_candidates(resource_dir)
+        .into_iter()
+        .find(|dir| dir.join("templates").join("config").is_dir() || dir.join("runtime").is_dir())
+}
+
+fn resource_dir_candidates(resource_dir: Option<&Path>) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+
+    if let Some(dir) = resource_dir {
+        push_unique(&mut candidates, dir.to_path_buf());
+        push_unique(&mut candidates, dir.join("resources"));
+    }
+
+    if let Ok(exe_path) = env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            push_unique(&mut candidates, exe_dir.join("resources"));
+            push_unique(&mut candidates, exe_dir.to_path_buf());
+        }
+    }
+
+    if let Ok(local_root) = app_local_root() {
+        push_unique(&mut candidates, local_root.join("resources"));
+    }
+
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    push_unique(&mut candidates, manifest_dir.join("resources"));
+
+    candidates
 }
 
 fn push_unique(paths: &mut Vec<PathBuf>, path: PathBuf) {
