@@ -12,8 +12,12 @@ config/private/
 *.zip
 build/
 runtime/dist/
+runtime/dist-x64/
 runtime/dist-smoke-data/
 .runtime-build-venv/
+.runtime-build-venv-x64/
+.build-tools/
+build-x64/
 desktop/node_modules/
 desktop/dist/
 desktop/src-tauri/target/

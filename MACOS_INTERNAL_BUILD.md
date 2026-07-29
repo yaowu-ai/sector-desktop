@@ -86,7 +86,12 @@ arch -x86_64 python -m pip install -r requirements.txt pyinstaller
 打包 Intel 架构 Python runtime，并复制到 Tauri resources：
 
 ```bash
-COPY_TO_TAURI_RESOURCES=1 PYTHON_BIN="arch -x86_64 python" bash runtime/build-runtime.sh
+COPY_TO_TAURI_RESOURCES=1 \
+PYTHON_ARCH=x86_64 \
+PYTHON_BIN="$PWD/.runtime-build-venv-x64/bin/python" \
+DIST_DIR=runtime/dist-x64 \
+WORK_DIR=build-x64 \
+bash runtime/build-runtime.sh
 ```
 
 打包 Intel 架构 Tauri 应用：
@@ -95,6 +100,12 @@ COPY_TO_TAURI_RESOURCES=1 PYTHON_BIN="arch -x86_64 python" bash runtime/build-ru
 cd desktop
 pnpm tauri build --target x86_64-apple-darwin
 cd ..
+```
+
+也可以直接使用项目提供的组合脚本：
+
+```bash
+bash desktop-build-macos-x64.sh
 ```
 
 预期产物位置：

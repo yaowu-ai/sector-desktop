@@ -26,12 +26,15 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": ["icons/icon.ico"],
+    "icon": ["icons/icon.png", "icons/icon.icns", "icons/icon.ico"],
     "resources": [
       "resources/templates/config/accounts.yaml",
       "resources/templates/config/comments.txt",
       "resources/templates/config/comments_brand.txt",
       "resources/runtime/**/*"
-    ]
+    ],
+    "macOS": {
+      "signingIdentity": "-"
+    }
   }
 }
