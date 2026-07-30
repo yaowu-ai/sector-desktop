@@ -1142,7 +1142,7 @@ function AccountForm({
               <Form.Item
                 name="proxy"
                 label="代理"
-                extra="可选。格式：主机:端口 或 主机:端口:用户名:密码"
+                extra="可选。格式：主机:端口:用户名:密码"
               >
                 <Input placeholder="127.0.0.1:1080" />
               </Form.Item>
