@@ -68,8 +68,6 @@ class BuiltinProxy:
 
     @property
     def server_arg(self) -> str:
-        if self.username or self.password:
-            return f"{self.scheme}://{self.username}:{self.password}@{self.host}:{self.port}"
         return f"{self.scheme}://{self.host}:{self.port}"
 
     @property
@@ -285,7 +283,13 @@ class BuiltinChromiumProvider:
         ]
         proxy = builtin_proxy_config(account)
         if proxy:
-            command.insert(-1, f"--proxy-server={proxy_server_arg(proxy)}")
+            parsed_proxy = parse_builtin_proxy(proxy)
+            if parsed_proxy.username or parsed_proxy.password:
+                extension_dir = write_builtin_proxy_auth_extension(user_data, parsed_proxy)
+                command.insert(-1, f"--disable-extensions-except={extension_dir}")
+                command.insert(-1, f"--load-extension={extension_dir}")
+            else:
+                command.insert(-1, f"--proxy-server={parsed_proxy.server_arg}")
 
         creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
         process = None
@@ -775,6 +779,55 @@ def _validate_proxy_port(port: str) -> int:
     if value <= 0 or value > 65535:
         raise ValueError("browser.proxy port must be between 1 and 65535")
     return value
+
+
+def write_builtin_proxy_auth_extension(user_data_dir: Path, proxy: BuiltinProxy) -> Path:
+    extension_dir = user_data_dir / "proxy-auth-extension"
+    extension_dir.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "manifest_version": 2,
+        "name": "Account Matrix Proxy Auth",
+        "version": "1.0.0",
+        "permissions": [
+            "proxy",
+            "webRequest",
+            "webRequestBlocking",
+            "<all_urls>",
+        ],
+        "background": {"scripts": ["background.js"]},
+    }
+    background = f"""
+const proxyConfig = {{
+  mode: "fixed_servers",
+  rules: {{
+    singleProxy: {{
+      scheme: {json.dumps(proxy.scheme)},
+      host: {json.dumps(proxy.host)},
+      port: {proxy.port}
+    }},
+    bypassList: ["localhost", "127.0.0.1", "::1"]
+  }}
+}};
+
+chrome.proxy.settings.set({{ value: proxyConfig, scope: "regular" }});
+
+chrome.webRequest.onAuthRequired.addListener(
+  () => ({{
+    authCredentials: {{
+      username: {json.dumps(proxy.username)},
+      password: {json.dumps(proxy.password)}
+    }}
+  }}),
+  {{ urls: ["<all_urls>"] }},
+  ["blocking"]
+);
+""".strip()
+    (extension_dir / "manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=True, indent=2),
+        encoding="utf-8",
+    )
+    (extension_dir / "background.js").write_text(background, encoding="utf-8")
+    return extension_dir
 
 
 def masked_proxy_server(proxy: Mapping[str, str]) -> str:

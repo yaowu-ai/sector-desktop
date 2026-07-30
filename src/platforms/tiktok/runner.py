@@ -3,7 +3,11 @@ import os
 import time
 
 from auth_adapters import LoginState, auth_adapter_for_platform
-from browser_providers import bitbrowser_profile_id, provider_for_account, test_cdp_endpoint
+from browser_providers import (
+    bitbrowser_profile_id,
+    provider_for_account,
+    test_cdp_endpoint,
+)
 from core.runtime import (
     auto_close_profile_enabled,
     clear_auth_intervention_actions,
