@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::process::{Command, Stdio};
 use tauri::State;
 
@@ -11,6 +13,9 @@ use crate::paths::{
 };
 use crate::security::redact_text;
 use crate::state::AppState;
+
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -180,12 +185,15 @@ pub fn test_notification(payload: NotifySettingsPayload) -> Result<NotifyTestRes
     }
 
     let command = notification_test_command()?;
-    let output = Command::new(&command[0])
+    let mut command_builder = Command::new(&command[0]);
+    command_builder
         .args(&command[1..])
         .env("PYTHONUNBUFFERED", "1")
         .envs(envs)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    hide_console_window(&mut command_builder);
+    let output = command_builder
         .output()
         .map_err(|err| format!("failed to start notification test: {}", err))?;
 
@@ -200,6 +208,13 @@ pub fn test_notification(payload: NotifySettingsPayload) -> Result<NotifyTestRes
         notify_type: notify_type.to_string(),
         message: "notification test sent".to_string(),
     })
+}
+
+fn hide_console_window(command: &mut Command) {
+    #[cfg(windows)]
+    {
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
 }
 
 fn system_settings_snapshot() -> Result<SystemSettingsSnapshot, String> {

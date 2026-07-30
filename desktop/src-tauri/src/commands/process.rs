@@ -2,6 +2,8 @@ use chrono::Local;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -17,6 +19,9 @@ use crate::commands::config::{
 use crate::paths::{normalize, project_paths, project_root, python_command_parts, ProjectPaths};
 use crate::security::redact_line;
 use crate::state::{AppState, AuthInterventionState, BrowserPreviewState, RunState};
+
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -753,22 +758,23 @@ fn spawn_process_with_env_inner(
             }
         }
     }
-    let mut child = Command::new(&command[0])
+    let mut command_builder = Command::new(&command[0]);
+    command_builder
         .args(&command[1..])
         .current_dir(&current_dir)
         .env("PYTHONUNBUFFERED", "1")
         .envs(env_vars.iter())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|err| {
-            format!(
-                "failed to start {:?} in {}: {}",
-                command,
-                normalize(&current_dir),
-                err
-            )
-        })?;
+        .stderr(Stdio::piped());
+    hide_console_window(&mut command_builder);
+    let mut child = command_builder.spawn().map_err(|err| {
+        format!(
+            "failed to start {:?} in {}: {}",
+            command,
+            normalize(&current_dir),
+            err
+        )
+    })?;
 
     let process_id = child.id();
     if let Some(stdout) = child.stdout.take() {
@@ -801,6 +807,13 @@ fn spawn_process_with_env_inner(
         task_type,
         account_id,
     })
+}
+
+fn hide_console_window(command: &mut Command) {
+    #[cfg(windows)]
+    {
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
 }
 
 fn mark_start_failure(run_state: &Arc<Mutex<RunState>>, error: &str) {

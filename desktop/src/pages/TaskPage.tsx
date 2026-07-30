@@ -474,7 +474,15 @@ export function TaskPage() {
                   <Descriptions.Item label="可执行账号">{runnableAccounts.length}</Descriptions.Item>
                   <Descriptions.Item label="本次 FYP 账号">{selectedRunAccounts.length}</Descriptions.Item>
                   <Descriptions.Item label="本次 FYP 浏览器">
-                    <AccountBrowserEnvironment accounts={selectedRunAccounts} />
+                    <div
+                      className={
+                        selectedRunAccounts.length > 3
+                          ? 'task-fyp-browser-list task-fyp-browser-list-scrollable'
+                          : 'task-fyp-browser-list'
+                      }
+                    >
+                      <AccountBrowserEnvironment accounts={selectedRunAccounts} />
+                    </div>
                   </Descriptions.Item>
                   <Descriptions.Item label="目标号参与账号">{targetRunnableAccounts.length}</Descriptions.Item>
                   <Descriptions.Item label="目标号浏览器">

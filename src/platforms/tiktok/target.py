@@ -126,7 +126,11 @@ def run_target_engagement(page, account, config, conn):
                     account_id,
                     "target_like",
                     "ok" if result["liked"] else "fail",
-                    f"{handle}/{video_id}",
+                    (
+                        f"{handle}/{video_id}"
+                        if result["liked"]
+                        else f"{handle}/{video_id} reason={result.get('like_reason', 'unknown')}"
+                    ),
                 )
             else:
                 log_action(conn, platform, account_id, "target_like", "skip", f"{handle}/{video_id}")

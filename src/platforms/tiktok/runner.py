@@ -14,6 +14,7 @@ from core.runtime import (
     session_log,
     wait_for_auth_intervention_action,
 )
+from patchright_runtime import start_sync_playwright
 from platforms.base import PlatformRunner
 from platforms.tiktok.auth import TikTokAuthAdapter
 from platforms.tiktok.fyp import build_fyp_plan, run_tiktok_fyp
@@ -250,9 +251,8 @@ def run_session(account, config, conn):
         time.sleep(3)
         test_cdp_endpoint(cdp_url, timeout=5)
 
-        from patchright.sync_api import sync_playwright
-
-        with sync_playwright() as playwright:
+        playwright_manager, playwright = start_sync_playwright()
+        try:
             browser = playwright.chromium.connect_over_cdp(cdp_url)
             ctx = browser.contexts[0]
             page = choose_tiktok_page(ctx)
@@ -283,6 +283,8 @@ def run_session(account, config, conn):
             summary["status"] = "ok"
 
             browser.close()
+        finally:
+            playwright_manager.__exit__()
         actual = (time.time() - started) / 60
         summary["duration_actual_min"] = round(actual, 1)
         session_log(

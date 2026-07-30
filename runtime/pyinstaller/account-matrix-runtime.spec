@@ -19,6 +19,7 @@ LOCAL_HIDDENIMPORTS = [
     "human_mouse",
     "main",
     "notify",
+    "patchright_runtime",
     "platform_config",
     "runtime_config",
     "scheduler",

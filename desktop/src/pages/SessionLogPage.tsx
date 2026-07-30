@@ -1,4 +1,4 @@
-import { Button, Card, DatePicker, Empty, Input, Modal, Select, Space, Tag, Typography, message } from 'antd'
+import { Button, Card, DatePicker, Empty, Input, Modal, Select, Space, Tabs, Tag, Typography, message } from 'antd'
 import type { Dayjs } from 'dayjs'
 import { FilterX, PlayCircle, RefreshCw, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -21,12 +21,32 @@ const TASK_TYPE_OPTIONS = [
   { value: 'gmail', label: 'Gmail' },
   { value: 'diagnostic', label: '诊断' },
 ]
-const STATUS_OPTIONS = ['ok', 'error', 'failed', 'skip', 'running', 'completed', 'stopped'].map((value) => ({
-  value,
-  label: value,
-}))
+const STATUS_OPTIONS = [
+  { value: 'success', label: '正常' },
+  { value: 'warning', label: '警告' },
+  { value: 'error', label: '错误' },
+  { value: 'ok', label: 'ok' },
+  { value: 'failed', label: 'failed' },
+  { value: 'skip', label: 'skip' },
+  { value: 'running', label: 'running' },
+  { value: 'completed', label: 'completed' },
+  { value: 'stopped', label: 'stopped' },
+]
 
 type TimeRange = [Dayjs, Dayjs] | null
+type SessionLogSeverity = 'success' | 'info' | 'warning' | 'error'
+
+interface SessionLogEntry {
+  id: string
+  raw: string
+  timestamp?: string
+  platform?: string
+  accountId?: string
+  event?: string
+  message: string
+  details: string[]
+  severity: SessionLogSeverity
+}
 
 export function SessionLogPage() {
   const [accounts, setAccounts] = useState<Account[]>([])
@@ -70,6 +90,21 @@ export function SessionLogPage() {
           }),
         )
         .join('\n'),
+    [accountId, accountPlatformMap, keyword, platformFilter, sessionLog, status, taskType, timeRange],
+  )
+  const filteredSessionLogEntries = useMemo(
+    () =>
+      parseSessionLogEntries(sessionLog).filter((entry) =>
+        sessionLogEntryMatches(entry, {
+          platformFilter,
+          accountId,
+          taskType,
+          status,
+          keyword,
+          timeRange,
+          accountPlatformMap,
+        }),
+      ),
     [accountId, accountPlatformMap, keyword, platformFilter, sessionLog, status, taskType, timeRange],
   )
 
@@ -226,12 +261,38 @@ export function SessionLogPage() {
           </Space>
         }
       >
-        {filteredSessionLog ? (
-          <LogBlock
-            value={filteredSessionLog}
-            filename="sessions.log"
-            className="session-log-block"
-            contentClassName="global-log-content session-log-content"
+        {filteredSessionLog || filteredSessionLogEntries.length ? (
+          <Tabs
+            className="session-log-tabs"
+            items={[
+              {
+                key: 'structured',
+                label: '结构化日志',
+                children: filteredSessionLogEntries.length ? (
+                  <SessionLogEntryList entries={filteredSessionLogEntries} />
+                ) : (
+                  <SessionLogEmptyState
+                    initialized={logExists !== false}
+                    filtered={Boolean(sessionLog)}
+                    refreshing={refreshing}
+                    onRefresh={() => void reloadLog()}
+                    onGoToTasks={goToTasks}
+                  />
+                ),
+              },
+              {
+                key: 'raw',
+                label: '原始日志',
+                children: (
+                  <LogBlock
+                    value={filteredSessionLog}
+                    filename="sessions.log"
+                    className="session-log-block"
+                    contentClassName="global-log-content session-log-content"
+                  />
+                ),
+              },
+            ]}
           />
         ) : (
           <SessionLogEmptyState
@@ -244,6 +305,39 @@ export function SessionLogPage() {
         )}
       </Card>
     </div>
+  )
+}
+
+function SessionLogEntryList({ entries }: { entries: SessionLogEntry[] }) {
+  return (
+    <div className="session-log-list">
+      {entries.map((entry) => (
+        <SessionLogEntryRow key={entry.id} entry={entry} />
+      ))}
+    </div>
+  )
+}
+
+function SessionLogEntryRow({ entry }: { entry: SessionLogEntry }) {
+  const severity = SESSION_LOG_SEVERITY_META[entry.severity]
+
+  return (
+    <article className={`session-log-entry session-log-entry-${entry.severity}`}>
+      <div className="session-log-entry-header">
+        <Tag color={severity.color}>{severity.label}</Tag>
+        {entry.timestamp ? <Typography.Text className="session-log-entry-time">{entry.timestamp}</Typography.Text> : null}
+        {entry.platform ? <Tag className="session-log-entry-platform">{entry.platform}</Tag> : null}
+        {entry.accountId ? <Typography.Text code>{entry.accountId}</Typography.Text> : null}
+        {entry.event ? <Tag color="default">{entry.event}</Tag> : null}
+      </div>
+      <Typography.Text className="session-log-entry-message">{entry.message || entry.raw}</Typography.Text>
+      {entry.details.length ? (
+        <details className="session-log-entry-details">
+          <summary>查看详情（{entry.details.length} 行）</summary>
+          <pre>{entry.details.join('\n')}</pre>
+        </details>
+      ) : null}
+    </article>
   )
 }
 
@@ -310,6 +404,94 @@ function accountMatchesPlatform(account: { platform: Platform }, platformFilter:
   return platformFilter === 'all' || account.platform === platformFilter
 }
 
+const SESSION_LOG_ENTRY_RE = /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \| ([^|]+) \| (.*)$/
+const SESSION_LOG_SEVERITY_META: Record<SessionLogSeverity, { label: string; color: string }> = {
+  success: { label: '正常', color: 'green' },
+  info: { label: '信息', color: 'blue' },
+  warning: { label: '警告', color: 'gold' },
+  error: { label: '错误', color: 'red' },
+}
+
+function parseSessionLogEntries(value: string): SessionLogEntry[] {
+  const entries: SessionLogEntry[] = []
+  let current: SessionLogEntry | undefined
+
+  value.split(/\r?\n/).forEach((line, index) => {
+    const match = line.match(SESSION_LOG_ENTRY_RE)
+    if (match) {
+      current = buildSessionLogEntry(match[1], match[2], match[3], index)
+      entries.push(current)
+      return
+    }
+    if (current && line.trim()) {
+      current.details.push(line)
+      current.raw = `${current.raw}\n${line}`
+    }
+  })
+
+  return entries
+}
+
+function buildSessionLogEntry(timestamp: string, platform: string, content: string, index: number): SessionLogEntry {
+  const segments = content.split('|').map((segment) => segment.trim())
+  const hasAccount = segments.length >= 2 && looksLikeAccountId(segments[0])
+  const accountId = hasAccount ? segments[0] : undefined
+  const event = hasAccount ? segments[1] : segments[0]
+  const message = hasAccount ? segments.slice(2).join(' | ') : segments.slice(1).join(' | ')
+
+  return {
+    id: `${timestamp}-${index}`,
+    raw: `${timestamp} | ${platform} | ${content}`,
+    timestamp,
+    platform: platform.trim(),
+    accountId,
+    event,
+    message,
+    details: [],
+    severity: classifySessionLogSeverity(content),
+  }
+}
+
+function looksLikeAccountId(value: string) {
+  return /^[a-z][a-z0-9_-]*_\d+$/i.test(value)
+}
+
+function classifySessionLogSeverity(value: string): SessionLogSeverity {
+  const normalized = value.toLowerCase()
+  if (
+    /\|\s*error\s*\|/i.test(value) ||
+    normalized.includes('[err]') ||
+    normalized.includes(' failed') ||
+    normalized.includes('exception') ||
+    normalized.includes('traceback') ||
+    normalized.includes('runtimeerror') ||
+    normalized.includes('attributeerror')
+  ) {
+    return 'error'
+  }
+  if (
+    /\|\s*skip\s*\|/i.test(value) ||
+    normalized.includes('batch stop') ||
+    normalized.includes('[warn]') ||
+    normalized.includes(' warning') ||
+    normalized.includes('logged_out') ||
+    normalized.includes('captcha') ||
+    normalized.includes('security_check') ||
+    normalized.includes('intervention')
+  ) {
+    return 'warning'
+  }
+  if (
+    /\|\s*ok\s*($|\|)/i.test(value) ||
+    normalized.includes(' ok') ||
+    normalized.includes('completed') ||
+    normalized.includes('batch end | account matrix bot')
+  ) {
+    return 'success'
+  }
+  return 'info'
+}
+
 function sessionLogLineMatches(
   line: string,
   filters: {
@@ -332,7 +514,7 @@ function sessionLogLineMatches(
   if (filters.taskType && !normalized.includes(filters.taskType.toLowerCase())) {
     return false
   }
-  if (filters.status && !normalized.includes(filters.status.toLowerCase())) {
+  if (filters.status && !lineMatchesStatus(line, filters.status)) {
     return false
   }
   if (filters.keyword.trim() && !normalized.includes(filters.keyword.trim().toLowerCase())) {
@@ -345,6 +527,56 @@ function sessionLogLineMatches(
     return false
   }
   return true
+}
+
+function sessionLogEntryMatches(
+  entry: SessionLogEntry,
+  filters: {
+    platformFilter: PlatformFilterValue
+    accountId?: string
+    taskType?: string
+    status?: string
+    keyword: string
+    timeRange: TimeRange
+    accountPlatformMap: Map<string, Platform>
+  },
+) {
+  const raw = entry.raw
+  const normalized = raw.toLowerCase()
+  if (filters.accountId && entry.accountId !== filters.accountId && !raw.includes(filters.accountId)) {
+    return false
+  }
+  if (filters.taskType && !normalized.includes(filters.taskType.toLowerCase())) {
+    return false
+  }
+  if (filters.status && !entryMatchesStatus(entry, filters.status)) {
+    return false
+  }
+  if (filters.keyword.trim() && !normalized.includes(filters.keyword.trim().toLowerCase())) {
+    return false
+  }
+  if (filters.platformFilter !== 'all' && !lineMatchesPlatform(raw, filters.platformFilter, filters.accountPlatformMap)) {
+    return false
+  }
+  if (filters.timeRange && !lineMatchesTimeRange(raw, filters.timeRange)) {
+    return false
+  }
+  return true
+}
+
+function lineMatchesStatus(line: string, status: string) {
+  const severity = classifySessionLogSeverity(line)
+  if (status === 'success' || status === 'warning' || status === 'error') {
+    return severity === status
+  }
+  return line.toLowerCase().includes(status.toLowerCase())
+}
+
+function entryMatchesStatus(entry: SessionLogEntry, status: string) {
+  if (status === 'success' || status === 'warning' || status === 'error') {
+    return entry.severity === status
+  }
+  return entry.raw.toLowerCase().includes(status.toLowerCase())
 }
 
 function lineMatchesPlatform(

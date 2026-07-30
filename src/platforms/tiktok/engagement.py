@@ -10,7 +10,7 @@ from platforms.tiktok.actions import (
     _focus_comment_box,
     _human_type,
     human_pause,
-    try_like,
+    try_like_with_detail,
 )
 
 
@@ -141,9 +141,10 @@ def engage_target_video(page, handle, video_id, comment_pool, like_prob=0.9, com
 
     liked = False
     like_attempted = False
+    like_reason = "not_attempted"
     if random.random() < like_prob:
         like_attempted = True
-        liked = try_like(page, mouse_state)
+        liked, like_reason = try_like_with_detail(page, mouse_state)
         human_pause(0.5, 1.5)
 
     commented = False
@@ -157,6 +158,7 @@ def engage_target_video(page, handle, video_id, comment_pool, like_prob=0.9, com
     return {
         "liked": liked,
         "like_attempted": like_attempted,
+        "like_reason": like_reason,
         "commented": commented,
         "comment_attempted": comment_attempted,
     }

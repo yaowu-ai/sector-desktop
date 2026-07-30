@@ -55,30 +55,38 @@ def _scroll_to_next_video(page, viewport, mouse_state):
         page.keyboard.press("ArrowDown")
 
 
-def try_like(page, mouse_state):
-    """Like the visible video. Returns True only on a verified state change."""
+def try_like_with_detail(page, mouse_state):
+    """Like the visible video. Returns (success, reason)."""
     btn = _find_active_button(page, 'button[aria-label*="Like" i]')
     if btn is None:
-        return False
+        return False, "button_not_found"
 
     try:
         if btn.get_attribute("aria-pressed", timeout=500) == "true":
-            return False
+            return False, "already_liked"
     except Exception:
         pass
 
     if not human_click_locator(page, btn, mouse_state):
-        return False
+        return False, "click_failed"
 
     time.sleep(random.uniform(0.4, 0.9))
 
     try:
         btn_after = _find_active_button(page, 'button[aria-label*="Like" i]')
         if btn_after is None:
-            return False
-        return btn_after.get_attribute("aria-pressed", timeout=500) == "true"
+            return False, "button_not_found"
+        if btn_after.get_attribute("aria-pressed", timeout=500) == "true":
+            return True, "liked"
+        return False, "state_unchanged"
     except Exception:
-        return False
+        return False, "state_unchanged"
+
+
+def try_like(page, mouse_state):
+    """Like the visible video. Returns True only on a verified state change."""
+    success, _reason = try_like_with_detail(page, mouse_state)
+    return success
 
 
 def _follow_icon_d(button):
@@ -263,6 +271,7 @@ def fyp_browse(
     video_count = 0
     likes_done = 0
     like_attempts = 0
+    like_failure_reasons = {}
     follows_done = 0
     follow_attempts = 0
     comments_done = 0
@@ -278,9 +287,12 @@ def fyp_browse(
 
         if random.random() < like_prob:
             like_attempts += 1
-            if try_like(page, mouse_state):
+            liked, reason = try_like_with_detail(page, mouse_state)
+            if liked:
                 likes_done += 1
                 human_pause(0.3, 1.0)
+            else:
+                like_failure_reasons[reason] = like_failure_reasons.get(reason, 0) + 1
 
         if follows_done < follows_target and random.random() < 0.05:
             follow_attempts += 1
@@ -311,6 +323,7 @@ def fyp_browse(
         "likes": likes_done,
         "like_attempts": like_attempts,
         "like_failures": max(0, like_attempts - likes_done),
+        "like_failure_reasons": like_failure_reasons,
         "follows": follows_done,
         "follow_attempts": follow_attempts,
         "follow_failures": max(0, follow_attempts - follows_done),

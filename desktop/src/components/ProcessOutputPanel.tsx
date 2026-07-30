@@ -220,7 +220,7 @@ export function ProcessOutputPanel({ title = '运行输出' }: ProcessOutputPane
             <Descriptions.Item label="队列">{status.queuedAccounts.length}</Descriptions.Item>
             <Descriptions.Item label="已完成">{status.completedAccounts.length}</Descriptions.Item>
             <Descriptions.Item label="命令" span={2}>
-              {status.command.length ? <Typography.Text code>{status.command.join(' ')}</Typography.Text> : '-'}
+              {status.command.length ? <Typography.Text code>{formatDisplayCommand(status.command)}</Typography.Text> : '-'}
             </Descriptions.Item>
             {status.error ? (
               <Descriptions.Item label="错误" span={2}>
@@ -236,6 +236,37 @@ export function ProcessOutputPanel({ title = '运行输出' }: ProcessOutputPane
 }
 
 const PERSISTED_SESSION_LOG_LINE_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \| [a-z][a-z0-9_-]* \| /i
+
+function formatDisplayCommand(command: string[]) {
+  return command.map((part, index) => sanitizeCommandPart(part, command[index - 1], index)).join(' ')
+}
+
+function sanitizeCommandPart(part: string, previousPart: string | undefined, index: number) {
+  if (index === 0 || /account-matrix-runtime\.exe$/i.test(part)) {
+    return 'account-matrix-runtime.exe'
+  }
+  if (previousPart === '--config') {
+    return '<配置文件>'
+  }
+  if (previousPart === '--data-dir') {
+    return '<数据目录>'
+  }
+  if (isLocalPath(part)) {
+    return '<本地路径>'
+  }
+  return part
+}
+
+function isLocalPath(value: string) {
+  const normalized = value.replace(/^\/\/\?\//, '').replace(/^\\\\\?\\/, '')
+  return (
+    /^[a-zA-Z]:[\\/]/.test(normalized) ||
+    normalized.includes('/AppData/') ||
+    normalized.includes('\\AppData\\') ||
+    normalized.startsWith('/Users/') ||
+    normalized.startsWith('/home/')
+  )
+}
 
 function filterPersistedSessionLogLines(value: string) {
   if (!value) {

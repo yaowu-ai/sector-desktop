@@ -188,6 +188,18 @@ def build_diagnostic_payload(config_path=None):
     add_check("dataDir", data_dir.exists() and data_dir.is_dir(), str(data_dir), warning=True)
     add_check("comments", comments.is_file(), str(comments), warning=True)
     add_check("brandComments", brand_comments.is_file(), str(brand_comments), warning=True)
+    patchright_driver = check_patchright_driver()
+    add_check(
+        "patchrightDriver",
+        patchright_driver["status"] == "ok",
+        patchright_driver["detail"],
+    )
+    patchright_check = check_patchright_startup()
+    add_check(
+        "patchrightStartup",
+        patchright_check["status"] == "ok",
+        patchright_check["detail"],
+    )
 
     account_count = 0
     enabled_accounts = 0
@@ -237,6 +249,30 @@ def build_diagnostic_payload(config_path=None):
         "browserProviders": provider_capability_matrix(),
         "checks": checks,
     }
+
+
+def check_patchright_startup():
+    try:
+        from patchright_runtime import patchright_startup_check
+
+        return patchright_startup_check()
+    except Exception as exc:
+        return {
+            "status": "error",
+            "detail": f"{type(exc).__name__}: {exc}",
+        }
+
+
+def check_patchright_driver():
+    try:
+        from patchright_runtime import patchright_driver_check
+
+        return patchright_driver_check()
+    except Exception as exc:
+        return {
+            "status": "error",
+            "detail": f"{type(exc).__name__}: {exc}",
+        }
 
 
 def version_payload():

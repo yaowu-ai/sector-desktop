@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 use std::fs;
 use std::net::{TcpStream, ToSocketAddrs};
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
@@ -13,6 +15,8 @@ use crate::security::redact_text;
 
 const SCHEDULER_HOST: &str = "127.0.0.1";
 const SCHEDULER_PORT: u16 = 9601;
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -251,11 +255,14 @@ fn invoke_runtime_json(
     checks: &mut Vec<DiagnosticCheck>,
 ) -> Result<JsonValue, String> {
     let (command, current_dir) = runtime_json_command(paths, command_name)?;
-    let output = Command::new(&command[0])
+    let mut command_builder = Command::new(&command[0]);
+    command_builder
         .args(&command[1..])
         .current_dir(&current_dir)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    hide_console_window(&mut command_builder);
+    let output = command_builder
         .output()
         .map_err(|err| format!("failed to start runtime {}: {}", command_name, err))?;
     if !output.status.success() {
@@ -276,6 +283,13 @@ fn invoke_runtime_json(
         detail: command.join(" "),
     });
     Ok(value)
+}
+
+fn hide_console_window(command: &mut Command) {
+    #[cfg(windows)]
+    {
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
 }
 
 fn runtime_json_command(

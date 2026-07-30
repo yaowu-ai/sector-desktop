@@ -50,6 +50,7 @@ def run_tiktok_fyp(page, account, plan, conn):
     videos = result["videos"]
     likes = result["likes"]
     like_failures = result.get("like_failures", 0)
+    like_failure_reasons = result.get("like_failure_reasons") or {}
     follows = result["follows"]
     follow_failures = result.get("follow_failures", 0)
     comments = result["comments"]
@@ -58,7 +59,11 @@ def run_tiktok_fyp(page, account, plan, conn):
     log_action(conn, platform, account_id, "fyp_browse", "ok", f"videos={videos}")
     if likes > 0:
         log_action(conn, platform, account_id, "like", "ok", f"count={likes}")
-    if like_failures > 0:
+    if like_failure_reasons:
+        for reason, count in sorted(like_failure_reasons.items()):
+            if count > 0:
+                log_action(conn, platform, account_id, "like", "fail", f"reason={reason} count={count}")
+    elif like_failures > 0:
         log_action(conn, platform, account_id, "like", "fail", f"count={like_failures}")
     if follows > 0:
         log_action(conn, platform, account_id, "follow", "ok", f"count={follows}")

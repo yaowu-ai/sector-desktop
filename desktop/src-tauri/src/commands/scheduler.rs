@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpStream;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 use tauri::State;
@@ -14,6 +16,8 @@ use crate::state::AppState;
 
 const SCHEDULER_HOST: &str = "127.0.0.1";
 const SCHEDULER_PORT: u16 = 9601;
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -136,7 +140,8 @@ pub fn start_scheduler(state: State<'_, AppState>) -> Result<SchedulerStartResul
 
     let paths = project_paths()?;
     let (command, current_dir) = scheduler_command_for_paths(&paths)?;
-    let child = Command::new(&command[0])
+    let mut command_builder = Command::new(&command[0]);
+    command_builder
         .args(&command[1..])
         .current_dir(&current_dir)
         .env("PYTHONUNBUFFERED", "1")
@@ -145,16 +150,16 @@ pub fn start_scheduler(state: State<'_, AppState>) -> Result<SchedulerStartResul
             if paths.auto_close_profile { "1" } else { "0" },
         )
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|err| {
-            format!(
-                "failed to start scheduler {:?} in {}: {}",
-                command,
-                normalize(&current_dir),
-                err
-            )
-        })?;
+        .stderr(Stdio::null());
+    hide_console_window(&mut command_builder);
+    let child = command_builder.spawn().map_err(|err| {
+        format!(
+            "failed to start scheduler {:?} in {}: {}",
+            command,
+            normalize(&current_dir),
+            err
+        )
+    })?;
 
     let process_id = child.id();
     let mut scheduler = state
@@ -168,6 +173,13 @@ pub fn start_scheduler(state: State<'_, AppState>) -> Result<SchedulerStartResul
         command,
         status: "starting".to_string(),
     })
+}
+
+fn hide_console_window(command: &mut Command) {
+    #[cfg(windows)]
+    {
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
 }
 
 #[tauri::command]

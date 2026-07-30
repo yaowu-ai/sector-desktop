@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
@@ -33,7 +33,7 @@ a:hover { text-decoration: underline; }
 .toc a { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .toc-toggle { border: 0; border-radius: 5px; background: transparent; color: #2563eb; cursor: pointer; font: inherit; width: 22px; height: 22px; padding: 0; line-height: 22px; }
 .toc-row { display: grid; grid-template-columns: 22px minmax(0, 1fr); align-items: center; gap: 4px; }
-.toc-toggle::before { content: "▾"; display: inline-block; transition: transform 0.15s ease; }
+.toc-toggle::before { content: "\25BE"; display: inline-block; transition: transform 0.15s ease; }
 .toc-collapsed > .toc-row .toc-toggle::before { transform: rotate(-90deg); }
 .toc-toggle-placeholder { width: 22px; height: 22px; }
 .toc-children { margin: 2px 0 8px 26px !important; }
@@ -128,10 +128,12 @@ a:hover { text-decoration: underline; }
 <li class="toc-h3"><a href="#18.6-gmail-初始化需要人工处理">18.6 Gmail 初始化需要人工处理</a></li>
 <li class="toc-h3"><a href="#18.7-自动登录没有继续执行">18.7 自动登录没有继续执行</a></li>
 <li class="toc-h3"><a href="#18.8-运行时或诊断异常">18.8 运行时或诊断异常</a></li>
+<li class="toc-h3"><a href="#18.9-启动任务时弹出黑色控制台窗口">18.9 启动任务时弹出黑色控制台窗口</a></li>
+<li class="toc-h3"><a href="#18.10-点赞失败如何判断">18.10 点赞失败如何判断</a></li>
 <li class="toc-h2"><a href="#19.-操作注意事项">19. 操作注意事项</a></li></ul></nav>
       <div class="content">
 <h1 id="account-matrix-pc-端产品使用手册-v1">Account Matrix PC 端产品使用手册 V1</h1>
-<p>版本：V1.3<br> 日期：2026-07-29<br> 适用对象：负责账号配置、浏览器环境维护、养号任务执行、调度巡检和数据查看的运营或技术人员。</p>
+<p>版本：V1.4<br> 日期：2026-07-30<br> 适用对象：负责账号配置、浏览器环境维护、养号任务执行、调度巡检和数据查看的运营或技术人员。</p>
 <h2 id="1.-产品概述">1. 产品概述</h2>
 <p>Account Matrix PC 端是一个运行在 Windows 云电脑上的多平台、多账号养号操作台。它通过桌面界面包装内置运行时和现有 Python 自动化脚本，集中管理平台能力、账号配置、浏览器提供方、FYP 养号任务、目标号互动、定时调度、评论素材、执行记录、Session 日志、统计报表、Gmail 初始化、登录保障和诊断工具。</p>
 <p>V1 的真实自动执行能力只支持 TikTok。Instagram、WhatsApp、抖音已在界面中预留账号、浏览器环境、任务、调度和统计入口，但自动执行按钮保持禁用，后端脚本也会过滤这些预留平台账号。</p>
@@ -196,11 +198,12 @@ corepack pnpm dev</code></pre>
 .\desktop-build.ps1</code></pre>
 <p>打包成功后，NSIS 安装包位于：</p>
 <pre><code class="language-text">desktop\src-tauri\target\release\bundle\nsis\Account Matrix_0.1.0_x64-setup.exe</code></pre>
-<p>2026-07-29 重新打包产物信息：</p>
+<p>2026-07-30 重新打包产物信息：</p>
 <pre><code class="language-text">文件：desktop\src-tauri\target\release\bundle\nsis\Account Matrix_0.1.0_x64-setup.exe
-大小：44,082,420 bytes
-SHA256：4CF3611A6A55267DD96002B96C68A8C1A29B21BAC327A3A5CE6F63374927E0A2
+大小：44,101,633 bytes
+SHA256：BB17CC2B34A684D511B9EEB1956056C2FC8A53445212A6BEAD3D48A6D81800C1
 runtime：account-matrix-runtime.exe 0.1.0</code></pre>
+<p>传输到云电脑后建议先比对文件大小或 SHA256。若安装时出现 NSIS integrity check failed，通常表示安装包下载或传输不完整，需要重新复制完整安装包。</p>
 <p>不启动 PC 端应用时，也可以在项目根目录直接运行 TikTok Python 兼容入口：</p>
 <pre><code class="language-powershell">cd E:\YAOWU\yangHao\account-matrix
 python src\main.py --platform tiktok</code></pre>
@@ -216,6 +219,7 @@ account-matrix-runtime.exe scheduler --host 127.0.0.1 --port 9601 --config &quot
 <pre><code class="language-powershell">python src\runtime_cli.py version --json
 python src\runtime_cli.py diagnostic --json
 python src\runtime_cli.py run --platform tiktok</code></pre>
+<p>正常通过 PC 端启动任务、调度、诊断或通知测试时，内置 runtime 会在后台运行，不会弹出独立黑色控制台窗口。只有手动在 PowerShell 或命令提示符中直接执行 <code>account-matrix-runtime.exe</code> 时，才会在当前终端显示输出。</p>
 <h3 id="2.3-首次检查">2.3 首次检查</h3>
 <p>打开 PC 端后先看顶部状态栏：</p>
 <ul>
@@ -256,6 +260,7 @@ python src\runtime_cli.py run --platform tiktok</code></pre>
 <li><code>暂停后续</code>：当前账号执行完后停止后续队列。</li>
 <li><code>强制停止</code>：直接终止当前 Python 进程。仅在任务卡死时使用，日志和数据库记录可能不完整。</li>
 </ul>
+<p>安装版从界面启动任务时，runtime 子进程会隐藏 Windows 控制台窗口。任务输出仍会被 PC 端捕获并展示在 <code>任务运行输出</code>、<code>执行记录</code> 和 <code>Session 日志</code> 中。</p>
 <p>任务启动后，PC 端会监听运行时输出的浏览器预览事件。如果账号浏览器已打开并返回 CDP endpoint，页面会弹出 <code>浏览器预览</code>，持续显示当前账号浏览器画面。该预览只用于观察任务状态，不替代在真实浏览器窗口中的人工操作。</p>
 <p>如果任务进入登录人工接管状态，<code>脚本输出</code> 会显示账号、登录状态和页面 URL，并提供：</p>
 <ul>
@@ -504,6 +509,14 @@ python src\runtime_cli.py run --platform tiktok</code></pre>
 <li>遇到验证码、二次验证、安全检查或无法稳定判断的页面时，进入人工接管或跳过当前账号。</li>
 </ol>
 <p>登录状态会写入执行记录中的 <code>login_check</code> 动作，也会写入 Session 日志；密码不会出现在 stdout、stderr、Session 日志或命令行参数中。</p>
+<p>点赞动作会验证点击后按钮状态是否变为已点赞。若点赞尝试没有成功，执行记录中的 <code>like fail</code> 会按原因拆分显示：</p>
+<ul>
+<li><code>reason=button_not_found count=N</code>：未找到当前视频的点赞按钮，可能是页面结构变化、页面未聚焦或视频区域定位失败。</li>
+<li><code>reason=already_liked count=N</code>：当前视频已经处于已点赞状态，系统不会重复点赞。</li>
+<li><code>reason=state_unchanged count=N</code>：点击后按钮状态没有变为已点赞，常见于网络慢、点击被遮挡、账号互动受限或 TikTok 页面未及时更新状态。</li>
+<li><code>reason=click_failed count=N</code>：模拟点击动作本身失败，常见于按钮不可见、坐标不可点击或页面切换中。</li>
+</ul>
+<p>这些 <code>like fail</code> 不代表整个 session 失败。只要 <code>fyp_browse</code>、<code>session</code> 或 <code>close</code> 仍为 <code>ok</code>，说明本次浏览流程已完成，只是部分点赞尝试未成功。</p>
 <h2 id="8.-目标号互动">8. 目标号互动</h2>
 <p>目标号互动严格跟随顶部当前平台，用于让当前平台的参与账号检查品牌目标号的新视频，并按概率点赞、评论和可选关注。V1 中只有 TikTok 可以执行真实目标号互动。</p>
 <h3 id="8.1-配置项">8.1 配置项</h3>
@@ -608,6 +621,7 @@ python src\runtime_cli.py run --platform tiktok</code></pre>
 <li><code>目标关注</code>：目标号关注记录。</li>
 </ul>
 <p>详情字段支持复制，方便排查失败原因。</p>
+<p>点赞失败会在详情字段中显示原因，例如 <code>reason=button_not_found count=1</code>、<code>reason=already_liked count=2</code>、<code>reason=state_unchanged count=3</code> 或 <code>reason=click_failed count=1</code>。目标号互动中的 <code>target_like fail</code> 也会带 <code>reason=...</code>，用于判断是找不到按钮、已点赞、点击未生效还是点击动作失败。</p>
 <h2 id="12.-session-日志">12. Session 日志</h2>
 <p><code>Session 日志</code> 页面集中展示 <code>data/sessions.log</code> 的原始运行日志，不再在每个页面底部重复展示。新日志行包含 platform 字段，页面默认展示全部平台，并可按平台、账号、任务类型、关键词和时间范围筛选。</p>
 <p>页面包含：</p>
@@ -691,6 +705,12 @@ python src\runtime_cli.py run --platform tiktok</code></pre>
 <li><code>cdpEndpoint</code>：已有内置 Chromium 运行记录是否还能访问 CDP。</li>
 </ul>
 <p>BitBrowser 账号重点检查 <code>profile_id</code> 和 Local API；内置 Chromium 账号重点检查 Chromium 可执行文件、代理、user data dir 和 runtime 记录。</p>
+<p>安装版 runtime 诊断还会检查 Patchright driver 启动能力：</p>
+<ul>
+<li><code>patchrightDriver</code>：验证内置 Patchright Node driver 是否能启动并保持等待协议连接。正常时会显示 <code>driver stayed alive</code>。</li>
+<li><code>patchrightStartup</code>：验证 Patchright sync API 是否能完整启动并拿到 Chromium browser type。</li>
+</ul>
+<p>如果这两项失败，优先复制诊断详情排查。常见原因包括安装包传输不完整、安全软件拦截 <code>node.exe</code>、云电脑权限策略限制子进程管道、或 Windows 长路径前缀导致 Node 入口脚本解析失败。</p>
 <h3 id="15.2-点赞诊断">15.2 点赞诊断</h3>
 <p>选择 TikTok 启用账号后运行。脚本会验证点赞动作是否能执行，并在输出中显示过程和结果。</p>
 <h3 id="15.3-评论诊断">15.3 评论诊断</h3>
@@ -932,8 +952,26 @@ python src\runtime_cli.py run --platform tiktok</code></pre>
 <li>系统设置中的 <code>运行模式</code> 是否符合当前场景。安装版一般使用 <code>内置运行时</code>，源码调试使用 <code>源码开发模式</code>。</li>
 <li><code>运行时清单</code> 是否存在，且支持 <code>run</code>、<code>scheduler</code>、<code>gmail</code>、<code>diagnostic</code>、<code>version</code>。</li>
 <li>可在命令行运行 <code>account-matrix-runtime.exe version --json</code> 或 <code>python src\runtime_cli.py version --json</code> 检查版本。</li>
-<li>可运行 <code>diagnostic --json</code> 查看配置路径、data 目录、评论池、浏览器 provider 能力和账号浏览器诊断结果。</li>
+<li>可运行 <code>diagnostic --json</code> 查看配置路径、data 目录、评论池、浏览器 provider 能力、<code>patchrightDriver</code>、<code>patchrightStartup</code> 和账号浏览器诊断结果。</li>
 </ul>
+<h3 id="18.9-启动任务时弹出黑色控制台窗口">18.9 启动任务时弹出黑色控制台窗口</h3>
+<p>旧安装包中，启动任务、调度、诊断或通知测试时可能会弹出标题为 <code>account-matrix-runtime.exe</code> 的黑色控制台窗口。该窗口不是任务错误，而是 Windows 显示了 runtime 子进程控制台。</p>
+<p>处理方式：</p>
+<ol>
+<li>更新到 2026-07-30 或之后的安装包。</li>
+<li>通过 PC 端按钮启动任务，不要手动双击 <code>account-matrix-runtime.exe</code>。</li>
+<li>若仍弹出黑框，确认正在运行的是新安装包，并在系统设置中保持 <code>运行模式</code> 为 <code>内置运行时</code>。</li>
+</ol>
+<p>新安装包会在 Tauri 后台启动 runtime，并隐藏控制台窗口；stdout 和 stderr 仍会进入 PC 端任务输出与日志。</p>
+<h3 id="18.10-点赞失败如何判断">18.10 点赞失败如何判断</h3>
+<p>执行记录中出现 <code>like fail</code> 时，先看详情中的 <code>reason</code>：</p>
+<ul>
+<li><code>button_not_found</code>：优先检查 TikTok 页面是否正常加载、浏览器窗口是否被遮挡、页面结构是否变化。</li>
+<li><code>already_liked</code>：通常无需处理，说明候选视频已经点过赞。</li>
+<li><code>state_unchanged</code>：优先检查网络、代理质量、账号互动限制和页面是否响应；可降低点赞概率或换账号验证。</li>
+<li><code>click_failed</code>：优先检查云电脑分辨率、缩放比例、浏览器窗口是否可见，以及页面是否正在切换。</li>
+</ul>
+<p>如果 <code>fyp_browse ok</code> 且 <code>close ok</code>，但只有少量 <code>like fail</code>，一般不需要重跑整批任务。若连续多次全部为 <code>button_not_found</code> 或 <code>state_unchanged</code>，再使用诊断工具运行点赞诊断并查看浏览器画面。</p>
 <h2 id="19.-操作注意事项">19. 操作注意事项</h2>
 <ul>
 <li>同一个 BitBrowser profile 同一时间只能在一台机器打开。</li>

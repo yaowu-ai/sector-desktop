@@ -1,7 +1,7 @@
 ﻿# Account Matrix PC 端产品使用手册 V1
 
-版本：V1.3  
-日期：2026-07-29  
+版本：V1.4  
+日期：2026-07-30  
 适用对象：负责账号配置、浏览器环境维护、养号任务执行、调度巡检和数据查看的运营或技术人员。
 
 ## 1. 产品概述
@@ -99,14 +99,16 @@ cd E:\YAOWU\yangHao\account-matrix
 desktop\src-tauri\target\release\bundle\nsis\Account Matrix_0.1.0_x64-setup.exe
 ```
 
-2026-07-29 重新打包产物信息：
+2026-07-30 重新打包产物信息：
 
 ```text
 文件：desktop\src-tauri\target\release\bundle\nsis\Account Matrix_0.1.0_x64-setup.exe
-大小：44,082,420 bytes
-SHA256：4CF3611A6A55267DD96002B96C68A8C1A29B21BAC327A3A5CE6F63374927E0A2
+大小：44,101,633 bytes
+SHA256：BB17CC2B34A684D511B9EEB1956056C2FC8A53445212A6BEAD3D48A6D81800C1
 runtime：account-matrix-runtime.exe 0.1.0
 ```
+
+传输到云电脑后建议先比对文件大小或 SHA256。若安装时出现 NSIS integrity check failed，通常表示安装包下载或传输不完整，需要重新复制完整安装包。
 
 不启动 PC 端应用时，也可以在项目根目录直接运行 TikTok Python 兼容入口：
 
@@ -139,6 +141,8 @@ python src\runtime_cli.py version --json
 python src\runtime_cli.py diagnostic --json
 python src\runtime_cli.py run --platform tiktok
 ```
+
+正常通过 PC 端启动任务、调度、诊断或通知测试时，内置 runtime 会在后台运行，不会弹出独立黑色控制台窗口。只有手动在 PowerShell 或命令提示符中直接执行 `account-matrix-runtime.exe` 时，才会在当前终端显示输出。
 
 ### 2.3 首次检查
 
@@ -183,6 +187,8 @@ python src\runtime_cli.py run --platform tiktok
 
 - `暂停后续`：当前账号执行完后停止后续队列。
 - `强制停止`：直接终止当前 Python 进程。仅在任务卡死时使用，日志和数据库记录可能不完整。
+
+安装版从界面启动任务时，runtime 子进程会隐藏 Windows 控制台窗口。任务输出仍会被 PC 端捕获并展示在 `任务运行输出`、`执行记录` 和 `Session 日志` 中。
 
 任务启动后，PC 端会监听运行时输出的浏览器预览事件。如果账号浏览器已打开并返回 CDP endpoint，页面会弹出 `浏览器预览`，持续显示当前账号浏览器画面。该预览只用于观察任务状态，不替代在真实浏览器窗口中的人工操作。
 
@@ -490,6 +496,15 @@ data/browser/builtin_chromium/<账号>/user-data
 
 登录状态会写入执行记录中的 `login_check` 动作，也会写入 Session 日志；密码不会出现在 stdout、stderr、Session 日志或命令行参数中。
 
+点赞动作会验证点击后按钮状态是否变为已点赞。若点赞尝试没有成功，执行记录中的 `like fail` 会按原因拆分显示：
+
+- `reason=button_not_found count=N`：未找到当前视频的点赞按钮，可能是页面结构变化、页面未聚焦或视频区域定位失败。
+- `reason=already_liked count=N`：当前视频已经处于已点赞状态，系统不会重复点赞。
+- `reason=state_unchanged count=N`：点击后按钮状态没有变为已点赞，常见于网络慢、点击被遮挡、账号互动受限或 TikTok 页面未及时更新状态。
+- `reason=click_failed count=N`：模拟点击动作本身失败，常见于按钮不可见、坐标不可点击或页面切换中。
+
+这些 `like fail` 不代表整个 session 失败。只要 `fyp_browse`、`session` 或 `close` 仍为 `ok`，说明本次浏览流程已完成，只是部分点赞尝试未成功。
+
 ## 8. 目标号互动
 
 目标号互动严格跟随顶部当前平台，用于让当前平台的参与账号检查品牌目标号的新视频，并按概率点赞、评论和可选关注。V1 中只有 TikTok 可以执行真实目标号互动。
@@ -625,6 +640,8 @@ data/browser/builtin_chromium/<账号>/user-data
 
 详情字段支持复制，方便排查失败原因。
 
+点赞失败会在详情字段中显示原因，例如 `reason=button_not_found count=1`、`reason=already_liked count=2`、`reason=state_unchanged count=3` 或 `reason=click_failed count=1`。目标号互动中的 `target_like fail` 也会带 `reason=...`，用于判断是找不到按钮、已点赞、点击未生效还是点击动作失败。
+
 ## 12. Session 日志
 
 `Session 日志` 页面集中展示 `data/sessions.log` 的原始运行日志，不再在每个页面底部重复展示。新日志行包含 platform 字段，页面默认展示全部平台，并可按平台、账号、任务类型、关键词和时间范围筛选。
@@ -726,6 +743,13 @@ Gmail 初始化包装 `gmail_setup.py`，用于打开 BitBrowser 窗口并辅助
 - `cdpEndpoint`：已有内置 Chromium 运行记录是否还能访问 CDP。
 
 BitBrowser 账号重点检查 `profile_id` 和 Local API；内置 Chromium 账号重点检查 Chromium 可执行文件、代理、user data dir 和 runtime 记录。
+
+安装版 runtime 诊断还会检查 Patchright driver 启动能力：
+
+- `patchrightDriver`：验证内置 Patchright Node driver 是否能启动并保持等待协议连接。正常时会显示 `driver stayed alive`。
+- `patchrightStartup`：验证 Patchright sync API 是否能完整启动并拿到 Chromium browser type。
+
+如果这两项失败，优先复制诊断详情排查。常见原因包括安装包传输不完整、安全软件拦截 `node.exe`、云电脑权限策略限制子进程管道、或 Windows 长路径前缀导致 Node 入口脚本解析失败。
 
 ### 15.2 点赞诊断
 
@@ -1000,7 +1024,30 @@ BitBrowser 账号重点检查 `profile_id` 和 Local API；内置 Chromium 账�
 - 系统设置中的 `运行模式` 是否符合当前场景。安装版一般使用 `内置运行时`，源码调试使用 `源码开发模式`。
 - `运行时清单` 是否存在，且支持 `run`、`scheduler`、`gmail`、`diagnostic`、`version`。
 - 可在命令行运行 `account-matrix-runtime.exe version --json` 或 `python src\runtime_cli.py version --json` 检查版本。
-- 可运行 `diagnostic --json` 查看配置路径、data 目录、评论池、浏览器 provider 能力和账号浏览器诊断结果。
+- 可运行 `diagnostic --json` 查看配置路径、data 目录、评论池、浏览器 provider 能力、`patchrightDriver`、`patchrightStartup` 和账号浏览器诊断结果。
+
+### 18.9 启动任务时弹出黑色控制台窗口
+
+旧安装包中，启动任务、调度、诊断或通知测试时可能会弹出标题为 `account-matrix-runtime.exe` 的黑色控制台窗口。该窗口不是任务错误，而是 Windows 显示了 runtime 子进程控制台。
+
+处理方式：
+
+1. 更新到 2026-07-30 或之后的安装包。
+2. 通过 PC 端按钮启动任务，不要手动双击 `account-matrix-runtime.exe`。
+3. 若仍弹出黑框，确认正在运行的是新安装包，并在系统设置中保持 `运行模式` 为 `内置运行时`。
+
+新安装包会在 Tauri 后台启动 runtime，并隐藏控制台窗口；stdout 和 stderr 仍会进入 PC 端任务输出与日志。
+
+### 18.10 点赞失败如何判断
+
+执行记录中出现 `like fail` 时，先看详情中的 `reason`：
+
+- `button_not_found`：优先检查 TikTok 页面是否正常加载、浏览器窗口是否被遮挡、页面结构是否变化。
+- `already_liked`：通常无需处理，说明候选视频已经点过赞。
+- `state_unchanged`：优先检查网络、代理质量、账号互动限制和页面是否响应；可降低点赞概率或换账号验证。
+- `click_failed`：优先检查云电脑分辨率、缩放比例、浏览器窗口是否可见，以及页面是否正在切换。
+
+如果 `fyp_browse ok` 且 `close ok`，但只有少量 `like fail`，一般不需要重跑整批任务。若连续多次全部为 `button_not_found` 或 `state_unchanged`，再使用诊断工具运行点赞诊断并查看浏览器画面。
 
 ## 19. 操作注意事项
 
