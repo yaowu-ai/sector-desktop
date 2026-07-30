@@ -49,6 +49,7 @@ import {
   deleteLoginPassword,
   cleanupBuiltinChromiumData,
   listBrowserProfiles,
+  checkBitbrowserApi,
 } from "../services/api";
 import { usePlatformContext } from "../app/PlatformContext";
 import {
@@ -87,6 +88,24 @@ interface AccountFormValues {
   loginPassword?: string;
   notes?: string;
 }
+
+const BITBROWSER_DOWNLOAD_URL = "https://www.bitbrowser.cn/download";
+const ACCOUNT_DRAFT_FIELD_NAMES = [
+  "id",
+  "platform",
+  "enabled",
+  "ipGroup",
+  "activeHours",
+  "browserProvider",
+  "bitbrowserProfileId",
+  "proxyType",
+  "proxy",
+  "userDataDir",
+  "loginEnabled",
+  "loginMethod",
+  "loginUsername",
+  "notes",
+] as const;
 
 export function AccountPage() {
   const { currentPlatform } = usePlatformContext();
@@ -220,14 +239,61 @@ export function AccountPage() {
   const saveForm = async () => {
     const values = await form.validateFields();
     const nextAccount = formToAccount(values, editingAccount);
-    const nextAccounts = editingAccount
-      ? accounts.map((account) =>
-          account.id === editingAccount.id ? nextAccount : account,
-        )
-      : [...accounts, nextAccount];
+    const ok = await persistAccounts(
+      upsertAccount(accounts, nextAccount, editingAccount),
+      "账号配置已保存",
+    );
+    if (ok) {
+      setDrawerOpen(false);
+    }
+  };
 
-    await persistAccounts(nextAccounts, "账号配置已保存");
-    setDrawerOpen(false);
+  const saveAccountDraftForCredentials = async () => {
+    await form.validateFields([...ACCOUNT_DRAFT_FIELD_NAMES]);
+    const values = form.getFieldsValue(true) as AccountFormValues;
+    const hasCredentialRef = Boolean(values.loginCredentialRef?.trim());
+    const nextAccount = formToAccount(
+      hasCredentialRef ? values : { ...values, loginEnabled: false },
+      editingAccount,
+    );
+    const ok = await persistAccounts(
+      upsertAccount(accounts, nextAccount, editingAccount),
+      editingAccount ? "账号配置已保存" : "账号已保存，可以继续配置凭据",
+    );
+    if (!ok) {
+      return null;
+    }
+    setEditingAccount(nextAccount);
+    form.setFieldsValue({
+      ...values,
+      id: nextAccount.id,
+      loginPassword: values.loginPassword ?? "",
+    });
+    return nextAccount;
+  };
+
+  const saveCredentialAccountSettings = async (
+    account: Account,
+    credentialRef: string,
+  ) => {
+    const values = form.getFieldsValue(true) as AccountFormValues;
+    const nextAccount = formToAccount(
+      { ...values, loginCredentialRef: credentialRef },
+      account,
+    );
+    const ok = await persistAccounts(
+      upsertAccount(accounts, nextAccount, account),
+      "账号登录配置已保存",
+    );
+    if (!ok) {
+      return null;
+    }
+    setEditingAccount(nextAccount);
+    form.setFieldsValue({
+      ...accountToForm(nextAccount),
+      loginPassword: "",
+    });
+    return nextAccount;
   };
 
   const toggleAccount = async (account: Account, enabled: boolean) => {
@@ -271,7 +337,7 @@ export function AccountPage() {
   const persistAccounts = async (
     nextAccounts: Account[],
     successText: string,
-  ) => {
+  ): Promise<boolean> => {
     setSaving(true);
     try {
       await saveAccounts({
@@ -282,8 +348,10 @@ export function AccountPage() {
       });
       message.success(successText);
       await refresh();
+      return true;
     } catch (error) {
       message.error(error instanceof Error ? error.message : String(error));
+      return false;
     } finally {
       setSaving(false);
     }
@@ -706,6 +774,9 @@ export function AccountPage() {
           accounts={accounts}
           editingAccount={editingAccount}
           currentPlatform={currentPlatform}
+          saving={saving}
+          onEnsureAccountSaved={saveAccountDraftForCredentials}
+          onSaveCredentialAccount={saveCredentialAccountSettings}
         />
       </Drawer>
 
@@ -744,11 +815,20 @@ function AccountForm({
   accounts,
   editingAccount,
   currentPlatform,
+  saving,
+  onEnsureAccountSaved,
+  onSaveCredentialAccount,
 }: {
   form: ReturnType<typeof Form.useForm<AccountFormValues>>[0];
   accounts: Account[];
   editingAccount: Account | null;
   currentPlatform: Platform;
+  saving: boolean;
+  onEnsureAccountSaved: () => Promise<Account | null>;
+  onSaveCredentialAccount: (
+    account: Account,
+    credentialRef: string,
+  ) => Promise<Account | null>;
 }) {
   const browserProvider =
     Form.useWatch("browserProvider", form) ?? "bitbrowser";
@@ -758,6 +838,31 @@ function AccountForm({
     useState<LoginCredentialStatus | null>(null);
   const [credentialLoading, setCredentialLoading] = useState(false);
   const [passwordSaving, setPasswordSaving] = useState(false);
+  const [bitbrowserUnavailable, setBitbrowserUnavailable] = useState(false);
+
+  useEffect(() => {
+    if (editingAccount || browserProvider !== "bitbrowser") {
+      setBitbrowserUnavailable(false);
+      return;
+    }
+
+    let active = true;
+    checkBitbrowserApi()
+      .then((status) => {
+        if (active) {
+          setBitbrowserUnavailable(!status.available);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setBitbrowserUnavailable(true);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [browserProvider, editingAccount]);
 
   const refreshCredentialStatus = async () => {
     if (!editingAccount) {
@@ -784,25 +889,35 @@ function AccountForm({
     void refreshCredentialStatus();
   }, [editingAccount?.id]);
 
-  const savePassword = async () => {
-    if (!editingAccount) {
-      message.warning("请先保存账号，再保存登录密码。");
-      return;
+  const ensureCredentialAccount = async () => {
+    if (editingAccount) {
+      return editingAccount;
     }
+    return onEnsureAccountSaved();
+  };
+
+  const savePassword = async () => {
     const password = form.getFieldValue("loginPassword");
     if (!password) {
       message.warning("请输入要保存的密码。");
       return;
     }
+    const account = await ensureCredentialAccount();
+    if (!account) {
+      return;
+    }
     setPasswordSaving(true);
     try {
       const result = await saveLoginPassword({
-        accountId: editingAccount.id,
+        accountId: account.id,
         password,
       });
       setCredentialStatus(result);
       form.setFieldValue("loginCredentialRef", result.credentialRef ?? "");
       form.setFieldValue("loginPassword", "");
+      if (form.getFieldValue("loginEnabled") && result.credentialRef) {
+        await onSaveCredentialAccount(account, result.credentialRef);
+      }
       message.success("登录密码已保存到本机安全凭据存储。");
     } catch (error) {
       message.error(error instanceof Error ? error.message : String(error));
@@ -812,12 +927,12 @@ function AccountForm({
   };
 
   const deletePassword = async () => {
-    if (!editingAccount) {
-      message.warning("请先保存账号，再删除登录密码。");
+    const account = await ensureCredentialAccount();
+    if (!account) {
       return;
     }
     Modal.confirm({
-      title: `删除 ${editingAccount.id} 的登录密码`,
+      title: `删除 ${account.id} 的登录密码`,
       content:
         "只会删除本机加密保存的登录凭据，不会改动 accounts.yaml 中的账号配置。",
       okText: "删除",
@@ -826,7 +941,7 @@ function AccountForm({
       onOk: async () => {
         setCredentialLoading(true);
         try {
-          const result = await deleteLoginPassword(editingAccount.id);
+          const result = await deleteLoginPassword(account.id);
           setCredentialStatus(result);
           message.success("登录密码已删除。");
         } catch (error) {
@@ -839,7 +954,23 @@ function AccountForm({
   };
 
   const checkLoginStatus = async () => {
-    const result = await refreshCredentialStatus();
+    const account = await ensureCredentialAccount();
+    if (!account) {
+      return;
+    }
+    setCredentialLoading(true);
+    let result: LoginCredentialStatus | null = null;
+    try {
+      result = await getLoginCredentialStatus(account.id);
+      setCredentialStatus(result);
+      if (result.credentialRef) {
+        form.setFieldValue("loginCredentialRef", result.credentialRef);
+      }
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setCredentialLoading(false);
+    }
     if (!result) {
       return;
     }
@@ -854,7 +985,11 @@ function AccountForm({
     }
   };
 
-  const testAutoLogin = () => {
+  const testAutoLogin = async () => {
+    const account = await ensureCredentialAccount();
+    if (!account) {
+      return;
+    }
     Modal.confirm({
       title: "测试自动登录",
       content:
@@ -937,6 +1072,13 @@ function AccountForm({
         name="browserProvider"
         label="浏览器提供方"
         rules={[{ required: true }]}
+        extra={
+          bitbrowserUnavailable ? (
+            <Typography.Link href={BITBROWSER_DOWNLOAD_URL} target="_blank">
+              下载 BitBrowser
+            </Typography.Link>
+          ) : null
+        }
       >
         <Select
           options={[
@@ -1099,7 +1241,7 @@ function AccountForm({
             placeholder={
               editingAccount
                 ? "仅在保存或更新密码时填写"
-                : "请先保存账号，再保存密码"
+                : "填写后点击保存密码，会先保存账号"
             }
           />
         </Form.Item>
@@ -1107,7 +1249,7 @@ function AccountForm({
           <Button
             onClick={() => void savePassword()}
             loading={passwordSaving}
-            disabled={!editingAccount}
+            disabled={saving || credentialLoading}
           >
             保存密码
           </Button>
@@ -1115,18 +1257,21 @@ function AccountForm({
             danger
             onClick={() => void deletePassword()}
             loading={credentialLoading}
-            disabled={!editingAccount}
+            disabled={saving || passwordSaving}
           >
             删除密码
           </Button>
           <Button
             onClick={() => void checkLoginStatus()}
             loading={credentialLoading}
-            disabled={!editingAccount}
+            disabled={saving || passwordSaving}
           >
             检查凭据
           </Button>
-          <Button onClick={testAutoLogin} disabled={!editingAccount}>
+          <Button
+            onClick={() => void testAutoLogin()}
+            disabled={saving || passwordSaving || credentialLoading}
+          >
             测试自动登录
           </Button>
         </Space>
@@ -1383,6 +1528,30 @@ function formToAccount(
     lastRunAt: existing?.lastRunAt,
     lastStatus: existing?.lastStatus ?? "unknown",
   };
+}
+
+function upsertAccount(
+  accounts: Account[],
+  nextAccount: Account,
+  existing: Account | null,
+) {
+  if (existing) {
+    let replaced = false;
+    const nextAccounts = accounts.map((account) => {
+      if (account.id !== existing.id) {
+        return account;
+      }
+      replaced = true;
+      return nextAccount;
+    });
+    return replaced ? nextAccounts : [...accounts, nextAccount];
+  }
+  if (accounts.some((account) => account.id === nextAccount.id)) {
+    return accounts.map((account) =>
+      account.id === nextAccount.id ? nextAccount : account,
+    );
+  }
+  return [...accounts, nextAccount];
 }
 
 function accountRunDisabledReason(account: Account) {

@@ -409,25 +409,47 @@ body {
 }
 
 .session-log-tabs {
-  flex: 1;
+  flex: 1 1 0;
   min-height: 0;
   width: 100%;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
-.session-log-tabs .ant-tabs-content-holder,
-.session-log-tabs .ant-tabs-content,
+.session-log-tabs .ant-tabs-nav {
+  flex: 0 0 auto;
+}
+
+.session-log-tabs .ant-tabs-content-holder {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.session-log-tabs .ant-tabs-content {
+  flex: 1 1 0;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  overflow: hidden;
+}
+
 .session-log-tabs .ant-tabs-tabpane {
   min-height: 0;
-  flex: 1;
+  height: 100%;
+  overflow: hidden;
 }
 
-.session-log-tabs .ant-tabs-tabpane {
-  height: 100%;
+.session-log-tabs .ant-tabs-tabpane-active {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
 }
 
 .session-log-list {
+  flex: 1 1 0;
   height: 100%;
   min-height: 0;
   padding-right: 8px;
