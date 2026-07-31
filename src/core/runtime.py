@@ -40,6 +40,12 @@ PROXY_URL_CREDENTIAL_RE = re.compile(
     re.IGNORECASE,
 )
 COLON_PROXY_CREDENTIAL_RE = re.compile(r"(?<!\S)([^:\s]+:\d{1,5}:[^:\s]+:)([^\s]+)")
+SENSITIVE_KEY_VALUE_RE = re.compile(
+    r"\b(password|passwd|proxy_password|proxy password|credential|credentials|token|cookie|session)\b"
+    r"(\s*[:=]\s*)"
+    r"([^;\s,}\]]+)",
+    re.IGNORECASE,
+)
 
 
 def configure_runtime(config_path=None):
@@ -224,6 +230,8 @@ def runtime_redactions():
             or "secret" in lowered
             or "token" in lowered
             or "credential" in lowered
+            or "cookie" in lowered
+            or ("session" in lowered and lowered != "sessionname")
         ):
             values.append(value)
     return values
@@ -236,6 +244,7 @@ def redact_runtime_text(value):
             text = text.replace(secret, "***")
     text = PROXY_URL_CREDENTIAL_RE.sub(r"\1***\3", text)
     text = COLON_PROXY_CREDENTIAL_RE.sub(r"\1***", text)
+    text = SENSITIVE_KEY_VALUE_RE.sub(r"\1\2***", text)
     return text
 
 

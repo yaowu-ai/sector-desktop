@@ -20,6 +20,8 @@ from core.runtime import (
 )
 from patchright_runtime import start_sync_playwright
 from platforms.base import PlatformRunner
+from platforms.registration.base import RegistrationStatus
+from platforms.registration.registry import adapter_for_platform
 from platforms.tiktok.auth import TikTokAuthAdapter
 from platforms.tiktok.fyp import build_fyp_plan, run_tiktok_fyp
 from platforms.tiktok.target import run_target_engagement
@@ -70,9 +72,11 @@ def requested_tiktok_task():
     aliases = {
         "warmup": "fyp",
         "target": "target_engagement",
+        "register": "tiktok_register",
+        "registration": "tiktok_register",
     }
     value = aliases.get(value, value)
-    if value in {"fyp", "target_engagement", "full"}:
+    if value in {"fyp", "target_engagement", "tiktok_register", "full"}:
         return value
     return "full"
 
@@ -209,6 +213,9 @@ def run_session(account, config, conn):
     account_id = account["id"]
     platform = account.get("platform", "tiktok")
     task_type = requested_tiktok_task()
+    if task_type == "tiktok_register":
+        return run_tiktok_registration(account, config, conn)
+
     plan = build_fyp_plan(account, config) if task_type in {"fyp", "full"} else None
     duration = plan["duration"] if plan else 0.0
 
@@ -316,6 +323,73 @@ def run_session(account, config, conn):
         else:
             session_log(f"{account_id} | CLOSE SKIP | AM_AUTO_CLOSE_PROFILE=0", platform)
 
+    return summary
+
+
+def run_tiktok_registration(account, config, conn):
+    account_id = account["id"]
+    platform = account.get("platform", "tiktok")
+    started = time.time()
+    summary = {
+        "account_id": account_id,
+        "platform": platform,
+        "task_type": "tiktok_register",
+        "status": "unknown",
+        "videos": 0,
+        "likes": 0,
+        "follows": 0,
+        "comments": 0,
+        "target_videos": 0,
+        "target_likes": 0,
+        "target_comments": 0,
+        "target_follows": 0,
+        "duration_target_min": 0.0,
+        "duration_actual_min": 0.0,
+        "error": None,
+        "registered_username": None,
+    }
+    adapter = adapter_for_platform(platform)
+    log_action(conn, platform, account_id, "register_auto_start", "start", "task_type=tiktok_register")
+    session_log(f"{account_id} | REGISTER AUTO START | task=tiktok_register", platform)
+    result = adapter.register(account, config, conn)
+    summary["duration_actual_min"] = round((time.time() - started) / 60, 1)
+    summary["registered_username"] = result.username
+    if result.status == RegistrationStatus.COMPLETE:
+        summary["status"] = "ok"
+        log_action(
+            conn,
+            platform,
+            account_id,
+            "register_auto_complete",
+            "ok",
+            result.summary(),
+        )
+    elif result.status == RegistrationStatus.MANUAL_REQUIRED:
+        summary["status"] = "skip"
+        summary["error"] = result.summary()
+        log_action(
+            conn,
+            platform,
+            account_id,
+            "register_auto_manual_required",
+            "skip",
+            result.summary(),
+        )
+    else:
+        summary["status"] = "error"
+        summary["error"] = result.summary()
+        log_action(
+            conn,
+            platform,
+            account_id,
+            "register_auto_failed",
+            "error",
+            result.summary(),
+        )
+    session_log(
+        f"{account_id} | REGISTER RESULT | {result.summary()}",
+        platform,
+    )
     return summary
 
 

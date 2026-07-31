@@ -1,6 +1,6 @@
 import { Alert, Button, Card, Descriptions, Drawer, Space, Typography, message } from 'antd'
 import { PauseCircle, Square, Terminal } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import {
   continueAuthIntervention,
@@ -27,6 +27,8 @@ export function ProcessOutputPanel({ title = '运行输出' }: ProcessOutputPane
   const [stderr, setStderr] = useState('')
   const [stopping, setStopping] = useState(false)
   const [outputOpen, setOutputOpen] = useState(false)
+  const observedRegistrationRunRef = useRef<string | null>(null)
+  const notifiedRegistrationRunRef = useRef<string | null>(null)
 
   const refresh = useCallback(async () => {
     const nextStatus = await getCurrentRunStatus()
@@ -63,6 +65,44 @@ export function ProcessOutputPanel({ title = '运行输出' }: ProcessOutputPane
     }, 1500)
     return () => window.clearInterval(id)
   }, [refresh])
+
+  useEffect(() => {
+    if (status?.taskType !== 'tiktok_register') {
+      return
+    }
+    const runKey = status.startedAt ?? status.endedAt ?? String(status.processId ?? 'unknown')
+    if (['starting', 'running', 'pause_pending', 'intervention_required'].includes(status.status)) {
+      observedRegistrationRunRef.current = runKey
+      return
+    }
+    if (
+      !['completed', 'failed', 'partial_failed', 'stopped'].includes(status.status) ||
+      observedRegistrationRunRef.current !== runKey ||
+      notifiedRegistrationRunRef.current === runKey
+    ) {
+      return
+    }
+
+    const outcome = parseRegistrationBatchOutcome(stdout)
+    if (status.status === 'completed' && !outcome) {
+      return
+    }
+
+    notifiedRegistrationRunRef.current = runKey
+    if (status.status === 'stopped') {
+      message.warning('注册任务已停止')
+      return
+    }
+    if (status.status === 'failed' || status.status === 'partial_failed') {
+      message.error(`注册失败：${status.error ?? '任务未完整完成'}`)
+      return
+    }
+    if (outcome?.failed) {
+      message.error(`注册失败：${outcome.ok}/${outcome.total} 完成，${outcome.failed} 个失败`)
+      return
+    }
+    message.success(`注册完成：${outcome?.ok ?? status.completedAccounts.length}/${outcome?.total ?? status.completedAccounts.length} 个账号`)
+  }, [status, stdout])
 
   const stopAfterCurrent = async () => {
     setStopping(true)
@@ -285,6 +325,20 @@ function latestNonEmptyLine(value: string) {
     .map((line) => line.trim())
     .filter(Boolean)
   return lines[lines.length - 1]
+}
+
+function parseRegistrationBatchOutcome(value: string) {
+  const match = value.match(
+    /BATCH END \| (?:\[ERR\] )?Account Matrix 注册: (\d+)\/(\d+) 完成(?:, (\d+) 失败)?/,
+  )
+  if (!match) {
+    return null
+  }
+  return {
+    ok: Number(match[1]),
+    total: Number(match[2]),
+    failed: Number(match[3] ?? 0),
+  }
 }
 
 function statusTone(status: ProcessStatus | null) {

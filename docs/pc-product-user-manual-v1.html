@@ -63,7 +63,7 @@ a:hover { text-decoration: underline; }
 <li class="toc-h3"><a href="#5.1-查看账号">5.1 查看账号</a></li>
 <li class="toc-h3"><a href="#5.2-新增账号">5.2 新增账号</a></li>
 <li class="toc-h3"><a href="#5.3-编辑账号">5.3 编辑账号</a></li>
-<li class="toc-h3"><a href="#5.4-执行单账号">5.4 执行单账号</a></li>
+<li class="toc-h3"><a href="#5.4-tiktok-google-注册">5.4 TikTok Google 注册</a></li>
 <li class="toc-h3"><a href="#5.5-查看账号日志">5.5 查看账号日志</a></li>
 <li class="toc-h2"><a href="#6.-浏览器环境">6. 浏览器环境</a></li>
 <li class="toc-h3"><a href="#6.1-bitbrowser-profile">6.1 BitBrowser Profile</a></li>
@@ -108,10 +108,11 @@ a:hover { text-decoration: underline; }
 <li class="toc-h2"><a href="#17.-日常操作流程">17. 日常操作流程</a></li>
 <li class="toc-h3"><a href="#17.1-当前多平台预留形态下的操作流程">17.1 当前多平台预留形态下的操作流程</a></li>
 <li class="toc-h4"><a href="#17.1.1-新增一批平台账号">17.1.1 新增一批平台账号</a></li>
-<li class="toc-h4"><a href="#17.1.2-手动执行-tiktok-养号">17.1.2 手动执行 TikTok 养号</a></li>
-<li class="toc-h4"><a href="#17.1.3-查看预留平台任务">17.1.3 查看预留平台任务</a></li>
-<li class="toc-h4"><a href="#17.1.4-启动-tiktok-自动调度">17.1.4 启动 TikTok 自动调度</a></li>
-<li class="toc-h4"><a href="#17.1.5-更新-tiktok-目标号互动">17.1.5 更新 TikTok 目标号互动</a></li>
+<li class="toc-h4"><a href="#17.1.2-注册-tiktok-google-账号">17.1.2 注册 TikTok Google 账号</a></li>
+<li class="toc-h4"><a href="#17.1.3-手动执行-tiktok-养号">17.1.3 手动执行 TikTok 养号</a></li>
+<li class="toc-h4"><a href="#17.1.4-查看预留平台任务">17.1.4 查看预留平台任务</a></li>
+<li class="toc-h4"><a href="#17.1.5-启动-tiktok-自动调度">17.1.5 启动 TikTok 自动调度</a></li>
+<li class="toc-h4"><a href="#17.1.6-更新-tiktok-目标号互动">17.1.6 更新 TikTok 目标号互动</a></li>
 <li class="toc-h3"><a href="#17.2-多个平台都接入真实执行后的操作流程">17.2 多个平台都接入真实执行后的操作流程</a></li>
 <li class="toc-h4"><a href="#17.2.1-确认平台能力">17.2.1 确认平台能力</a></li>
 <li class="toc-h4"><a href="#17.2.2-新增多平台账号">17.2.2 新增多平台账号</a></li>
@@ -130,12 +131,13 @@ a:hover { text-decoration: underline; }
 <li class="toc-h3"><a href="#18.8-运行时或诊断异常">18.8 运行时或诊断异常</a></li>
 <li class="toc-h3"><a href="#18.9-启动任务时弹出黑色控制台窗口">18.9 启动任务时弹出黑色控制台窗口</a></li>
 <li class="toc-h3"><a href="#18.10-点赞失败如何判断">18.10 点赞失败如何判断</a></li>
+<li class="toc-h3"><a href="#18.11-tiktok-注册没有完成">18.11 TikTok 注册没有完成</a></li>
 <li class="toc-h2"><a href="#19.-操作注意事项">19. 操作注意事项</a></li></ul></nav>
       <div class="content">
 <h1 id="account-matrix-pc-端产品使用手册-v1">Account Matrix PC 端产品使用手册 V1</h1>
-<p>版本：V1.4<br> 日期：2026-07-30<br> 适用对象：负责账号配置、浏览器环境维护、养号任务执行、调度巡检和数据查看的运营或技术人员。</p>
+<p>版本：V1.5<br> 日期：2026-07-31<br> 适用对象：负责账号配置、浏览器环境维护、TikTok 注册、养号任务执行、调度巡检和数据查看的运营或技术人员。</p>
 <h2 id="1.-产品概述">1. 产品概述</h2>
-<p>Account Matrix PC 端是一个运行在 Windows 云电脑上的多平台、多账号养号操作台。它通过桌面界面包装内置运行时和现有 Python 自动化脚本，集中管理平台能力、账号配置、浏览器提供方、FYP 养号任务、目标号互动、定时调度、评论素材、执行记录、Session 日志、统计报表、Gmail 初始化、登录保障和诊断工具。</p>
+<p>Account Matrix PC 端是一个运行在 Windows 云电脑上的多平台、多账号操作台。它通过桌面界面包装内置运行时和现有 Python 自动化脚本，集中管理平台能力、账号配置、浏览器提供方、TikTok Google 注册、FYP 养号任务、目标号互动、定时调度、评论素材、执行记录、Session 日志、统计报表、Gmail 初始化、登录保障和诊断工具。</p>
 <p>V1 的真实自动执行能力只支持 TikTok。Instagram、WhatsApp、抖音已在界面中预留账号、浏览器环境、任务、调度和统计入口，但自动执行按钮保持禁用，后端脚本也会过滤这些预留平台账号。</p>
 <p>当前 TikTok 浏览器环境支持两种 provider：</p>
 <ul>
@@ -143,6 +145,7 @@ a:hover { text-decoration: underline; }
 <li><code>builtin_chromium</code>：生产可选方案，内置的是 Account Matrix 的 Chromium 启动适配器，会用独立用户数据目录和临时 CDP 端口启动一个 Chromium 兼容浏览器。当前安装包没有随包携带完整 Chromium 浏览器本体，因此默认需要本机已安装 Chrome、Edge、Chromium，或在系统设置中手动指定可执行文件。它不等价替代 BitBrowser 的指纹环境能力，强指纹隔离场景仍优先使用 BitBrowser。</li>
 </ul>
 <p>TikTok 任务启动后会先做登录态检测。已登录时继续执行；未登录且账号开启自动登录、凭据完整时会尝试填写账号密码；遇到验证码、二次验证或安全检查时会进入人工接管状态，等待运营在浏览器里处理后继续检测或跳过当前账号。</p>
+<p>账号管理页新增 TikTok <code>注册</code> 入口，用于打开该账号的浏览器环境并进入 TikTok Google 注册流程。注册流程会打开 <code>https://www.tiktok.com/login</code>，点击 <code>Continue with Google</code>，读取账号管理中保存的 Google 登录邮箱和本机安全凭据中的密码，完成 Google 登录后继续处理 TikTok 生日和用户名页面。注册任务不会执行 FYP 浏览、点赞、关注、评论或目标号互动；注册成功并确认登录态后，登录状态保留在对应浏览器 profile 中。</p>
 <p>当前 PC 端采用顶部全局平台选择器作为多平台主入口。左侧菜单不按平台拆分，也不再显示独立的 <code>平台管理</code> 菜单；平台能力、默认配置和 API / 环境说明通过顶部 <code>更多平台</code> 按钮进入。页面按作用域分为三类：</p>
 <ul>
 <li>当前平台页面：账号管理、浏览器环境、养号任务、目标号互动、调度计划、评论素材、Gmail 初始化，会跟随顶部当前平台。</li>
@@ -158,6 +161,7 @@ a:hover { text-decoration: underline; }
 <li>会话日志：<code>data/sessions.log</code></li>
 <li>运行互斥锁：<code>data/run.lock</code></li>
 <li>内置 Chromium 账号数据：<code>data/browser/builtin_chromium/&lt;账号&gt;/user-data</code></li>
+<li>TikTok 注册用户名记录：<code>data/tiktok_registered_usernames.json</code></li>
 <li>自动登录人工接管标记：<code>data/auth_intervention/&lt;账号&gt;/</code></li>
 </ul>
 <h2 id="2.-使用前准备">2. 使用前准备</h2>
@@ -311,7 +315,7 @@ python src\runtime_cli.py run --platform tiktok</code></pre>
 <ul>
 <li><code>账号 ID</code>：建议按平台前缀命名，例如 <code>tiktok_106</code>、<code>instagram_106</code>、<code>whatsapp_106</code>、<code>douyin_106</code>。</li>
 <li><code>平台</code>：账号所属平台。当前页面会锁定为顶部当前平台，新增账号时自动写入该平台。</li>
-<li><code>启用</code>：打开后该账号会参与批量运行、运行所选和调度；关闭后仅保留配置，不自动执行。</li>
+<li><code>启用</code>：打开后该账号可被养号任务、目标号互动和调度使用；关闭后仅保留配置，不自动执行。</li>
 <li><code>IP 分组</code>：同一代理 IP 的账号填写相同编号，用于调度冲突检查。</li>
 <li><code>运行班次</code>：例如上午班 <code>[9, 12]</code>，晚上班 <code>[19, 23]</code>。</li>
 <li><code>浏览器提供方</code>：默认 <code>BitBrowser</code>。可改为 <code>内置 Chromium</code>，但需要确认它是生产可选方案，不等价替代 BitBrowser 指纹环境能力。</li>
@@ -332,7 +336,7 @@ python src\runtime_cli.py run --platform tiktok</code></pre>
 <li><code>删除密码</code> 只删除本机保存的凭据，不删除账号配置。</li>
 </ul>
 <h3 id="5.3-编辑账号">5.3 编辑账号</h3>
-<p>账号表格右侧操作列只显示图标。鼠标悬停在图标上会显示功能名称，例如 <code>编辑</code>、<code>运行</code>、<code>日志</code>、<code>删除</code>。点击编辑图标后，修改账号信息并保存。</p>
+<p>账号表格右侧操作列只显示图标。鼠标悬停在图标上会显示功能名称，例如 <code>编辑</code>、<code>注册</code>、<code>日志</code>、<code>删除</code>。点击编辑图标后，修改账号信息并保存。</p>
 <p>常见修改：</p>
 <ul>
 <li>临时停用账号：关闭 <code>启用</code>。</li>
@@ -343,9 +347,37 @@ python src\runtime_cli.py run --platform tiktok</code></pre>
 <li>清理内置 Chromium 数据：只删除该账号在 Account Matrix 内置 Chromium 下的 user data dir，不删除 BitBrowser profile。</li>
 <li>共享 IP 错峰：同一 <code>ip_group</code> 的两个账号设置不同时间段。</li>
 </ul>
-<h3 id="5.4-执行单账号">5.4 执行单账号</h3>
-<p>账号行点击 <code>运行</code> 可启动该账号任务。若平台不是当前可执行平台，按钮会禁用或提示未适配。V1 中只有 TikTok 可以运行。</p>
-<p>若本次运行包含内置 Chromium 账号，系统会二次确认这些账号不会使用 BitBrowser。确认后任务会按账号配置启动浏览器，打开临时 CDP 端口，并在任务结束时按 <code>任务结束自动关闭 profile</code> 设置关闭由应用启动的浏览器进程。</p>
+<h3 id="5.4-tiktok-google-注册">5.4 TikTok Google 注册</h3>
+<p>账号管理页不再提供单账号养号运行按钮，也不再提供 <code>运行所选</code> 批量按钮。FYP 养号请进入 <code>养号任务</code>，目标号互动请进入 <code>目标号互动</code>。</p>
+<p>TikTok 账号行会显示 <code>注册</code> 按钮。点击后系统会：</p>
+<ol>
+<li>校验账号平台为 TikTok，且浏览器 provider 配置可用。</li>
+<li>复用当前任务单例限制；如果已有任务运行、暂停等待或人工接管中，会拒绝启动第二个注册任务。</li>
+<li>打开该账号对应的 BitBrowser profile 或内置 Chromium user data dir。</li>
+<li>进入 <code>https://www.tiktok.com/login</code>，点击 <code>Continue with Google</code>。</li>
+<li>使用账号管理中保存的登录邮箱和本机安全凭据中的密码完成 Google 登录。密码通过环境变量传给 runtime，不会进入命令行参数、日志或 <code>accounts.yaml</code>。</li>
+<li>Google 登录完成后，自动处理 TikTok <code>When's your birthday?</code> 页面，随机选择合法生日，年份小于 2006。</li>
+<li>自动处理 TikTok <code>Create username</code> 页面，生成 15 位英文字母数字用户名。系统会先检查 <code>data/tiktok_registered_usernames.json</code>，避免重复使用本地已记录用户名；如 TikTok 提示用户名不可用，默认最多重试 5 次。</li>
+<li>注册成功并确认 TikTok 登录态后，等待浏览器 profile 写入 cookie/session，记录 <code>register_session_saved</code>，再关闭本次注册任务打开的浏览器环境。</li>
+</ol>
+<p>如果 Google 验证码、二次验证、安全检查或 TikTok 页面状态无法自动完成，任务会进入人工接管。此时保持浏览器打开，运营在真实浏览器窗口中处理后，再回到任务输出面板点击 <code>我已完成，继续检测</code>。点击 <code>跳过当前账号</code> 会结束该账号注册流程并保留当前状态。</p>
+<p>注册任务只用于创建和保存登录态，不会执行 FYP 浏览、点赞、关注、评论或目标号互动。注册成功后，后续从 <code>养号任务</code> 或 <code>目标号互动</code> 启动同一账号时，会复用对应浏览器 profile 中保留的 TikTok 登录态。</p>
+<p>注册过程中的主要动作日志包括：</p>
+<ul>
+<li><code>register_open</code></li>
+<li><code>register_open_login</code></li>
+<li><code>register_google_start</code></li>
+<li><code>register_google_email</code></li>
+<li><code>register_google_password</code></li>
+<li><code>register_birthday</code></li>
+<li><code>register_username</code></li>
+<li><code>register_session_saved</code></li>
+<li><code>register_browser_closed</code></li>
+<li><code>register_complete</code></li>
+<li><code>register_manual_required</code></li>
+<li><code>register_error</code></li>
+</ul>
+<p>稳定错误码会出现在 <code>register_error</code> 详情中，例如 <code>REGISTER_GOOGLE_POPUP_NOT_FOUND</code>、<code>REGISTER_TIKTOK_BIRTHDAY_FORM_NOT_FOUND</code>、<code>REGISTER_USERNAME_UNAVAILABLE</code>、<code>REGISTER_SESSION_SAVE_FAILED</code>、<code>REGISTER_BROWSER_CLOSE_FAILED</code>。</p>
 <h3 id="5.5-查看账号日志">5.5 查看账号日志</h3>
 <p>点击账号行的 <code>日志</code>，可查看该账号最近动作记录，包括时间、动作、状态和详情。</p>
 <h2 id="6.-浏览器环境">6. 浏览器环境</h2>
@@ -509,6 +541,8 @@ python src\runtime_cli.py run --platform tiktok</code></pre>
 <li>遇到验证码、二次验证、安全检查或无法稳定判断的页面时，进入人工接管或跳过当前账号。</li>
 </ol>
 <p>登录状态会写入执行记录中的 <code>login_check</code> 动作，也会写入 Session 日志；密码不会出现在 stdout、stderr、Session 日志或命令行参数中。</p>
+<p>TikTok 注册任务也使用同一个 <code>任务运行输出</code> 面板。启动后任务类型显示为 <code>tiktok_register</code>，stdout/stderr、浏览器预览、人工接管按钮和停止按钮复用现有运行输出能力。注册任务的输出重点关注 <code>register_*</code> 动作，不会产生 <code>fyp_browse</code>、<code>like</code>、<code>follow</code>、<code>comment</code> 或目标号互动记录。</p>
+<p>如果注册任务进入人工接管，先在已打开的浏览器里处理 Google 验证、TikTok 安全检查或页面异常，再点击 <code>我已完成，继续检测</code>。如果不准备继续该账号注册，点击 <code>跳过当前账号</code>。人工接管期间不要手动关闭该账号浏览器，否则 runtime 无法继续保存 session。</p>
 <p>点赞动作会验证点击后按钮状态是否变为已点赞。若点赞尝试没有成功，执行记录中的 <code>like fail</code> 会按原因拆分显示：</p>
 <ul>
 <li><code>reason=button_not_found count=N</code>：未找到当前视频的点赞按钮，可能是页面结构变化、页面未聚焦或视频区域定位失败。</li>
@@ -788,10 +822,25 @@ python src\runtime_cli.py run --platform tiktok</code></pre>
 <li>进入 <code>账号管理</code>，按平台筛选检查账号启用状态、浏览器环境、profile_id、IP 分组和班次。</li>
 <li>如需使用内置 Chromium，只对明确验证过的 TikTok 账号把 <code>浏览器提供方</code> 改为 <code>内置 Chromium</code>，并配置代理或自定义用户数据目录。</li>
 <li>如需自动登录，先保存账号，再保存登录密码，并确认凭据状态正常。</li>
-<li>对 TikTok 账号，先选择 1 个账号执行单账号任务，确认日志、浏览器预览和登录检测正常，再小批量运行。</li>
+<li>对新 TikTok 账号，先在账号管理中点击 <code>注册</code> 完成 TikTok Google 注册并保存登录态。</li>
+<li>注册成功后，进入 <code>养号任务</code> 先选择 1 个账号执行单账号 FYP，确认日志、浏览器预览和登录检测正常，再小批量运行。</li>
 <li>对 Instagram、WhatsApp、抖音账号，只维护配置、profile 和备注，不启动生产任务。</li>
 </ol>
-<h4 id="17.1.2-手动执行-tiktok-养号">17.1.2 手动执行 TikTok 养号</h4>
+<h4 id="17.1.2-注册-tiktok-google-账号">17.1.2 注册 TikTok Google 账号</h4>
+<ol>
+<li>确认顶部当前任务为空闲。若账号使用 BitBrowser，顶部需显示 <code>BitBrowser API 在线</code>。</li>
+<li>进入 <code>账号管理</code>，确认顶部当前平台为 TikTok。</li>
+<li>检查该账号的浏览器环境。BitBrowser 账号需要绑定正确的 <code>profile_id</code>；内置 Chromium 账号需要可用 Chromium 可执行文件和独立 user data dir。</li>
+<li>检查该账号的 <code>登录邮箱/用户名</code> 和本机保存密码状态。注册流程会用这些凭据登录 Google。</li>
+<li>点击账号行的 <code>注册</code>。</li>
+<li>观察 <code>任务运行输出</code> 和 <code>浏览器预览</code>。正常流程会依次打开 TikTok 登录页、点击 <code>Continue with Google</code>、填写 Google 邮箱和密码、回到 TikTok 注册页。</li>
+<li>如出现 Google 验证码、二次验证、安全检查或 TikTok 页面异常，保持浏览器打开，在浏览器里完成处理后点击 <code>我已完成，继续检测</code>。</li>
+<li>注册流程会自动选择生日、生成用户名并提交。用户名记录保存在 <code>data/tiktok_registered_usernames.json</code>，避免本地重复。</li>
+<li>注册完成后，系统会确认 TikTok 已登录，等待 profile 写入 cookie/session，记录 <code>register_session_saved</code>，再关闭本次注册任务打开的浏览器环境。</li>
+<li>完成后进入 <code>执行记录</code> 或账号行 <code>日志</code>，查看 <code>register_complete</code>、<code>register_username</code>、<code>register_session_saved</code> 等动作是否为 <code>ok</code>。</li>
+</ol>
+<p>注册任务不会做养号动作。不要把注册入口当作 FYP 或目标号互动入口；注册完成后的账号再从 <code>养号任务</code> 或 <code>目标号互动</code> 页面启动后续任务。</p>
+<h4 id="17.1.3-手动执行-tiktok-养号">17.1.3 手动执行 TikTok 养号</h4>
 <ol>
 <li>确认当前任务为空闲。若执行账号包含 BitBrowser provider，顶部需显示 <code>BitBrowser API 在线</code>。</li>
 <li>进入 <code>养号任务</code>，检查 FYP 参数。</li>
@@ -802,14 +851,14 @@ python src\runtime_cli.py run --platform tiktok</code></pre>
 <li>需要查看完整批次日志时进入 <code>Session 日志</code>。</li>
 <li>完成后进入 <code>执行记录</code> 或 <code>统计报表</code> 查看结果。</li>
 </ol>
-<h4 id="17.1.3-查看预留平台任务">17.1.3 查看预留平台任务</h4>
+<h4 id="17.1.4-查看预留平台任务">17.1.4 查看预留平台任务</h4>
 <ol>
 <li>点击顶部 <code>更多平台</code>，进入平台设置页查看 TikTok、Instagram、WhatsApp、抖音的能力矩阵。</li>
 <li>进入 <code>养号任务</code>，查看 <code>预留平台任务</code> 表。</li>
 <li>对 Instagram、WhatsApp、抖音，只确认任务入口已预留；不要把这些任务当作可执行任务。</li>
 <li>若预留平台账号已启用，<code>运行全部可执行账号</code> 和 scheduler 仍只会运行 TikTok，不会执行预留平台。</li>
 </ol>
-<h4 id="17.1.4-启动-tiktok-自动调度">17.1.4 启动 TikTok 自动调度</h4>
+<h4 id="17.1.5-启动-tiktok-自动调度">17.1.5 启动 TikTok 自动调度</h4>
 <ol>
 <li>进入 <code>调度计划</code>。</li>
 <li>检查 <code>run.lock</code> 和同 IP 班次冲突；如果 TikTok 队列中有 BitBrowser 账号，也要检查 <code>BitBrowser API</code>。</li>
@@ -819,7 +868,7 @@ python src\runtime_cli.py run --platform tiktok</code></pre>
 <li>点击 <code>启动调度</code>。</li>
 <li>查看 <code>当前 Jobs</code> 和下一次执行时间。V1 中 Jobs 只会包含 TikTok 账号。</li>
 </ol>
-<h4 id="17.1.5-更新-tiktok-目标号互动">17.1.5 更新 TikTok 目标号互动</h4>
+<h4 id="17.1.6-更新-tiktok-目标号互动">17.1.6 更新 TikTok 目标号互动</h4>
 <ol>
 <li>进入 <code>评论素材</code>，维护品牌评论池。</li>
 <li>进入 <code>目标号互动</code>，填写 TikTok 目标号 handles 和参与账号。</li>
@@ -972,16 +1021,31 @@ python src\runtime_cli.py run --platform tiktok</code></pre>
 <li><code>click_failed</code>：优先检查云电脑分辨率、缩放比例、浏览器窗口是否可见，以及页面是否正在切换。</li>
 </ul>
 <p>如果 <code>fyp_browse ok</code> 且 <code>close ok</code>，但只有少量 <code>like fail</code>，一般不需要重跑整批任务。若连续多次全部为 <code>button_not_found</code> 或 <code>state_unchanged</code>，再使用诊断工具运行点赞诊断并查看浏览器画面。</p>
+<h3 id="18.11-tiktok-注册没有完成">18.11 TikTok 注册没有完成</h3>
+<p>先看账号行日志或 <code>执行记录</code> 中的 <code>register_error</code> 详情：</p>
+<ul>
+<li><code>REGISTER_GOOGLE_POPUP_NOT_FOUND</code>：TikTok 登录页没有稳定打开 Google 弹窗。检查页面是否加载完成、是否被弹窗策略拦截、是否已经停在其他登录方式页面。</li>
+<li><code>REGISTER_GOOGLE_EMAIL_FIELD_NOT_FOUND</code> 或 <code>REGISTER_GOOGLE_PASSWORD_FIELD_NOT_FOUND</code>：Google 登录页结构异常、网络慢或账号被安全检查拦截。建议查看浏览器画面，必要时人工接管。</li>
+<li><code>REGISTER_GOOGLE_FLOW_BLOCKED</code>：Google <code>Next</code>、密码页或回跳流程被阻塞。常见于二次验证、安全检查、页面加载慢。</li>
+<li><code>REGISTER_TIKTOK_BIRTHDAY_FORM_NOT_FOUND</code>：TikTok 生日页选择器定位失败或页面结构变化。先人工确认页面是否仍是生日页。</li>
+<li><code>REGISTER_USERNAME_UNAVAILABLE</code>：连续 5 次随机用户名都被 TikTok 判定不可用。可重新启动注册任务，系统会重新生成用户名。</li>
+<li><code>REGISTER_SESSION_SAVE_FAILED</code>：注册后无法确认或等待浏览器 profile 写入 session。检查浏览器是否被手动关闭、user data dir 是否可写。</li>
+<li><code>REGISTER_BROWSER_CLOSE_FAILED</code>：注册成功但关闭浏览器失败。注册成功状态不会因此丢失；确认没有其他用户窗口被误关，再手动关闭对应 profile 或稍后重试。</li>
+</ul>
+<p>如果任务进入 <code>register_manual_required</code>，不要关闭浏览器。先在浏览器里完成验证码、二次验证、安全检查或页面确认，再回到 PC 端点击 <code>我已完成，继续检测</code>。如果该账号暂不注册，点击 <code>跳过当前账号</code>。</p>
 <h2 id="19.-操作注意事项">19. 操作注意事项</h2>
 <ul>
 <li>同一个 BitBrowser profile 同一时间只能在一台机器打开。</li>
 <li>批量任务运行时不要手动关闭正在执行的 profile。</li>
+<li>TikTok 注册人工接管期间不要手动关闭正在注册的 profile，否则可能无法保存 session。</li>
 <li>内置 Chromium 账号运行时不要手动删除其 user data dir 或 runtime 记录。</li>
 <li>不确认任务已停止时，不要清理 <code>run.lock</code>。</li>
 <li>修改调度配置后，建议停止并重新启动调度服务。</li>
 <li>目标号互动建议先小范围验证，再扩大参与账号。</li>
 <li>评论素材尽量避免大量重复、过短或明显模板化。</li>
 <li>自动登录密码只通过本机安全凭据存储维护，不要写入 <code>accounts.yaml</code>、备注或评论素材文件。</li>
+<li>TikTok 注册不会把 cookie/session 明文写入 <code>accounts.yaml</code>、日志、配置备份或普通 JSON；如后续需要导出 storage state，必须先加密后再保存到 data 目录。</li>
+<li>TikTok 注册入口只负责注册和保存登录态；FYP 养号、点赞、关注、评论和目标号互动必须从对应任务页面启动。</li>
 <li>V1 仅 TikTok 支持真实自动执行，其他平台不要作为生产任务入口。</li>
 </ul>
       </div>

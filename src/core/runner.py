@@ -85,6 +85,35 @@ def build_batch_message(summaries):
     skip = sum(1 for item in summaries if item["status"] == "skip")
     total_videos = sum(item["videos"] for item in summaries)
     total = len(summaries)
+    registration_task = bool(summaries) and all(
+        item.get("task_type") == "tiktok_register" for item in summaries
+    )
+
+    if registration_task:
+        title = f"Account Matrix 注册: {ok}/{total} 完成"
+        incomplete = err + skip
+        if incomplete:
+            title = f"[ERR] Account Matrix 注册: {ok}/{total} 完成, {incomplete} 失败"
+
+        lines = [
+            f"OK={ok}  ERR={err}  SKIP={skip}",
+            "",
+            "Per-account:",
+        ]
+        for item in summaries:
+            platform = item.get("platform", "tiktok")
+            prefix = f"  - {item['account_id']} ({platform})"
+            username = item.get("registered_username")
+            username_detail = f", username={username}" if username else ""
+            if item["status"] == "ok":
+                lines.append(
+                    f"{prefix}: REGISTERED ({item['duration_actual_min']}min{username_detail})"
+                )
+            elif item["status"] == "error":
+                lines.append(f"{prefix}: ERROR - {item['error']}")
+            else:
+                lines.append(f"{prefix}: {item['status'].upper()} - {item.get('error') or ''}")
+        return title, "\n".join(lines)
 
     title = f"Account Matrix bot: {ok}/{total} OK"
     if err:

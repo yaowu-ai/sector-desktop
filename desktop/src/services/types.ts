@@ -526,7 +526,7 @@ export interface HomeSummary {
 
 export interface TaskRun {
   id: string
-  taskType: 'fyp' | 'target_engagement' | 'scheduler' | 'gmail' | 'diagnostic'
+  taskType: 'fyp' | 'target_engagement' | 'tiktok_register' | 'scheduler' | 'gmail' | 'diagnostic'
   status: RunStatus
   accountIds: string[]
   startedAt?: string

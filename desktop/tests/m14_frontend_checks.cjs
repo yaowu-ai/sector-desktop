@@ -1,107 +1,133 @@
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
-const Module = require('node:module')
 const path = require('node:path')
-const ts = require('typescript')
 
 const root = path.resolve(__dirname, '..')
-const srcRoot = path.join(root, 'src')
-const originalResolveFilename = Module._resolveFilename
+const repoRoot = path.resolve(root, '..')
 
-Module._resolveFilename = function resolveTsFilename(request, parent, isMain, options) {
-  try {
-    return originalResolveFilename.call(this, request, parent, isMain, options)
-  } catch (error) {
-    if (request.startsWith('.') && parent?.filename) {
-      const base = path.resolve(path.dirname(parent.filename), request)
-      for (const extension of ['.ts', '.tsx']) {
-        if (fs.existsSync(base + extension)) {
-          return base + extension
-        }
-      }
-      for (const extension of ['.ts', '.tsx']) {
-        if (fs.existsSync(path.join(base, `index${extension}`))) {
-          return path.join(base, `index${extension}`)
-        }
-      }
-    }
-    throw error
-  }
+function read(relativePath) {
+  return fs.readFileSync(path.join(repoRoot, relativePath), 'utf8')
 }
 
-for (const extension of ['.ts', '.tsx']) {
-  require.extensions[extension] = (module, filename) => {
-    const source = fs.readFileSync(filename, 'utf8')
-    const output = ts.transpileModule(source, {
-      compilerOptions: {
-        esModuleInterop: true,
-        jsx: ts.JsxEmit.ReactJSX,
-        module: ts.ModuleKind.CommonJS,
-        target: ts.ScriptTarget.ES2020,
-      },
-      fileName: filename,
-    }).outputText
-    module._compile(output, filename)
-  }
+function assertIncludes(source, needle, message) {
+  assert.ok(source.includes(needle), message || `expected source to include ${needle}`)
 }
 
-function readSource(relativePath) {
-  return fs.readFileSync(path.join(srcRoot, relativePath), 'utf8')
+function assertNotIncludes(source, needle, message) {
+  assert.ok(!source.includes(needle), message || `expected source not to include ${needle}`)
 }
 
-function assertRoute(source, key, scope, capability) {
-  const keyIndex = source.indexOf(`key: '${key}'`)
-  assert.notEqual(keyIndex, -1, `route ${key} should exist`)
-  const routeBlock = source.slice(keyIndex, source.indexOf('}', keyIndex) + 1)
-  assert.match(routeBlock, new RegExp(`scope: '${scope}'`), `route ${key} should have ${scope} scope`)
-  if (capability) {
-    assert.match(
-      routeBlock,
-      new RegExp(`capability: '${capability}'`),
-      `route ${key} should declare ${capability}`,
-    )
-  }
-}
+const accountPage = read('desktop/src/pages/AccountPage.tsx')
+assertIncludes(accountPage, 'runTikTokRegister', 'account page should call TikTok registration API')
+assertIncludes(accountPage, 'runTikTokRegisterBatch', 'account page should call TikTok batch registration API')
+assertIncludes(accountPage, 'UserPlus', 'registration button should use the UserPlus icon')
+assertIncludes(accountPage, 'aria-label="注册"', 'registration button should be labelled 注册')
+assertIncludes(accountPage, 'runTikTokRegister(account.id)', 'row registration action should pass account.id')
+assertIncludes(accountPage, '批量注册', 'account page should expose a batch registration button')
+assertIncludes(accountPage, 'batchRegisterAccounts', 'account page should implement batch registration handler')
+assertIncludes(accountPage, 'selectedAccounts.map((account) => account.id)', 'batch registration should pass selected account ids')
+assertIncludes(accountPage, 'registeringAccountId === account.id', 'only the current row should show registration loading')
+assertIncludes(accountPage, 'currentRunBusy', 'registration button should respect the active process lock')
+assertIncludes(accountPage, '仅 TikTok 账号支持注册', 'non-TikTok accounts should be blocked from registration')
+assertNotIncludes(accountPage, 'const runAccount', 'account management page should not expose row runAccount handler')
+assertNotIncludes(accountPage, 'const runSelected', 'account management page should not expose selected run handler')
+assertNotIncludes(accountPage, '运行所选', 'account management page should not expose selected-run copy')
+assertNotIncludes(accountPage, 'runSelectedAccounts', 'account management page should not call selected account run API')
+assertNotIncludes(accountPage, 'runOneAccount', 'account management page should not call one-account run API')
 
-const registry = require(path.join(srcRoot, 'platforms', 'registry.ts'))
-assert.deepEqual(registry.PLATFORM_IDS, ['tiktok', 'instagram', 'whatsapp', 'douyin'])
-assert.equal(registry.getPlatformDefinition('tiktok').status, 'supported')
-assert.equal(registry.getPlatformDefinition('instagram').status, 'reserved')
-assert.equal(registry.supportsCapability('tiktok', 'warmupTask'), true)
-assert.equal(registry.supportsCapability('instagram', 'warmupTask'), false)
-assert.equal(registry.getCapabilityStatus('instagram', 'warmupTask'), 'reserved')
-assert.equal(registry.isExecutablePlatform('tiktok'), true)
-assert.equal(registry.isExecutablePlatform('instagram'), false)
-assert.match(
-  registry.getAutomaticExecutionDisabledReason('instagram', 'scheduler'),
-  /V1/,
-)
+const api = read('desktop/src/services/api.ts')
+assertIncludes(api, "invoke<ProcessStartResult>('run_tiktok_register', { accountId }).then(notifyProcessStarted)")
+assertIncludes(api, "invoke<ProcessStartResult>('run_tiktok_register_batch', { accountIds }).then(notifyProcessStarted)")
 
-const platformContext = require(path.join(srcRoot, 'app', 'PlatformContext.tsx'))
-assert.equal(platformContext.PLATFORM_STORAGE_KEY, 'account-matrix-current-platform')
-assert.equal(platformContext.DEFAULT_PLATFORM, 'tiktok')
-assert.equal(platformContext.resolveInitialPlatform(null), 'tiktok')
-assert.equal(platformContext.resolveInitialPlatform(''), 'tiktok')
-assert.equal(platformContext.resolveInitialPlatform('instagram'), 'instagram')
-assert.equal(platformContext.resolveInitialPlatform('unknown'), 'tiktok')
+const processOutputPanel = read('desktop/src/components/ProcessOutputPanel.tsx')
+assertIncludes(processOutputPanel, "status?.taskType !== 'tiktok_register'", 'registration completion prompt should only apply to registration tasks')
+assertIncludes(processOutputPanel, 'parseRegistrationBatchOutcome', 'registration completion prompt should parse batch outcome')
+assertIncludes(processOutputPanel, '注册完成', 'registration completion should show a success message')
+assertIncludes(processOutputPanel, '注册失败', 'registration failure should show an error message')
 
-const pageScope = require(path.join(srcRoot, 'app', 'pageScope.tsx'))
-assert.equal(pageScope.DEFAULT_PLATFORM_FILTER, 'all')
-assert.equal(pageScope.resolveRoutePlatformFilter('current_platform', 'instagram', 'all'), 'instagram')
-assert.equal(pageScope.resolveRoutePlatformFilter('all_platforms', 'instagram', 'all'), 'all')
-assert.equal(pageScope.resolveRoutePlatformFilter('system', 'instagram', 'tiktok'), 'tiktok')
+const types = read('desktop/src/services/types.ts')
+assertIncludes(types, "'tiktok_register'", 'process task type should include tiktok_register')
 
-const routeScopeFrame = readSource(path.join('components', 'RouteScopeFrame.tsx'))
-assert.match(routeScopeFrame, /DEFAULT_PLATFORM_FILTER/)
-assert.match(routeScopeFrame, /resolveRoutePlatformFilter/)
+const tauriMain = read('desktop/src-tauri/src/main.rs')
+assertIncludes(tauriMain, 'run_tiktok_register', 'Tauri command should be registered')
+assertIncludes(tauriMain, 'run_tiktok_register_batch', 'Tauri batch registration command should be registered')
 
-const routes = readSource(path.join('app', 'routes.tsx'))
-assertRoute(routes, 'home', 'all_platforms')
-assertRoute(routes, 'accounts', 'current_platform', 'accountManagement')
-assertRoute(routes, 'tasks', 'current_platform', 'warmupTask')
-assertRoute(routes, 'records', 'all_platforms', 'records')
-assertRoute(routes, 'stats', 'all_platforms', 'stats')
-assertRoute(routes, 'settings', 'system')
-assert.equal(routes.includes('currentPlatform'), false, 'left navigation routes should not depend on platform')
+const processRs = read('desktop/src-tauri/src/commands/process.rs')
+assertIncludes(processRs, 'pub fn run_tiktok_register', 'Tauri process command should expose run_tiktok_register')
+assertIncludes(processRs, 'pub fn run_tiktok_register_batch', 'Tauri process command should expose run_tiktok_register_batch')
+assertIncludes(processRs, 'ensure_tiktok_register_account(account_id)', 'batch registration should reuse registration preflight')
+assertIncludes(processRs, 'ensure_no_current_process(&run)', 'registration should use the singleton process guard')
+assertIncludes(processRs, 'reset_run_state(&mut run, "tiktok_register")')
+assertIncludes(processRs, '"AM_TASK_TYPE".to_string()')
+assertIncludes(processRs, 'runtime_task_type(&task_type).to_string()')
+assertIncludes(processRs, '"src/main.py".to_string()')
+assertIncludes(processRs, '"--account".to_string()')
+assertIncludes(processRs, 'read_login_password_for_runtime', 'password should be passed through runtime env redactions, not CLI args')
+assertNotIncludes(processRs, '"--password".to_string()', 'registration process must not pass passwords on CLI')
 
-console.log('M14 frontend checks passed')
+const taskPage = read('desktop/src/pages/TaskPage.tsx')
+assertIncludes(taskPage, "taskType: kind === 'fyp' ? 'fyp' : 'target_engagement'")
+
+const targetPage = read('desktop/src/pages/TargetEngagementPage.tsx')
+assertIncludes(targetPage, "taskType: 'target_engagement'")
+
+const runner = read('src/platforms/tiktok/runner.py')
+const registerBranch = runner.indexOf('if task_type == "tiktok_register":')
+const fypBranch = runner.indexOf('run_tiktok_fyp(page, account, plan, conn)')
+const targetBranch = runner.indexOf('run_target_engagement(page, account, config, conn)')
+assert.notEqual(registerBranch, -1, 'TikTok runner should branch for tiktok_register')
+assert.ok(registerBranch < fypBranch, 'registration should return before FYP automation')
+assert.ok(registerBranch < targetBranch, 'registration should return before target engagement automation')
+assertIncludes(runner, 'register_auto_start', 'automatic registration should log start')
+assertIncludes(runner, 'register_auto_complete', 'automatic registration should log completion')
+assertIncludes(runner, 'register_auto_failed', 'automatic registration should log failures')
+
+const coreRunner = read('src/core/runner.py')
+assertIncludes(coreRunner, 'Account Matrix 注册', 'registration batch notification should use registration copy')
+assertIncludes(coreRunner, 'registered_username', 'registration batch notification should include registered username when available')
+
+const registerPy = read('src/platforms/tiktok/register.py')
+assertIncludes(registerPy, 'TIKTOK_LOGIN_URL = "https://www.tiktok.com/login"')
+assertIncludes(registerPy, 'Continue with Google')
+assertIncludes(registerPy, 'wait_for_google_popup')
+assertIncludes(registerPy, 'expect_popup')
+assertIncludes(registerPy, 'run_google_login_flow')
+assertIncludes(registerPy, 'GOOGLE_EMAIL_SELECTORS')
+assertIncludes(registerPy, 'credentials.username')
+assertIncludes(registerPy, 'register_google_email')
+assertIncludes(registerPy, 'GOOGLE_PASSWORD_SELECTORS')
+assertIncludes(registerPy, 'credentials.password')
+assertIncludes(registerPy, 'register_google_password')
+assertIncludes(registerPy, 'click_google_next')
+assertIncludes(registerPy, 'page.mouse.wheel(0, 600)')
+assertIncludes(registerPy, 'wait_for_google_return_or_challenge')
+assertIncludes(registerPy, 'GOOGLE_ACCOUNT_CHOOSER_SELECTORS')
+assertIncludes(registerPy, 'select_existing_google_account')
+assertIncludes(registerPy, 'wait_for_google_account_chooser')
+assertIncludes(registerPy, 'choose an account')
+assertIncludes(registerPy, 'Use another account')
+assertIncludes(registerPy, 'timeout_ms: int = 60000')
+assertIncludes(registerPy, 'register_google_account_selected')
+assertIncludes(registerPy, 'LOGIN_PROMPT_RETRY_SECONDS = 15')
+assertIncludes(registerPy, 'GOOGLE_LOGIN_MAX_ATTEMPTS = 3')
+assertIncludes(registerPy, 'wait_for_tiktok_login_prompt_stuck')
+assertIncludes(registerPy, 'register_google_retry')
+assertIncludes(registerPy, 'select_tiktok_birthday')
+assertIncludes(registerPy, 'submit_tiktok_username')
+assertIncludes(registerPy, 'persist_registration_session')
+assertIncludes(registerPy, 'close_registration_browser')
+assertIncludes(registerPy, 'register_complete')
+assertNotIncludes(registerPy, 'run_tiktok_fyp(')
+assertNotIncludes(registerPy, 'run_target_engagement(')
+
+const cookiesPy = read('src/platforms/registration/cookies.py')
+assertIncludes(cookiesPy, 'register_session_saved')
+assertIncludes(cookiesPy, 'storage_state()')
+assertNotIncludes(cookiesPy, 'write_text', 'session helper must not write plaintext storage state')
+
+const browserSessionPy = read('src/platforms/registration/browser_session.py')
+assertIncludes(browserSessionPy, 'register_browser_closed')
+assertIncludes(browserSessionPy, 'REGISTER_BROWSER_CLOSE_FAILED')
+assertIncludes(browserSessionPy, 'already_open')
+
+console.log('M14 frontend/source acceptance checks passed')

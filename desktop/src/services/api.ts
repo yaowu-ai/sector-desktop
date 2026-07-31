@@ -343,6 +343,14 @@ export function runPlatformTask(request: PlatformTaskRequest) {
   return invoke<ProcessStartResult>('run_platform_task', { request }).then(notifyProcessStarted)
 }
 
+export function runTikTokRegister(accountId: string) {
+  return invoke<ProcessStartResult>('run_tiktok_register', { accountId }).then(notifyProcessStarted)
+}
+
+export function runTikTokRegisterBatch(accountIds: string[]) {
+  return invoke<ProcessStartResult>('run_tiktok_register_batch', { accountIds }).then(notifyProcessStarted)
+}
+
 export function startScheduler() {
   return invoke<SchedulerStartResult>('start_scheduler')
 }

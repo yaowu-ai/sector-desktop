@@ -35,10 +35,25 @@ LOGIN_PAGE_SELECTORS = [
 LOGGED_OUT_SELECTORS = [
     '[data-e2e="top-login-button"]',
     'button:has-text("Log in")',
+    '[role="button"]:has-text("Log in")',
     'button:has-text("登录")',
     'text=/Log in to TikTok/i',
     'text=/Sign up for TikTok/i',
     'text=/登录 TikTok/i',
+]
+
+GOOGLE_ONE_TAP_SELECTORS = [
+    'button:has-text("Continue as")',
+    '[role="button"]:has-text("Continue as")',
+    'text=/Continue as .+/i',
+]
+
+SESSION_BLOCKING_SELECTORS = [
+    *LOGGED_OUT_SELECTORS,
+    *GOOGLE_ONE_TAP_SELECTORS,
+    'text=/Sign in to tiktok\\.com with google\\.com/i',
+    'text=/What would you like to watch on TikTok/i',
+    'button:has-text("Continue (0/3)")',
 ]
 
 CAPTCHA_PATTERNS = [
@@ -107,6 +122,17 @@ class TikTokAuthAdapter:
             return result
         if result.state in {LoginState.MFA, LoginState.CAPTCHA, LoginState.SECURITY_CHECK}:
             return result
+        if click_tiktok_google_one_tap(page):
+            try:
+                page.wait_for_load_state("domcontentloaded", timeout=15000)
+            except Exception:
+                pass
+            time.sleep(15)
+            result = classify_tiktok_page(page, account_id=account_id)
+            if result.state == LoginState.LOGGED_IN:
+                return result
+            if result.state in {LoginState.MFA, LoginState.CAPTCHA, LoginState.SECURITY_CHECK}:
+                return result
         if not auto_login_enabled(account):
             return result
         username = login_username(account)
@@ -293,6 +319,16 @@ def classify_tiktok_page(page: Any, account_id: str | None = None) -> AuthResult
             intervention_reason="login_required",
         )
 
+    blocking_details = _session_blocking_details(page, lowered)
+    if blocking_details:
+        return _result(
+            state=LoginState.LOGGED_OUT,
+            detail=f"TikTok session is not complete: {', '.join(blocking_details)}",
+            account_id=account_id,
+            url=url,
+            intervention_reason="login_required",
+        )
+
     logged_in_hits = _visible_total(page, LOGGED_IN_SELECTORS)
     if logged_in_hits:
         return _result(
@@ -333,8 +369,44 @@ def _classify_challenge(lowered_text: str) -> LoginState | None:
     return None
 
 
+def click_tiktok_google_one_tap(page: Any, timeout: int = 1000) -> bool:
+    button = first_visible_locator(page, GOOGLE_ONE_TAP_SELECTORS, timeout=timeout)
+    if button is None:
+        return False
+    try:
+        button.click(timeout=5000)
+        return True
+    except Exception:
+        return False
+
+
+def _session_blocking_details(page: Any, lowered_text: str) -> list[str]:
+    details: list[str] = []
+    if _visible_total(page, LOGGED_OUT_SELECTORS) > 0 or _looks_logged_out(lowered_text):
+        details.append("login prompt visible")
+    if _visible_total(page, GOOGLE_ONE_TAP_SELECTORS) > 0 or (
+        "sign in to tiktok.com with google.com" in lowered_text
+        and "continue as" in lowered_text
+    ):
+        details.append("Google one-tap confirmation visible")
+    if _looks_interest_onboarding(lowered_text):
+        details.append("TikTok onboarding prompt visible")
+    return details
+
+
 def _looks_logged_out(lowered_text: str) -> bool:
-    return "log in to tiktok" in lowered_text or "sign up for tiktok" in lowered_text
+    return (
+        "log in to tiktok" in lowered_text
+        or "sign up for tiktok" in lowered_text
+        or "continue with google" in lowered_text
+    )
+
+
+def _looks_interest_onboarding(lowered_text: str) -> bool:
+    return (
+        "what would you like to watch on tiktok" in lowered_text
+        or "continue (0/3)" in lowered_text
+    )
 
 
 def _is_login_url(url: str) -> bool:

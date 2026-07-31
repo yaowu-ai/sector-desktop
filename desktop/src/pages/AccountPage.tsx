@@ -26,12 +26,11 @@ import {
   Edit3,
   FileSearch,
   Plus,
-  Play,
   Power,
   RefreshCw,
   Save,
   Trash2,
-  Users,
+  UserPlus,
 } from "lucide-react";
 
 import { confirmDanger } from "../components/ConfirmDanger";
@@ -42,7 +41,6 @@ import { StatusTag } from "../components/StatusTag";
 import {
   loadConfig,
   queryAccountLogs,
-  runPlatformTask,
   saveAccounts,
   getLoginCredentialStatus,
   saveLoginPassword,
@@ -50,10 +48,12 @@ import {
   cleanupBuiltinChromiumData,
   listBrowserProfiles,
   checkBitbrowserApi,
+  getCurrentRunStatus,
+  runTikTokRegister,
+  runTikTokRegisterBatch,
 } from "../services/api";
 import { usePlatformContext } from "../app/PlatformContext";
 import {
-  getAutomaticExecutionDisabledReason,
   getPlatformLabel,
   isExecutablePlatform,
   PLATFORMS,
@@ -68,6 +68,7 @@ import type {
   BrowserProviderId,
   LoginCredentialStatus,
   BrowserProfile,
+  ProcessStatus,
 } from "../services/types";
 
 interface AccountFormValues {
@@ -90,6 +91,12 @@ interface AccountFormValues {
 }
 
 const BITBROWSER_DOWNLOAD_URL = "https://www.bitbrowser.cn/download";
+const BUSY_RUN_STATUSES = new Set([
+  "starting",
+  "running",
+  "pause_pending",
+  "intervention_required",
+]);
 const ACCOUNT_DRAFT_FIELD_NAMES = [
   "id",
   "platform",
@@ -114,7 +121,12 @@ export function AccountPage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [runningAccountId, setRunningAccountId] = useState<string>();
+  const [registeringAccountId, setRegisteringAccountId] = useState<
+    string | null
+  >(null);
+  const [registeringBatch, setRegisteringBatch] = useState(false);
+  const [currentRunStatus, setCurrentRunStatus] =
+    useState<ProcessStatus | null>(null);
   const [selectedRowKeys, setSelectedRowKeys] = useState<Key[]>([]);
   const [query, setQuery] = useState("");
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -160,7 +172,9 @@ export function AccountPage() {
     () => new Map(browserProfiles.map((profile) => [profile.id, profile])),
     [browserProfiles],
   );
-  const selectedRunDisabledReason = selectedRunReason(selectedAccounts);
+  const currentRunBusy = Boolean(
+    currentRunStatus && BUSY_RUN_STATUSES.has(currentRunStatus.status),
+  );
 
   const refresh = async () => {
     setLoading(true);
@@ -201,6 +215,30 @@ export function AccountPage() {
 
   useEffect(() => {
     void refresh();
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    const refreshRunStatus = async () => {
+      try {
+        const nextStatus = await getCurrentRunStatus();
+        if (!disposed) {
+          setCurrentRunStatus(nextStatus);
+        }
+      } catch {
+        if (!disposed) {
+          setCurrentRunStatus(null);
+        }
+      }
+    };
+    void refreshRunStatus();
+    const intervalId = window.setInterval(() => {
+      void refreshRunStatus();
+    }, 1500);
+    return () => {
+      disposed = true;
+      window.clearInterval(intervalId);
+    };
   }, []);
 
   useEffect(() => {
@@ -334,6 +372,36 @@ export function AccountPage() {
     );
   };
 
+  const batchRegisterAccounts = async () => {
+    const disabledReason = batchRegisterDisabledReason(
+      selectedAccounts,
+      currentRunBusy,
+      registeringAccountId,
+      registeringBatch,
+    );
+    if (disabledReason) {
+      message.warning(disabledReason);
+      return;
+    }
+
+    const accountIds = selectedAccounts.map((account) => account.id);
+    setRegisteringBatch(true);
+    try {
+      const result = await runTikTokRegisterBatch(accountIds);
+      message.success(
+        `批量注册流程已启动，${accountIds.length} 个账号，PID ${
+          result.processId ?? "-"
+        }`,
+      );
+      setCurrentRunStatus(await getCurrentRunStatus());
+      await refresh();
+    } catch (error) {
+      message.error(formatRegisterStartError(error));
+    } finally {
+      setRegisteringBatch(false);
+    }
+  };
+
   const persistAccounts = async (
     nextAccounts: Account[],
     successText: string,
@@ -357,60 +425,28 @@ export function AccountPage() {
     }
   };
 
-  const runAccount = async (account: Account) => {
-    if (!isExecutablePlatform(account.platform)) {
-      message.warning(`${getPlatformLabel(account.platform)} 尚未适配自动执行`);
-      return;
-    }
-
-    if (!(await confirmNonBitBrowserRun([account]))) {
-      return;
-    }
-
-    setRunningAccountId(account.id);
-    try {
-      const result = await runPlatformTask({
-        platform: currentPlatform,
-        taskType: "fyp",
-        accountIds: [account.id],
-        mode: "single",
-      });
-      message.success(`${account.id} 已启动，PID ${result.processId ?? "-"}`);
-      await refresh();
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : String(error));
-    } finally {
-      setRunningAccountId(undefined);
-    }
-  };
-
-  const runSelected = async () => {
-    const runnableAccounts = selectedAccounts.filter(
-      (account) => account.enabled && isExecutablePlatform(account.platform),
+  const registerAccount = async (account: Account) => {
+    const disabledReason = accountRegisterDisabledReason(
+      account,
+      currentRunBusy,
+      registeringAccountId,
+      registeringBatch,
     );
-    if (runnableAccounts.length === 0) {
-      message.warning("请选择可执行平台的账号");
+    if (disabledReason) {
+      message.warning(disabledReason);
       return;
     }
 
-    if (!(await confirmNonBitBrowserRun(runnableAccounts))) {
-      return;
-    }
-
-    setRunningAccountId("selected");
+    setRegisteringAccountId(account.id);
     try {
-      const result = await runPlatformTask({
-        platform: currentPlatform,
-        taskType: "fyp",
-        accountIds: runnableAccounts.map((account) => account.id),
-        mode: "selected",
-      });
-      message.success(`队列已启动，PID ${result.processId ?? "-"}`);
+      const result = await runTikTokRegister(account.id);
+      message.success(`账号注册流程已启动，PID ${result.processId ?? "-"}`);
+      setCurrentRunStatus(await getCurrentRunStatus());
       await refresh();
     } catch (error) {
-      message.error(error instanceof Error ? error.message : String(error));
+      message.error(formatRegisterStartError(error));
     } finally {
-      setRunningAccountId(undefined);
+      setRegisteringAccountId(null);
     }
   };
 
@@ -603,17 +639,33 @@ export function AccountPage() {
             />
           </Tooltip>
           <Tooltip
-            title={accountRunDisabledReason(account) ?? "运行"}
+            title={
+              accountRegisterDisabledReason(
+                account,
+                currentRunBusy,
+                registeringAccountId,
+                registeringBatch,
+              ) ?? "打开该账号浏览器环境并进入 TikTok 注册"
+            }
             placement="top"
           >
             <span>
               <Button
-                aria-label="运行"
-                icon={<Play size={15} />}
-                onClick={() => void runAccount(account)}
-                loading={runningAccountId === account.id}
-                disabled={Boolean(accountRunDisabledReason(account))}
-              />
+                aria-label="注册"
+                icon={<UserPlus size={15} />}
+                onClick={() => void registerAccount(account)}
+                loading={registeringAccountId === account.id}
+                disabled={Boolean(
+                  accountRegisterDisabledReason(
+                    account,
+                    currentRunBusy,
+                    registeringAccountId,
+                    registeringBatch,
+                  ),
+                )}
+              >
+                注册
+              </Button>
             </span>
           </Tooltip>
           <Tooltip title="日志" placement="top">
@@ -640,7 +692,7 @@ export function AccountPage() {
     <>
       <PageHeader
         title="账号管理"
-        description="读取、编辑、校验并运行 accounts.yaml 中的账号。"
+        description="读取、编辑、校验 accounts.yaml 中的账号。"
         extra={
           <Space>
             <Button
@@ -677,6 +729,7 @@ export function AccountPage() {
                   type="warning"
                   title="配置告警"
                   issues={snapshot.validation.warnings}
+                  defaultCollapsed
                 />
               ) : null}
 
@@ -700,6 +753,35 @@ export function AccountPage() {
                   <Tag>已选 {selectedAccounts.length}</Tag>
                 </Space>
                 <Space>
+                  <Tooltip
+                    title={
+                      batchRegisterDisabledReason(
+                        selectedAccounts,
+                        currentRunBusy,
+                        registeringAccountId,
+                        registeringBatch,
+                      ) ?? "对已选账号依次启动 TikTok Google 注册"
+                    }
+                    placement="top"
+                  >
+                    <span>
+                      <Button
+                        icon={<UserPlus size={15} />}
+                        disabled={Boolean(
+                          batchRegisterDisabledReason(
+                            selectedAccounts,
+                            currentRunBusy,
+                            registeringAccountId,
+                            registeringBatch,
+                          ),
+                        )}
+                        loading={registeringBatch}
+                        onClick={() => void batchRegisterAccounts()}
+                      >
+                        批量注册
+                      </Button>
+                    </span>
+                  </Tooltip>
                   <Button
                     icon={<Power size={15} />}
                     disabled={selectedAccounts.length === 0}
@@ -716,19 +798,6 @@ export function AccountPage() {
                   >
                     批量停用
                   </Button>
-                  <Tooltip title={selectedRunDisabledReason}>
-                    <span>
-                      <Button
-                        type="primary"
-                        icon={<Users size={15} />}
-                        disabled={Boolean(selectedRunDisabledReason)}
-                        loading={runningAccountId === "selected"}
-                        onClick={() => void runSelected()}
-                      >
-                        运行所选
-                      </Button>
-                    </span>
-                  </Tooltip>
                 </Space>
               </Space>
 
@@ -749,7 +818,7 @@ export function AccountPage() {
         </Col>
 
         <Col span={24}>
-          <ProcessOutputPanel title="运行输出" />
+          <ProcessOutputPanel title="任务输出" />
         </Col>
       </Row>
 
@@ -1052,7 +1121,7 @@ function AccountForm({
             <Space align="center">
               <Switch />
               <Typography.Text type="secondary">
-                开启后参与批量运行、运行所选和调度；关闭后仅保留配置，不自动执行。
+                开启后可被养号任务、目标号互动和调度使用；关闭后仅保留配置，不自动执行。
               </Typography.Text>
             </Space>
           </Form.Item>
@@ -1329,31 +1398,59 @@ function IssueAlert({
   type,
   title,
   issues,
+  defaultCollapsed = false,
 }: {
   type: "error" | "warning";
   title: string;
   issues: ValidationIssue[];
+  defaultCollapsed?: boolean;
 }) {
+  const [collapsed, setCollapsed] = useState(defaultCollapsed);
+
   return (
     <Alert
       type={type}
       showIcon
-      message={title}
-      description={
-        <Space direction="vertical" size={2}>
-          {issues.slice(0, 6).map((issue) => (
-            <Typography.Text key={`${issue.path}-${issue.message}`}>
-              {issue.path}: {issue.message}
-            </Typography.Text>
-          ))}
-          {issues.length > 6 ? (
-            <Typography.Text type="secondary">
-              还有 {issues.length - 6} 条
-            </Typography.Text>
+      message={
+        <Space size={8}>
+          <Typography.Text strong>{title}</Typography.Text>
+          {defaultCollapsed ? (
+            <Tag color={type === "warning" ? "gold" : "red"}>
+              {issues.length} 条
+            </Tag>
           ) : null}
         </Space>
       }
+      description={collapsed ? undefined : <IssueList issues={issues} />}
+      action={
+        defaultCollapsed ? (
+          <Button
+            type="text"
+            size="small"
+            onClick={() => setCollapsed((nextCollapsed) => !nextCollapsed)}
+          >
+            {collapsed ? "展开 ↓" : "收起 ↑"}
+          </Button>
+        ) : undefined
+      }
     />
+  );
+}
+
+function IssueList({ issues }: { issues: ValidationIssue[] }) {
+  return (
+    <Space direction="vertical" size={2}>
+      {issues.slice(0, 6).map((issue) => (
+        <Typography.Text key={`${issue.path}-${issue.message}`}>
+          {issue.path}: {issue.message}
+        </Typography.Text>
+      ))}
+      {issues.length > 6 ? (
+        <Typography.Text type="secondary">
+          还有 {issues.length - 6} 条
+        </Typography.Text>
+      ) : null}
+    </Space>
   );
 }
 
@@ -1554,12 +1651,23 @@ function upsertAccount(
   return [...accounts, nextAccount];
 }
 
-function accountRunDisabledReason(account: Account) {
-  if (!isExecutablePlatform(account.platform)) {
-    return getAutomaticExecutionDisabledReason(account.platform, "warmupTask");
+function accountRegisterDisabledReason(
+  account: Account,
+  currentRunBusy: boolean,
+  registeringAccountId: string | null,
+  registeringBatch: boolean,
+) {
+  if (account.platform !== "tiktok") {
+    return "仅 TikTok 账号支持注册";
   }
-  if (!account.enabled) {
-    return `${account.id} 已停用`;
+  if (currentRunBusy) {
+    return "当前已有任务运行，请到任务输出面板停止或等待完成";
+  }
+  if (registeringBatch) {
+    return "当前已有批量注册入口正在处理";
+  }
+  if (registeringAccountId && registeringAccountId !== account.id) {
+    return "当前已有注册入口正在处理";
   }
   const provider = resolveBrowserProvider(account);
   if (
@@ -1572,55 +1680,46 @@ function accountRunDisabledReason(account: Account) {
   return undefined;
 }
 
-function selectedRunReason(accounts: Account[]) {
+function batchRegisterDisabledReason(
+  accounts: Account[],
+  currentRunBusy: boolean,
+  registeringAccountId: string | null,
+  registeringBatch: boolean,
+) {
   if (accounts.length === 0) {
     return "请先选择账号";
   }
-  const runnable = accounts.filter(
-    (account) => !accountRunDisabledReason(account),
-  );
-  if (runnable.length === 0) {
-    return accountRunDisabledReason(accounts[0]) ?? "所选账号不可执行";
+  if (currentRunBusy) {
+    return "当前已有任务运行，请到任务输出面板停止或等待完成";
+  }
+  if (registeringBatch) {
+    return "当前已有批量注册入口正在处理";
+  }
+  if (registeringAccountId) {
+    return "当前已有注册入口正在处理";
+  }
+  const blockedAccount = accounts
+    .map((account) => ({
+      account,
+      reason: accountRegisterDisabledReason(account, false, null, false),
+    }))
+    .find(({ reason }) => Boolean(reason));
+  if (blockedAccount?.reason) {
+    return `${blockedAccount.account.id}: ${blockedAccount.reason}`;
   }
   return undefined;
 }
 
-function confirmNonBitBrowserRun(accounts: Account[]) {
-  const productionOptional = accounts.filter(
-    (account) => resolveBrowserProvider(account) !== "bitbrowser",
+function formatRegisterStartError(error: unknown) {
+  const messageText = error instanceof Error ? error.message : String(error);
+  return messageText.replace(
+    /(password|credential|proxy password|token|cookie|session)\s*[:=]\s*[^,\s;]+/gi,
+    "$1=[已隐藏]",
   );
-  if (productionOptional.length === 0) {
-    return Promise.resolve(true);
-  }
-  return new Promise<boolean>((resolve) => {
-    Modal.confirm({
-      title: "生产可选浏览器提供方",
-      content: `以下 TikTok 账号不会使用 BitBrowser：${productionOptional
-        .map(
-          (account) =>
-            `${account.id}:${formatBrowserProvider(resolveBrowserProvider(account))}`,
-        )
-        .join(
-          ", ",
-        )}。内置 Chromium 是生产可选方案，但不等价替代 BitBrowser 的指纹环境能力；BitBrowser 仍是默认推荐。`,
-      okText: "运行",
-      cancelText: "取消",
-      onOk: () => resolve(true),
-      onCancel: () => resolve(false),
-    });
-  });
 }
 
 function resolveBrowserProvider(account: Account): BrowserProviderId {
   return account.browserProvider ?? account.browser?.provider ?? "bitbrowser";
-}
-
-function formatBrowserProvider(provider: BrowserProviderId) {
-  const labels: Record<BrowserProviderId, string> = {
-    bitbrowser: "BitBrowser",
-    builtin_chromium: "内置 Chromium",
-  };
-  return labels[provider];
 }
 
 function validateActiveHourRows(

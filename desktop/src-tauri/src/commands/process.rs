@@ -243,6 +243,70 @@ pub fn run_platform_task(
 }
 
 #[tauri::command]
+pub fn run_tiktok_register(
+    account_id: String,
+    state: State<'_, AppState>,
+) -> Result<ProcessStartResult, String> {
+    let account_id = account_id.trim().to_string();
+    validate_account_id(&account_id)?;
+    ensure_tiktok_register_account(&account_id)?;
+
+    {
+        let mut run = state
+            .current_run
+            .lock()
+            .map_err(|_| "failed to lock process state".to_string())?;
+        ensure_no_current_process(&run)?;
+        reset_run_state(&mut run, "tiktok_register");
+    }
+
+    spawn_account_process(
+        state.current_run.clone(),
+        account_id,
+        "tiktok_register".to_string(),
+    )
+}
+
+#[tauri::command]
+pub fn run_tiktok_register_batch(
+    account_ids: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<ProcessStartResult, String> {
+    let account_ids = account_ids
+        .into_iter()
+        .map(|account_id| account_id.trim().to_string())
+        .filter(|account_id| !account_id.is_empty())
+        .collect::<Vec<_>>();
+    if account_ids.is_empty() {
+        return Err("accountIds must contain at least one account".to_string());
+    }
+    for account_id in &account_ids {
+        validate_account_id(account_id)?;
+        ensure_tiktok_register_account(account_id)?;
+    }
+
+    let mut queue = account_ids.clone();
+    let first = queue.remove(0);
+    let remaining = queue;
+
+    {
+        let mut run = state
+            .current_run
+            .lock()
+            .map_err(|_| "failed to lock process state".to_string())?;
+        ensure_no_current_process(&run)?;
+        reset_run_state(&mut run, "tiktok_register");
+        run.queue = remaining;
+    }
+
+    spawn_account_process(
+        state.current_run.clone(),
+        first,
+        "tiktok_register".to_string(),
+    )
+}
+
+#[tauri::command]
 pub fn get_current_run_status(state: State<'_, AppState>) -> Result<ProcessStatus, String> {
     let run = state
         .current_run
@@ -595,7 +659,13 @@ fn spawn_account_process(
         mark_start_failure(&run_state, &error);
         return Err(error);
     }
-    let (mut env_vars, redactions) = login_env_for_account(&account_id)?;
+    let (mut env_vars, redactions) = match login_env_for_account(&account_id) {
+        Ok(result) => result,
+        Err(error) => {
+            mark_start_failure(&run_state, &error);
+            return Err(error);
+        }
+    };
     env_vars.insert(
         "AM_TASK_TYPE".to_string(),
         runtime_task_type(&task_type).to_string(),
@@ -626,6 +696,8 @@ fn spawn_account_process(
 fn runtime_task_type(task_type: &str) -> &'static str {
     if task_type.contains("target_engagement") {
         "target_engagement"
+    } else if task_type == "tiktok_register" {
+        "tiktok_register"
     } else {
         "fyp"
     }
@@ -1216,10 +1288,71 @@ fn ensure_no_active_run_lock(lock_path: &Path) -> Result<(), String> {
 fn ensure_no_current_process(run: &RunState) -> Result<(), String> {
     if matches!(
         run.status.as_str(),
-        "starting" | "running" | "pause_pending"
+        "starting" | "running" | "pause_pending" | "intervention_required"
     ) {
         return Err("another account script is already running".to_string());
     }
+    Ok(())
+}
+
+fn ensure_tiktok_register_account(account_id: &str) -> Result<(), String> {
+    let config = load_config()?;
+    let paths = project_paths()?;
+    let account = config
+        .accounts()
+        .iter()
+        .find(|account| account.id() == account_id)
+        .ok_or_else(|| {
+            format!(
+                "REGISTER_ACCOUNT_NOT_FOUND: account '{}' does not exist",
+                account_id
+            )
+        })?;
+
+    if account.platform() != "tiktok" {
+        return Err(format!(
+            "REGISTER_UNSUPPORTED_PLATFORM: account '{}' belongs to platform '{}'",
+            account_id,
+            account.platform(),
+        ));
+    }
+
+    match account.browser_provider() {
+        "bitbrowser" => {
+            if account.bitbrowser_profile_id().is_none() {
+                return Err(format!(
+                    "REGISTER_BROWSER_PROVIDER_INVALID: account '{}' has no bitbrowser_profile_id",
+                    account_id,
+                ));
+            }
+            let api_status = check_bitbrowser_api();
+            if !api_status.available() {
+                return Err(format!(
+                    "REGISTER_BROWSER_PROVIDER_INVALID: BitBrowser API is not available at {}: {}",
+                    api_status.api_url(),
+                    api_status.error().unwrap_or("unknown error")
+                ));
+            }
+        }
+        "builtin_chromium" => {
+            if paths.chromium_executable.trim().is_empty()
+                && config.chromium_executable().is_none()
+                && auto_configure_chromium_executable().is_err()
+            {
+                return Err(
+                    "REGISTER_BROWSER_PROVIDER_INVALID: 未检测到可用 Chromium，请安装 Chrome/Edge 或手动指定可执行文件。"
+                        .to_string(),
+                );
+            }
+        }
+        provider => {
+            return Err(format!(
+                "REGISTER_BROWSER_PROVIDER_INVALID: unsupported browser provider '{}'",
+                provider
+            ));
+        }
+    }
+
     Ok(())
 }
 

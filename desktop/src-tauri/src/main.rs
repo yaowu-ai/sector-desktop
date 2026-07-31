@@ -71,6 +71,8 @@ fn main() {
             commands::process::run_python_script,
             commands::process::run_gmail_setup,
             commands::process::run_platform_task,
+            commands::process::run_tiktok_register,
+            commands::process::run_tiktok_register_batch,
             commands::logs::tail_session_log,
             commands::logs::clear_session_log,
             commands::stats::get_home_summary,
