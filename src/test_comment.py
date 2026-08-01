@@ -17,10 +17,10 @@ import time
 from pathlib import Path
 
 import yaml
-from patchright.sync_api import sync_playwright
 
 from browser_providers import provider_for_account
 from human_mouse import MouseState, human_click_locator
+from patchright_runtime import start_sync_playwright
 from platforms.tiktok.actions import (
     _find_active_button,
     _active_comment_count,
@@ -90,7 +90,8 @@ def main():
         time.sleep(3)
 
     try:
-        with sync_playwright() as p:
+        playwright_manager, p = start_sync_playwright()
+        try:
             browser = p.chromium.connect_over_cdp(cdp_url)
             ctx = browser.contexts[0]
 
@@ -197,6 +198,8 @@ def main():
 
             print("\n[info] Browser stays open 30s so you can eyeball the comment.")
             time.sleep(30)
+        finally:
+            playwright_manager.__exit__()
     finally:
         if was_already_open:
             print("[info] Leaving browser open (already open).")

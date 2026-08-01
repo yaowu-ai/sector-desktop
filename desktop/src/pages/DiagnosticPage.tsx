@@ -659,10 +659,19 @@ function parseCommentSummary(output: string) {
 }
 
 function detectDiagnosticKind(status: ProcessStatus | null, output: string) {
-  if (status?.command.includes('src/test_like.py') || output.includes('Strategy A:')) {
+  const command = status?.command ?? []
+  if (
+    command.includes('src/test_like.py') ||
+    (command.includes('diagnostic') && command.includes('--kind') && command.includes('like')) ||
+    output.includes('Strategy A:')
+  ) {
     return '点赞诊断'
   }
-  if (status?.command.includes('src/test_comment.py') || output.includes('Scanning for a video')) {
+  if (
+    command.includes('src/test_comment.py') ||
+    (command.includes('diagnostic') && command.includes('--kind') && command.includes('comment')) ||
+    output.includes('Scanning for a video')
+  ) {
     return '评论诊断'
   }
   return status?.taskType === 'diagnostic' ? '诊断任务' : '无诊断任务'

@@ -23,6 +23,8 @@ import type { ColumnsType } from "antd/es/table";
 import type { Key } from "react";
 import { useEffect, useMemo, useState } from "react";
 import {
+  ChevronDown,
+  ChevronUp,
   Edit3,
   FileSearch,
   Plus,
@@ -1046,12 +1048,12 @@ function AccountForm({
     }
     if (result.saved && result.readable) {
       message.success(
-        "凭据已保存且可读取。真实网页登录状态会在任务运行时检测。",
+        "登录密码已保存且可读取。真实网页登录状态会在任务运行时检测。",
       );
     } else if (result.saved) {
-      message.error(result.error ?? "凭据存在，但当前无法读取。");
+      message.error(result.error ?? "登录密码存在，但当前无法读取。");
     } else {
-      message.warning("尚未保存登录凭据。真实网页登录状态会在任务运行时检测。");
+      message.warning("尚未保存登录密码。真实网页登录状态会在任务运行时检测。");
     }
   };
 
@@ -1061,21 +1063,6 @@ function AccountForm({
     } catch (error) {
       message.error(error instanceof Error ? error.message : String(error));
     }
-  };
-
-  const testAutoLogin = async () => {
-    const account = await ensureCredentialAccount();
-    if (!account) {
-      return;
-    }
-    Modal.confirm({
-      title: "测试自动登录",
-      content:
-        "当前会使用运行时登录流程检测并处理登录页；遇到验证码、二次验证或安全检查会暂停并提示人工接管。",
-      okText: "确认",
-      cancelText: "取消",
-      onOk: () => message.info("请从任务运行或诊断入口触发实际登录检测。"),
-    });
   };
 
   return (
@@ -1298,7 +1285,7 @@ function AccountForm({
           <Input placeholder="平台登录邮箱或用户名" />
         </Form.Item>
         <Form.Item
-          label="凭据状态"
+          label="登录密码状态"
           required={loginEnabled && !loginCredentialRef}
           validateStatus={
             loginEnabled && !loginCredentialRef ? "error" : undefined
@@ -1350,13 +1337,7 @@ function AccountForm({
             loading={credentialLoading}
             disabled={saving || passwordSaving}
           >
-            检查凭据
-          </Button>
-          <Button
-            onClick={() => void testAutoLogin()}
-            disabled={saving || passwordSaving || credentialLoading}
-          >
-            测试自动登录
+            检查保存的密码
           </Button>
         </Space>
       </Space>
@@ -1439,13 +1420,15 @@ function IssueAlert({
       description={collapsed ? undefined : <IssueList issues={issues} />}
       action={
         defaultCollapsed ? (
-          <Button
-            type="text"
-            size="small"
-            onClick={() => setCollapsed((nextCollapsed) => !nextCollapsed)}
-          >
-            {collapsed ? "展开 ↓" : "收起 ↑"}
-          </Button>
+          <Tooltip title={collapsed ? "展开配置告警" : "收起配置告警"}>
+            <Button
+              type="text"
+              size="small"
+              aria-label={collapsed ? "展开配置告警" : "收起配置告警"}
+              icon={collapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+              onClick={() => setCollapsed((nextCollapsed) => !nextCollapsed)}
+            />
+          </Tooltip>
         ) : undefined
       }
     />
@@ -1477,15 +1460,15 @@ function CredentialStateTag({
   credentialRef?: string;
 }) {
   if (status?.saved && status.readable) {
-    return <Tag color="green">已保存</Tag>;
+    return <Tag color="green">已保存密码</Tag>;
   }
   if (status?.saved && !status.readable) {
-    return <Tag color="red">读取失败</Tag>;
+    return <Tag color="red">密码不可用</Tag>;
   }
   if (credentialRef) {
-    return <Tag color="gold">缺失</Tag>;
+    return <Tag color="gold">未保存密码</Tag>;
   }
-  return <Tag>未保存</Tag>;
+  return <Tag>未保存密码</Tag>;
 }
 
 function LoginStateTag({ account }: { account: Account }) {

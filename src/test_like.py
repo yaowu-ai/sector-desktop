@@ -13,10 +13,11 @@ import time
 from pathlib import Path
 
 import yaml
-from patchright.sync_api import sync_playwright
 
 from browser_providers import provider_for_account
 from human_mouse import MouseState, human_click_locator
+from patchright_runtime import start_sync_playwright
+from platforms.tiktok.actions import LIKE_BUTTON_SELECTORS
 from runtime_config import resolve_config_path
 
 ROOT = Path(__file__).parent.parent
@@ -34,9 +35,14 @@ def find_active_like_button(page):
     Picks among all `button[aria-label*="Like"]` matches the one whose
     vertical centre is closest to the viewport centre.
     """
-    candidates = page.locator('button[aria-label*="Like" i]')
-    n = candidates.count()
-    if n == 0:
+    candidates = None
+    n = 0
+    for selector in LIKE_BUTTON_SELECTORS:
+        candidates = page.locator(selector)
+        n = candidates.count()
+        if n > 0:
+            break
+    if candidates is None or n == 0:
         return None, None
 
     viewport = page.viewport_size or {"width": 1280, "height": 800}
@@ -65,7 +71,17 @@ def find_active_like_button(page):
 
     if best_idx is None:
         return None, None
-    return candidates.nth(best_idx), best_box
+    return nearest_button(candidates.nth(best_idx)), best_box
+
+
+def nearest_button(locator):
+    try:
+        button = locator.locator("xpath=ancestor-or-self::button[1]").first
+        if button.count():
+            return button
+    except Exception:
+        pass
+    return locator
 
 
 def capture_state(button):
@@ -189,7 +205,8 @@ def main():
         time.sleep(3)
 
     try:
-        with sync_playwright() as p:
+        playwright_manager, p = start_sync_playwright()
+        try:
             browser = p.chromium.connect_over_cdp(cdp_url)
             ctx = browser.contexts[0]
 
@@ -227,6 +244,8 @@ def main():
             print("\n[info] Done. Browser stays open 30s — go to Profile -> Activity -> Likes")
             time.sleep(30)
             browser.close()
+        finally:
+            playwright_manager.__exit__()
     finally:
         if was_already_open:
             print("[info] Leaving browser open since it was already open.")

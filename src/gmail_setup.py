@@ -29,9 +29,9 @@ from urllib.parse import urlparse
 
 import requests
 from patchright.sync_api import TimeoutError as PlaywrightTimeoutError
-from patchright.sync_api import sync_playwright
 
 from bitbrowser import BitBrowserClient
+from patchright_runtime import start_sync_playwright
 
 
 GOOGLE_HOME = "https://www.google.com/"
@@ -681,7 +681,8 @@ def run_google_setup(
     completed = False
     try:
         print(f"[2/{total_steps}] 连接浏览器 CDP")
-        with sync_playwright() as playwright:
+        playwright_manager, playwright = start_sync_playwright()
+        try:
             browser = playwright.chromium.connect_over_cdp(cdp_url)
             if not browser.contexts:
                 raise RuntimeError("浏览器没有可用的 context")
@@ -812,6 +813,8 @@ def run_google_setup(
             else:
                 print("比特浏览器窗口保持打开。")
             # Exiting the Playwright connection does not call BitBrowser /close.
+        finally:
+            playwright_manager.__exit__()
     except Exception as exc:
         print(f"[error] 浏览器操作失败: {type(exc).__name__}: {exc}", file=sys.stderr)
         if close_when_done and not keep_open_on_error:

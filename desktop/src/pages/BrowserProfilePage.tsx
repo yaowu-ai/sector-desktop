@@ -55,6 +55,7 @@ import {
   getBuiltinChromiumStatus,
   listBrowserProfiles,
   loadAccounts,
+  openBitbrowserDownloadPage,
   openProfile,
   syncAccountsApply,
   syncAccountsDryRun,
@@ -190,6 +191,14 @@ export function BrowserProfilePage() {
       message.error(error instanceof Error ? error.message : String(error))
     } finally {
       setLoading(false)
+    }
+  }
+
+  const openBitbrowserDownload = async () => {
+    try {
+      await openBitbrowserDownloadPage()
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : String(error))
     }
   }
 
@@ -582,6 +591,11 @@ export function BrowserProfilePage() {
                         showIcon
                         message="BitBrowser Local API 不可用"
                         description={apiStatus?.error ?? '请确认 BitBrowser 客户端和 Local API 已启动。其他 Tab 不受影响。'}
+                        action={
+                          <Button type="link" size="small" onClick={() => void openBitbrowserDownload()}>
+                            下载 BitBrowser
+                          </Button>
+                        }
                         style={{ marginBottom: 16 }}
                       />
                     ) : null}

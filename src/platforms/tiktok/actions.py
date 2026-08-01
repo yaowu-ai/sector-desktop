@@ -4,6 +4,15 @@ import time
 
 from human_mouse import MouseState, human_click_locator
 
+LIKE_BUTTON_SELECTORS = (
+    'button[aria-label*="Like" i]',
+    'button[aria-label*="\u559c\u6b22"]',
+    'button[aria-label*="\u8d5e"]',
+    'button[aria-label*="\u8b9a"]',
+    'button:has([data-e2e="like-icon"])',
+    '[data-e2e="like-icon"]',
+)
+
 
 def human_pause(min_s=1.0, max_s=3.0):
     time.sleep(random.uniform(min_s, max_s))
@@ -42,6 +51,25 @@ def _find_active_button(page, selector):
     return candidates.nth(best_idx)
 
 
+def _nearest_button(locator):
+    try:
+        button = locator.locator("xpath=ancestor-or-self::button[1]").first
+        if button.count():
+            return button
+    except Exception:
+        pass
+    return locator
+
+
+def _find_active_like_button(page):
+    """Find the active video's like control across TikTok DOM variants."""
+    for selector in LIKE_BUTTON_SELECTORS:
+        btn = _find_active_button(page, selector)
+        if btn is not None:
+            return _nearest_button(btn)
+    return None
+
+
 def _scroll_to_next_video(page, viewport, mouse_state):
     """Advance to the next video."""
     if random.random() < 0.75:
@@ -57,7 +85,7 @@ def _scroll_to_next_video(page, viewport, mouse_state):
 
 def try_like_with_detail(page, mouse_state):
     """Like the visible video. Returns (success, reason)."""
-    btn = _find_active_button(page, 'button[aria-label*="Like" i]')
+    btn = _find_active_like_button(page)
     if btn is None:
         return False, "button_not_found"
 
@@ -73,7 +101,7 @@ def try_like_with_detail(page, mouse_state):
     time.sleep(random.uniform(0.4, 0.9))
 
     try:
-        btn_after = _find_active_button(page, 'button[aria-label*="Like" i]')
+        btn_after = _find_active_like_button(page)
         if btn_after is None:
             return False, "button_not_found"
         if btn_after.get_attribute("aria-pressed", timeout=500) == "true":
