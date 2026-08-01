@@ -8,7 +8,6 @@ import {
   Form,
   Input,
   InputNumber,
-  Modal,
   Row,
   Select,
   Space,
@@ -55,10 +54,6 @@ const DEFAULT_NOTIFY: NotifySettings = {
   webhook: { url: "" },
 };
 
-const SUPPORT_AUTH_CODE = "YangHao-dev";
-
-type AdvancedPanelKey = "advanced-paths" | "diagnostic-paths";
-
 export function SettingsPage() {
   const [systemForm] = Form.useForm<SystemSettingsPayload>();
   const [notifyForm] = Form.useForm<NotifySettings>();
@@ -96,11 +91,6 @@ export function SettingsPage() {
   const [previewingMigration, setPreviewingMigration] = useState(false);
   const [applyingMigration, setApplyingMigration] = useState(false);
   const [detectingChromium, setDetectingChromium] = useState(false);
-  const [supportModeUnlocked, setSupportModeUnlocked] = useState(false);
-  const [supportAuthOpen, setSupportAuthOpen] = useState(false);
-  const [supportAuthCode, setSupportAuthCode] = useState("");
-  const [pendingAdvancedPanel, setPendingAdvancedPanel] =
-    useState<AdvancedPanelKey | null>(null);
   const [advancedPathKeys, setAdvancedPathKeys] = useState<string[]>([]);
   const [diagnosticPathKeys, setDiagnosticPathKeys] = useState<string[]>([]);
 
@@ -266,61 +256,12 @@ export function SettingsPage() {
     }
   };
 
-  const openAdvancedPanel = (panelKey: AdvancedPanelKey) => {
-    if (panelKey === "advanced-paths") {
-      setAdvancedPathKeys(["advanced-paths"]);
-    } else {
-      setDiagnosticPathKeys(["diagnostic-paths"]);
-    }
-  };
-
-  const requestSupportUnlock = (panelKey: AdvancedPanelKey) => {
-    if (supportModeUnlocked) {
-      openAdvancedPanel(panelKey);
-      return;
-    }
-    setPendingAdvancedPanel(panelKey);
-    setSupportAuthCode("");
-    setSupportAuthOpen(true);
-  };
-
-  const handleSupportAuthOk = () => {
-    if (supportAuthCode.trim() !== SUPPORT_AUTH_CODE) {
-      message.error("授权码错误");
-      return;
-    }
-    setSupportModeUnlocked(true);
-    setSupportAuthOpen(false);
-    setSupportAuthCode("");
-    if (pendingAdvancedPanel) {
-      openAdvancedPanel(pendingAdvancedPanel);
-    }
-    setPendingAdvancedPanel(null);
-    message.success("高级设置已解锁");
-  };
-
-  const handleSupportAuthCancel = () => {
-    setSupportAuthOpen(false);
-    setSupportAuthCode("");
-    setPendingAdvancedPanel(null);
-  };
-
   const handleAdvancedPathChange = (keys: string | string[]) => {
-    const nextKeys = normalizeCollapseKeys(keys);
-    if (nextKeys.includes("advanced-paths") && !supportModeUnlocked) {
-      requestSupportUnlock("advanced-paths");
-      return;
-    }
-    setAdvancedPathKeys(nextKeys);
+    setAdvancedPathKeys(normalizeCollapseKeys(keys));
   };
 
   const handleDiagnosticPathChange = (keys: string | string[]) => {
-    const nextKeys = normalizeCollapseKeys(keys);
-    if (nextKeys.includes("diagnostic-paths") && !supportModeUnlocked) {
-      requestSupportUnlock("diagnostic-paths");
-      return;
-    }
-    setDiagnosticPathKeys(nextKeys);
+    setDiagnosticPathKeys(normalizeCollapseKeys(keys));
   };
 
   return (
@@ -363,8 +304,13 @@ export function SettingsPage() {
           <Card title="浏览器提供方能力矩阵">
             <Row gutter={[12, 12]}>
               {providerMatrix.map((provider) => (
-                <Col xs={24} md={8} key={provider.provider}>
-                  <Descriptions size="small" column={1} bordered>
+                <Col xs={24} md={12} key={provider.provider}>
+                  <Descriptions
+                    size="small"
+                    column={1}
+                    bordered
+                    style={{ width: "100%" }}
+                  >
                     <Descriptions.Item
                       label={formatProviderLabel(
                         provider.provider,
@@ -542,9 +488,6 @@ export function SettingsPage() {
                     label: (
                       <Space>
                         <Typography.Text>高级路径配置</Typography.Text>
-                        <Tag color={supportModeUnlocked ? "green" : "default"}>
-                          {supportModeUnlocked ? "已解锁" : "需授权"}
-                        </Tag>
                       </Space>
                     ),
                     forceRender: true,
@@ -774,9 +717,6 @@ export function SettingsPage() {
                   label: (
                     <Space>
                       <Typography.Text>高级诊断信息</Typography.Text>
-                      <Tag color={supportModeUnlocked ? "green" : "default"}>
-                        {supportModeUnlocked ? "已解锁" : "需授权"}
-                      </Tag>
                     </Space>
                   ),
                   children: (
@@ -894,29 +834,6 @@ export function SettingsPage() {
           </Card>
         </Col>
       </Row>
-      <Modal
-        title="解锁高级设置"
-        open={supportAuthOpen}
-        okText="解锁"
-        cancelText="取消"
-        onOk={handleSupportAuthOk}
-        onCancel={handleSupportAuthCancel}
-        destroyOnClose
-      >
-        <Space direction="vertical" size={12} className="full-width">
-          <Typography.Text type="secondary">
-            高级设置仅用于部署和技术支持排查，修改错误可能导致应用无法正常运行。
-          </Typography.Text>
-          <Input.Password
-            autoFocus
-            autoComplete="off"
-            placeholder="请输入技术支持授权码"
-            value={supportAuthCode}
-            onChange={(event) => setSupportAuthCode(event.target.value)}
-            onPressEnter={handleSupportAuthOk}
-          />
-        </Space>
-      </Modal>
     </>
   );
 }

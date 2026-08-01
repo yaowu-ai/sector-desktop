@@ -946,7 +946,7 @@ pub fn locate_chromium_executable() -> Result<PathBuf, String> {
     }
     candidates
         .into_iter()
-        .find(|path| path.is_file())
+        .find_map(|path| resolve_chromium_candidate(&path))
         .ok_or_else(|| {
             "未检测到可用 Chromium，请安装 Chrome/Edge/Chromium 或手动指定可执行文件。".to_string()
         })
@@ -966,6 +966,33 @@ fn expand_user_path(value: &str) -> PathBuf {
         }
     }
     PathBuf::from(value)
+}
+
+fn resolve_chromium_candidate(path: &Path) -> Option<PathBuf> {
+    if path.is_file() {
+        return Some(path.to_path_buf());
+    }
+    if cfg!(target_os = "macos")
+        && path.extension().and_then(|value| value.to_str()) == Some("app")
+        && path.is_dir()
+    {
+        let macos_dir = path.join("Contents").join("MacOS");
+        let mut names = Vec::new();
+        if let Some(stem) = path.file_stem().and_then(|value| value.to_str()) {
+            names.push(stem.to_string());
+        }
+        names.extend([
+            "Google Chrome".to_string(),
+            "Google Chrome for Testing".to_string(),
+            "Microsoft Edge".to_string(),
+            "Chromium".to_string(),
+        ]);
+        return names
+            .into_iter()
+            .map(|name| macos_dir.join(name))
+            .find(|candidate| candidate.is_file());
+    }
+    None
 }
 
 fn find_on_path(name: &str) -> Option<PathBuf> {

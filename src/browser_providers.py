@@ -77,6 +77,21 @@ class BuiltinProxy:
         return f"{self.scheme}://{self.host}:{self.port}"
 
 
+def windows_subprocess_kwargs(*, new_process_group: bool = False) -> Dict[str, Any]:
+    if os.name != "nt":
+        return {}
+    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    if new_process_group:
+        creationflags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo.wShowWindow = subprocess.SW_HIDE
+    return {
+        "creationflags": creationflags,
+        "startupinfo": startupinfo,
+    }
+
+
 @dataclass(frozen=True)
 class BrowserProviderStatus:
     provider: str
@@ -291,7 +306,6 @@ class BuiltinChromiumProvider:
             else:
                 command.insert(-1, f"--proxy-server={parsed_proxy.server_arg}")
 
-        creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
         process = None
         startup_context = builtin_startup_context(account, executable, port, user_data, proxy)
         try:
@@ -300,7 +314,7 @@ class BuiltinChromiumProvider:
                 command,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                creationflags=creationflags,
+                **windows_subprocess_kwargs(new_process_group=True),
             )
             cdp_version = wait_for_cdp(cdp_endpoint)
         except Exception as exc:
@@ -458,10 +472,29 @@ def chromium_executable_path(config: Mapping[str, Any]) -> str:
                 candidates.append(found)
 
     for candidate in candidates:
-        path = Path(candidate).expanduser()
-        if path.is_file():
+        path = resolve_chromium_candidate(Path(candidate).expanduser())
+        if path:
             return str(path)
     raise FileNotFoundError("builtin_chromium could not find a Chromium/Chrome/Edge executable")
+
+
+def resolve_chromium_candidate(path: Path) -> Optional[Path]:
+    if path.is_file():
+        return path
+    if platform.system() == "Darwin" and path.suffix == ".app" and path.is_dir():
+        macos_dir = path / "Contents" / "MacOS"
+        names = [
+            path.stem,
+            "Google Chrome",
+            "Google Chrome for Testing",
+            "Microsoft Edge",
+            "Chromium",
+        ]
+        for name in names:
+            executable = macos_dir / name
+            if executable.is_file():
+                return executable
+    return None
 
 
 def safe_account_dir_name(account_id: str) -> str:
@@ -632,6 +665,7 @@ def pid_alive(pid: Any) -> bool:
                 capture_output=True,
                 text=True,
                 timeout=5,
+                **windows_subprocess_kwargs(),
             )
             return str(pid) in result.stdout
         except Exception:
@@ -657,6 +691,7 @@ def terminate_pid(pid: Any) -> None:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 timeout=10,
+                **windows_subprocess_kwargs(),
             )
         else:
             os.kill(pid, 15)
