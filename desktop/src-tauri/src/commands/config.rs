@@ -4,8 +4,10 @@ use serde::{Deserialize, Serialize};
 use serde_yaml::{Mapping, Value};
 use std::collections::{HashMap, HashSet};
 use std::fs;
+#[cfg(target_os = "windows")]
 use std::io::Write;
 use std::path::PathBuf;
+#[cfg(target_os = "windows")]
 use std::process::{Command, Stdio};
 
 use crate::paths::{normalize, project_paths, ProjectPaths};
@@ -808,7 +810,6 @@ pub fn save_login_password(payload: LoginPasswordPayload) -> Result<LoginCredent
             )
         });
 
-    let encrypted = dpapi_protect(&payload.password)?;
     set_account_credential_ref(&mut config_value, &account_id, &credential_ref)?;
     let next_yaml = serde_yaml::to_string(&config_value)
         .map_err(|err| format!("failed to serialize accounts.yaml: {}", err))?;
@@ -817,6 +818,7 @@ pub fn save_login_password(payload: LoginPasswordPayload) -> Result<LoginCredent
         return Err(format_validation_errors(&validation));
     }
 
+    let encrypted = protect_login_secret(&credential_ref, &payload.password)?;
     let credential_path = credential_ref_path(&credential_ref)?;
     if let Some(parent) = credential_path.parent() {
         fs::create_dir_all(parent).map_err(|err| {
@@ -846,6 +848,7 @@ pub fn delete_login_password(account_id: String) -> Result<LoginCredentialStatus
     let account_id = normalize_account_id(&account_id)?;
     let credential_ref = load_account_credential_ref(&account_id)?;
     if let Some(credential_ref) = credential_ref.as_deref() {
+        delete_login_secret(credential_ref)?;
         let credential_path = credential_ref_path(credential_ref)?;
         if credential_path.exists() {
             fs::remove_file(&credential_path).map_err(|err| {
@@ -1468,7 +1471,7 @@ fn login_credential_status(
             };
         }
     };
-    match dpapi_unprotect(&encrypted) {
+    match unprotect_login_secret(&credential_ref, &encrypted) {
         Ok(_) => LoginCredentialStatus {
             account_id: account_id.to_string(),
             credential_ref: Some(credential_ref),
@@ -1482,7 +1485,7 @@ fn login_credential_status(
             saved: true,
             readable: false,
             error: Some(format!(
-                "stored login credential exists but DPAPI read failed: {}",
+                "stored login credential exists but secure credential read failed: {}",
                 error
             )),
         },
@@ -1506,7 +1509,7 @@ pub(crate) fn read_login_password_for_runtime(account_id: &str) -> Result<Option
             err
         )
     })?;
-    dpapi_unprotect(&encrypted).map(Some)
+    unprotect_login_secret(&credential_ref, &encrypted).map(Some)
 }
 
 fn credential_ref_path(credential_ref: &str) -> Result<PathBuf, String> {
@@ -1554,7 +1557,20 @@ fn is_valid_login_credential_ref(value: &str) -> bool {
             .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
 }
 
-fn dpapi_protect(secret: &str) -> Result<String, String> {
+fn protect_login_secret(credential_ref: &str, secret: &str) -> Result<String, String> {
+    protect_login_secret_impl(credential_ref, secret)
+}
+
+fn unprotect_login_secret(credential_ref: &str, encrypted: &str) -> Result<String, String> {
+    unprotect_login_secret_impl(credential_ref, encrypted)
+}
+
+fn delete_login_secret(credential_ref: &str) -> Result<(), String> {
+    delete_login_secret_impl(credential_ref)
+}
+
+#[cfg(target_os = "windows")]
+fn protect_login_secret_impl(_credential_ref: &str, secret: &str) -> Result<String, String> {
     let script = r#"$ErrorActionPreference = 'Stop'; $secret = [Console]::In.ReadToEnd(); $secure = ConvertTo-SecureString -String $secret -AsPlainText -Force; $secure | ConvertFrom-SecureString"#;
     let encrypted = run_powershell_with_stdin(script, secret, "encrypt login credential")?;
     let encrypted = encrypted.trim();
@@ -1565,12 +1581,19 @@ fn dpapi_protect(secret: &str) -> Result<String, String> {
     }
 }
 
-fn dpapi_unprotect(encrypted: &str) -> Result<String, String> {
+#[cfg(target_os = "windows")]
+fn unprotect_login_secret_impl(_credential_ref: &str, encrypted: &str) -> Result<String, String> {
     let script = r#"$ErrorActionPreference = 'Stop'; $blob = [Console]::In.ReadToEnd(); $secure = ConvertTo-SecureString -String $blob; $ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure); try { [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) }"#;
     run_powershell_with_stdin(script, encrypted, "read login credential")
         .map(|value| value.trim_end_matches(['\r', '\n']).to_string())
 }
 
+#[cfg(target_os = "windows")]
+fn delete_login_secret_impl(_credential_ref: &str) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
 fn run_powershell_with_stdin(script: &str, input: &str, action: &str) -> Result<String, String> {
     let mut child = Command::new("powershell")
         .args(["-NoProfile", "-NonInteractive", "-Command", script])
@@ -1602,6 +1625,257 @@ fn run_powershell_with_stdin(script: &str, input: &str, action: &str) -> Result<
         });
     }
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+#[cfg(target_os = "macos")]
+const MACOS_KEYCHAIN_MARKER: &str = "account-matrix-macos-keychain-v1";
+#[cfg(target_os = "macos")]
+const MACOS_KEYCHAIN_SERVICE: &str = "Account Matrix Login Credential";
+
+#[cfg(target_os = "macos")]
+fn protect_login_secret_impl(credential_ref: &str, secret: &str) -> Result<String, String> {
+    macos_keychain_save_password(credential_ref, secret)?;
+    Ok(format!(
+        "{}\nservice={}\naccount={}\n",
+        MACOS_KEYCHAIN_MARKER, MACOS_KEYCHAIN_SERVICE, credential_ref
+    ))
+}
+
+#[cfg(target_os = "macos")]
+fn unprotect_login_secret_impl(credential_ref: &str, encrypted: &str) -> Result<String, String> {
+    if encrypted.lines().next() != Some(MACOS_KEYCHAIN_MARKER) {
+        return Err("stored credential marker is not a macOS Keychain credential".to_string());
+    }
+    macos_keychain_read_password(credential_ref)
+}
+
+#[cfg(target_os = "macos")]
+fn delete_login_secret_impl(credential_ref: &str) -> Result<(), String> {
+    macos_keychain_delete_password(credential_ref)
+}
+
+#[cfg(target_os = "macos")]
+type OsStatus = i32;
+#[cfg(target_os = "macos")]
+type SecKeychainRef = *const std::os::raw::c_void;
+#[cfg(target_os = "macos")]
+type SecKeychainItemRef = *mut std::os::raw::c_void;
+
+#[cfg(target_os = "macos")]
+const ERR_SEC_SUCCESS: OsStatus = 0;
+#[cfg(target_os = "macos")]
+const ERR_SEC_ITEM_NOT_FOUND: OsStatus = -25300;
+
+#[cfg(target_os = "macos")]
+#[link(name = "Security", kind = "framework")]
+unsafe extern "C" {
+    fn SecKeychainAddGenericPassword(
+        keychain: SecKeychainRef,
+        serviceNameLength: u32,
+        serviceName: *const std::os::raw::c_char,
+        accountNameLength: u32,
+        accountName: *const std::os::raw::c_char,
+        passwordLength: u32,
+        passwordData: *const std::os::raw::c_void,
+        itemRef: *mut SecKeychainItemRef,
+    ) -> OsStatus;
+
+    fn SecKeychainFindGenericPassword(
+        keychain: SecKeychainRef,
+        serviceNameLength: u32,
+        serviceName: *const std::os::raw::c_char,
+        accountNameLength: u32,
+        accountName: *const std::os::raw::c_char,
+        passwordLength: *mut u32,
+        passwordData: *mut *mut std::os::raw::c_void,
+        itemRef: *mut SecKeychainItemRef,
+    ) -> OsStatus;
+
+    fn SecKeychainItemModifyAttributesAndData(
+        itemRef: SecKeychainItemRef,
+        attrList: *const std::os::raw::c_void,
+        length: u32,
+        data: *const std::os::raw::c_void,
+    ) -> OsStatus;
+
+    fn SecKeychainItemDelete(itemRef: SecKeychainItemRef) -> OsStatus;
+
+    fn SecKeychainItemFreeContent(
+        attrList: *mut std::os::raw::c_void,
+        data: *mut std::os::raw::c_void,
+    ) -> OsStatus;
+}
+
+#[cfg(target_os = "macos")]
+#[link(name = "CoreFoundation", kind = "framework")]
+unsafe extern "C" {
+    fn CFRelease(cf: *const std::os::raw::c_void);
+}
+
+#[cfg(target_os = "macos")]
+fn macos_keychain_save_password(credential_ref: &str, secret: &str) -> Result<(), String> {
+    let service = MACOS_KEYCHAIN_SERVICE.as_bytes();
+    let account = credential_ref.as_bytes();
+    let password = secret.as_bytes();
+    let service_len = macos_len(service.len(), "Keychain service")?;
+    let account_len = macos_len(account.len(), "Keychain account")?;
+    let password_len = macos_len(password.len(), "Keychain password")?;
+    let mut item_ref: SecKeychainItemRef = std::ptr::null_mut();
+
+    let find_status = unsafe {
+        SecKeychainFindGenericPassword(
+            std::ptr::null(),
+            service_len,
+            service.as_ptr() as *const std::os::raw::c_char,
+            account_len,
+            account.as_ptr() as *const std::os::raw::c_char,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut item_ref,
+        )
+    };
+
+    if find_status == ERR_SEC_SUCCESS {
+        let update_status = unsafe {
+            SecKeychainItemModifyAttributesAndData(
+                item_ref,
+                std::ptr::null(),
+                password_len,
+                password.as_ptr() as *const std::os::raw::c_void,
+            )
+        };
+        macos_release_item(item_ref);
+        return macos_status_to_result(update_status, "update login credential in macOS Keychain");
+    }
+    if find_status != ERR_SEC_ITEM_NOT_FOUND {
+        return macos_status_to_result(find_status, "find login credential in macOS Keychain");
+    }
+
+    let add_status = unsafe {
+        SecKeychainAddGenericPassword(
+            std::ptr::null(),
+            service_len,
+            service.as_ptr() as *const std::os::raw::c_char,
+            account_len,
+            account.as_ptr() as *const std::os::raw::c_char,
+            password_len,
+            password.as_ptr() as *const std::os::raw::c_void,
+            std::ptr::null_mut(),
+        )
+    };
+    macos_status_to_result(add_status, "save login credential to macOS Keychain")
+}
+
+#[cfg(target_os = "macos")]
+fn macos_keychain_read_password(credential_ref: &str) -> Result<String, String> {
+    let service = MACOS_KEYCHAIN_SERVICE.as_bytes();
+    let account = credential_ref.as_bytes();
+    let service_len = macos_len(service.len(), "Keychain service")?;
+    let account_len = macos_len(account.len(), "Keychain account")?;
+    let mut password_len: u32 = 0;
+    let mut password_data: *mut std::os::raw::c_void = std::ptr::null_mut();
+
+    let status = unsafe {
+        SecKeychainFindGenericPassword(
+            std::ptr::null(),
+            service_len,
+            service.as_ptr() as *const std::os::raw::c_char,
+            account_len,
+            account.as_ptr() as *const std::os::raw::c_char,
+            &mut password_len,
+            &mut password_data,
+            std::ptr::null_mut(),
+        )
+    };
+    if status != ERR_SEC_SUCCESS {
+        return macos_status_to_result(status, "read login credential from macOS Keychain")
+            .map(|_| String::new());
+    }
+
+    let password = unsafe {
+        let bytes = std::slice::from_raw_parts(password_data as *const u8, password_len as usize);
+        String::from_utf8(bytes.to_vec())
+    }
+    .map_err(|err| format!("macOS Keychain returned non-UTF-8 login credential: {}", err));
+    unsafe {
+        SecKeychainItemFreeContent(std::ptr::null_mut(), password_data);
+    }
+    password
+}
+
+#[cfg(target_os = "macos")]
+fn macos_keychain_delete_password(credential_ref: &str) -> Result<(), String> {
+    let service = MACOS_KEYCHAIN_SERVICE.as_bytes();
+    let account = credential_ref.as_bytes();
+    let service_len = macos_len(service.len(), "Keychain service")?;
+    let account_len = macos_len(account.len(), "Keychain account")?;
+    let mut item_ref: SecKeychainItemRef = std::ptr::null_mut();
+
+    let find_status = unsafe {
+        SecKeychainFindGenericPassword(
+            std::ptr::null(),
+            service_len,
+            service.as_ptr() as *const std::os::raw::c_char,
+            account_len,
+            account.as_ptr() as *const std::os::raw::c_char,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut item_ref,
+        )
+    };
+    if find_status == ERR_SEC_ITEM_NOT_FOUND {
+        return Ok(());
+    }
+    if find_status != ERR_SEC_SUCCESS {
+        return macos_status_to_result(find_status, "find login credential in macOS Keychain");
+    }
+
+    let delete_status = unsafe { SecKeychainItemDelete(item_ref) };
+    macos_release_item(item_ref);
+    macos_status_to_result(delete_status, "delete login credential from macOS Keychain")
+}
+
+#[cfg(target_os = "macos")]
+fn macos_release_item(item_ref: SecKeychainItemRef) {
+    if !item_ref.is_null() {
+        unsafe {
+            CFRelease(item_ref as *const std::os::raw::c_void);
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_status_to_result(status: OsStatus, action: &str) -> Result<(), String> {
+    if status == ERR_SEC_SUCCESS {
+        Ok(())
+    } else if status == ERR_SEC_ITEM_NOT_FOUND {
+        Err(format!("macOS Keychain failed to {}: item not found", action))
+    } else {
+        Err(format!(
+            "macOS Keychain failed to {}: OSStatus {}",
+            action, status
+        ))
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_len(len: usize, label: &str) -> Result<u32, String> {
+    u32::try_from(len).map_err(|_| format!("{} is too large for macOS Keychain", label))
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+fn protect_login_secret_impl(_credential_ref: &str, _secret: &str) -> Result<String, String> {
+    Err("secure login credential storage is not supported on this operating system".to_string())
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+fn unprotect_login_secret_impl(_credential_ref: &str, _encrypted: &str) -> Result<String, String> {
+    Err("secure login credential storage is not supported on this operating system".to_string())
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+fn delete_login_secret_impl(_credential_ref: &str) -> Result<(), String> {
+    Ok(())
 }
 
 fn build_migration_preview(

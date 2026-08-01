@@ -48,6 +48,7 @@ import {
   cleanupBuiltinChromiumData,
   listBrowserProfiles,
   checkBitbrowserApi,
+  openBitbrowserDownloadPage,
   getCurrentRunStatus,
   runTikTokRegister,
   runTikTokRegisterBatch,
@@ -1054,6 +1055,14 @@ function AccountForm({
     }
   };
 
+  const openBitbrowserDownload = async () => {
+    try {
+      await openBitbrowserDownloadPage();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : String(error));
+    }
+  };
+
   const testAutoLogin = async () => {
     const account = await ensureCredentialAccount();
     if (!account) {
@@ -1143,7 +1152,13 @@ function AccountForm({
         rules={[{ required: true }]}
         extra={
           bitbrowserUnavailable ? (
-            <Typography.Link href={BITBROWSER_DOWNLOAD_URL} target="_blank">
+            <Typography.Link
+              href={BITBROWSER_DOWNLOAD_URL}
+              onClick={(event) => {
+                event.preventDefault();
+                void openBitbrowserDownload();
+              }}
+            >
               下载 BitBrowser
             </Typography.Link>
           ) : null

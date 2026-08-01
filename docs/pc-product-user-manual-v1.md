@@ -1,7 +1,7 @@
 ﻿# Account Matrix PC 端产品使用手册 V1
 
-版本：V1.5
-日期：2026-07-31
+版本：V1.6
+日期：2026-08-01
 适用对象：负责账号配置、浏览器环境维护、TikTok 注册、养号任务执行、调度巡检和数据查看的运营或技术人员。
 
 ## 1. 产品概述
@@ -96,18 +96,25 @@ cd E:\YAOWU\yangHao\account-matrix
 .\desktop-build.ps1
 ```
 
+如果当前终端找不到 Windows `py` 启动器，但项目虚拟环境已存在，可指定运行时构建使用的 Python：
+
+```powershell
+cd E:\YAOWU\yangHao\account-matrix
+.\desktop-build.ps1 -Python ".runtime-build-venv\Scripts\python.exe"
+```
+
 打包成功后，NSIS 安装包位于：
 
 ```text
 desktop\src-tauri\target\release\bundle\nsis\Account Matrix_0.1.0_x64-setup.exe
 ```
 
-2026-07-30 重新打包产物信息：
+2026-08-01 重新打包产物信息：
 
 ```text
 文件：desktop\src-tauri\target\release\bundle\nsis\Account Matrix_0.1.0_x64-setup.exe
-大小：44,101,633 bytes
-SHA256：BB17CC2B34A684D511B9EEB1956056C2FC8A53445212A6BEAD3D48A6D81800C1
+大小：44,136,713 bytes
+SHA256：FAB8AC28DF36E05AADED9CE1C25E92B713A2F9439BC93F143DCBFDF836F004A2
 runtime：account-matrix-runtime.exe 0.1.0
 ```
 
@@ -259,6 +266,7 @@ V1 状态：
 - `运行班次`：例如上午班 `[9, 12]`，晚上班 `[19, 23]`。
 - `浏览器提供方`：默认 `BitBrowser`。可改为 `内置 Chromium`，但需要确认它是生产可选方案，不等价替代 BitBrowser 指纹环境能力。
 - `BitBrowser 窗口 ID`：当浏览器提供方为 `BitBrowser` 时填写，对应 `bitbrowser_profile_id` 或 `browser.profile_id`。
+- 如果本机没有安装 BitBrowser，且 BitBrowser API 当前不可用，表单中的 `下载 BitBrowser` 会通过系统默认浏览器打开 `https://www.bitbrowser.cn/download`。Windows 安装版会隐藏用于打开外部浏览器的临时控制台窗口。
 - `代理协议`、`代理`、`用户数据目录`：当浏览器提供方为 `内置 Chromium` 时填写。代理支持 `http`、`https`、`socks5`；用户数据目录可留空，系统会自动使用 `data/browser/builtin_chromium/<账号>/user-data`。
 - `自动登录`：开启后任务启动前会尝试保障平台登录态。
 - `登录邮箱/用户名`：自动登录开启时必填，可填写邮箱、用户名或手机号。
@@ -271,9 +279,10 @@ V1 状态：
 
 - `accounts.yaml` 只保存 `login.enabled`、`login.method`、`login.username` 和 `login.credential_ref`。
 - 密码通过本机安全凭据存储保存，页面只显示凭据状态，不回显明文。
+- Windows 版本使用当前 Windows 用户上下文的 DPAPI 加密凭据文件；macOS 构建使用系统 Keychain 保存同一 `credential_ref` 对应的密码。跨系统复制 `accounts.yaml` 时，需要在目标机器重新保存密码。
 - 开启自动登录前必须先保存账号并保存密码，否则启动任务时会提示缺少凭据。
 - `检查凭据` 只验证本机凭据是否存在且可读取；真实网页登录状态会在任务运行时检测。
-- `删除密码` 只删除本机保存的凭据，不删除账号配置。
+- `删除密码` 会删除本机保存的凭据。Windows 版本会删除凭据文件；macOS 构建会同步删除 Keychain 中对应项目；该操作不删除账号配置。
 
 ### 5.3 编辑账号
 
@@ -1001,6 +1010,7 @@ BitBrowser 账号重点检查 `profile_id` 和 Local API；内置 Chromium 账�
 2. 确认 BitBrowser Local API 已开启。
 3. 进入 `系统设置`，确认 API 地址是 `http://127.0.0.1:54345` 或实际地址。
 4. 点击顶部 `刷新`。
+5. 如果本机尚未安装 BitBrowser，可在账号管理新增或编辑账号时点击 `下载 BitBrowser`，系统会用默认浏览器打开官方下载页。
 
 ### 18.2 启动任务失败
 
@@ -1085,7 +1095,7 @@ BitBrowser 账号重点检查 `profile_id` 和 Local API；内置 Chromium 账�
 
 处理方式：
 
-1. 更新到 2026-07-30 或之后的安装包。
+1. 更新到 2026-08-01 或之后的安装包。
 2. 通过 PC 端按钮启动任务，不要手动双击 `account-matrix-runtime.exe`。
 3. 若仍弹出黑框，确认正在运行的是新安装包，并在系统设置中保持 `运行模式` 为 `内置运行时`。
 
@@ -1127,6 +1137,7 @@ BitBrowser 账号重点检查 `profile_id` 和 Local API；内置 Chromium 账�
 - 目标号互动建议先小范围验证，再扩大参与账号。
 - 评论素材尽量避免大量重复、过短或明显模板化。
 - 自动登录密码只通过本机安全凭据存储维护，不要写入 `accounts.yaml`、备注或评论素材文件。
+- 凭据只保证在当前操作系统用户上下文内可读。更换云电脑、Windows 用户或迁移到 macOS 后，需要重新保存账号密码。
 - TikTok 注册不会把 cookie/session 明文写入 `accounts.yaml`、日志、配置备份或普通 JSON；如后续需要导出 storage state，必须先加密后再保存到 data 目录。
 - TikTok 注册入口只负责注册和保存登录态；FYP 养号、点赞、关注、评论和目标号互动必须从对应任务页面启动。
 - V1 仅 TikTok 支持真实自动执行，其他平台不要作为生产任务入口。

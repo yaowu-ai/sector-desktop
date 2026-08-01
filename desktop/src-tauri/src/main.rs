@@ -48,6 +48,7 @@ fn main() {
             commands::settings::test_notification,
             commands::diagnostics::get_runtime_diagnostics,
             commands::diagnostics::export_support_bundle,
+            commands::external::open_bitbrowser_download_page,
             commands::bitbrowser::check_bitbrowser_api,
             commands::bitbrowser::get_browser_provider_matrix,
             commands::bitbrowser::diagnose_account_browser,

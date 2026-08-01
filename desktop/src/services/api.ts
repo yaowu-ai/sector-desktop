@@ -215,6 +215,10 @@ export function checkBitbrowserApi() {
   return invoke<ApiStatus>('check_bitbrowser_api')
 }
 
+export function openBitbrowserDownloadPage() {
+  return invoke<void>('open_bitbrowser_download_page')
+}
+
 export function getBrowserProviderMatrix() {
   return invoke<BrowserProviderCapability[]>('get_browser_provider_matrix')
 }
