@@ -10,6 +10,7 @@ any manual `python main.py` invocation.
 """
 import asyncio
 import argparse
+import hashlib
 import logging
 import os
 import random
@@ -25,10 +26,11 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
 
 from core import runtime as main_runtime
-from core.runner import run
+from core.runner import run, find_account
 from core.runtime import acquire_lock, pid_alive, release_lock
 from runtime_config import resolve_config_path
 from platform_config import account_platform, load_runtime_config, scheduler_config
+from browser_providers import account_provider_name, BITBROWSER
 
 
 def setup_windows_event_loop():
@@ -59,11 +61,16 @@ scheduler = AsyncIOScheduler(
 # land close together; this serialises them so we never drive two profiles at once
 # (the file lock only guards against a *separate* manual `python main.py`).
 session_lock = asyncio.Lock()
+config_fingerprint = None
 
 
 def load_config():
     with open(CONFIG_PATH, encoding="utf-8") as f:
         return load_runtime_config(yaml.safe_load(f))
+
+
+def current_config_fingerprint():
+    return hashlib.sha256(CONFIG_PATH.read_bytes()).hexdigest()
 
 
 def configure_runtime(config_path=None):
@@ -108,18 +115,33 @@ def resolve_active_hours(account, cfg):
         platform_scheduler.get("active_hours", [[9, 12], [19, 23]])
 
 
-async def account_session_task(account_id):
+async def account_session_task(account_id, job_id=None):
     """One scheduled fire for a single account.
 
     `main.run()` is synchronous (sync_playwright), so we offload it to the default
     thread executor. `session_lock` keeps fires from overlapping; the file lock
     inside `run` still guards against a separate manual run.
     """
-    if not bitbrowser_responsive():
-        logger.error(
-            f"Skipped {account_id} — BitBrowser API unreachable on 127.0.0.1:54345. "
-            "Is the BitBrowser app running?"
-        )
+    job_id = job_id or f"fire_{account_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    platform = "tiktok"
+    try:
+        cfg = load_config()
+        account = find_account(cfg, account_id)
+        platform = account_platform(account)
+        provider = account_provider_name(account, cfg)
+    except Exception as e:
+        detail = f"could not resolve account config: {e}"
+        main_runtime.record_scheduler_job_started(job_id, platform, account_id)
+        main_runtime.record_scheduler_job_finished(job_id, "skipped", detail)
+        logger.error(f"Fire aborted: {account_id} — {detail}")
+        return
+
+    main_runtime.record_scheduler_job_started(job_id, platform, account_id)
+
+    if provider == BITBROWSER and not bitbrowser_responsive():
+        detail = "BitBrowser API unreachable on 127.0.0.1:54345. Is the BitBrowser app running?"
+        main_runtime.record_scheduler_job_finished(job_id, "skipped", detail)
+        logger.error(f"Skipped {account_id} — {detail}")
         return
 
     async with session_lock:
@@ -128,21 +150,34 @@ async def account_session_task(account_id):
 
         def sync_call():
             if is_locked_externally():
-                logger.warning(f"Skipped {account_id} — manual run holds the lock")
-                return
+                return ("skipped", "manual run holds the lock")
             try:
                 acquire_lock()
             except SystemExit:
-                logger.warning(f"Skipped {account_id} — lock taken between check and acquire")
-                return
+                return ("skipped", "lock taken between check and acquire")
             try:
-                run(account_id=account_id)
+                summaries = run(account_id=account_id)
             finally:
                 release_lock()
+            if not summaries:
+                return ("skipped", "no executable account runner")
+            failed = [item for item in summaries if item.get("status") == "error"]
+            skipped = [item for item in summaries if item.get("status") == "skip"]
+            if failed:
+                return ("failed", failed[0].get("error") or "account run failed")
+            if skipped:
+                return ("skipped", skipped[0].get("error") or "account run skipped")
+            return ("success", "")
 
         try:
-            await loop.run_in_executor(None, sync_call)
+            status, detail = await loop.run_in_executor(None, sync_call)
+            main_runtime.record_scheduler_job_finished(job_id, status, detail)
+            if status == "skipped":
+                logger.warning(f"Skipped {account_id} — {detail}")
+            elif status == "failed":
+                logger.error(f"Fire failed: {account_id} — {detail}")
         except Exception as e:
+            main_runtime.record_scheduler_job_finished(job_id, "failed", str(e))
             logger.error(f"Fire failed: {account_id} — {e}", exc_info=True)
         logger.info(f"Fire end: {account_id}")
 
@@ -219,10 +254,16 @@ def schedule_today_fires():
     non-overlapping windows), not from spacing here. Accounts run one at a time
     via `session_lock`, so within a shift distinct-IP accounts are simply queued.
     """
+    global config_fingerprint
+
     cfg = load_config()
     sched_cfg = scheduler_config(cfg, "tiktok")
     fires_per_day = int(sched_cfg.get("fires_per_day", 3))
     accounts = executable_accounts(cfg)
+
+    for job in scheduler.get_jobs():
+        if job.id.startswith("fire_"):
+            scheduler.remove_job(job.id)
 
     now = datetime.now()
     total = 0
@@ -234,19 +275,45 @@ def schedule_today_fires():
 
         fires = [f for f in generate_fire_times(active_hours, fires_per_day) if f > now]
         for f in fires:
+            job_id = f"fire_{acc_id}_{f.strftime('%Y%m%d_%H%M%S')}"
             scheduler.add_job(
                 account_session_task,
                 trigger="date",
                 run_date=f,
-                id=f"fire_{acc_id}_{f.strftime('%Y%m%d_%H%M%S')}",
-                args=[acc_id],
+                id=job_id,
+                args=[acc_id, job_id],
                 replace_existing=True,
+            )
+            main_runtime.record_scheduler_job_scheduled(
+                job_id,
+                account_platform(acc),
+                acc_id,
+                f.isoformat(),
             )
             logger.info(f"Scheduled {acc_id} at {f.isoformat()} (ip_group={group})")
         total += len(fires)
 
     if total == 0:
         logger.warning("No fires scheduled for today (active_hours already past)")
+    config_fingerprint = current_config_fingerprint()
+
+
+def reload_schedule_if_config_changed():
+    try:
+        fingerprint = current_config_fingerprint()
+    except OSError as exc:
+        logger.error(f"Failed to inspect scheduler config: {exc}")
+        return
+
+    if fingerprint == config_fingerprint:
+        return
+
+    logger.info("accounts.yaml changed; rebuilding remaining scheduler jobs")
+    try:
+        validate_ip_groups(load_config())
+        schedule_today_fires()
+    except Exception as exc:
+        logger.error(f"Failed to reload scheduler config: {exc}", exc_info=True)
 
 
 def setup_scheduler():
@@ -262,6 +329,14 @@ def setup_scheduler():
         replace_existing=True,
     )
     logger.info("Daily reschedule job set for 00:05")
+    scheduler.add_job(
+        reload_schedule_if_config_changed,
+        trigger="interval",
+        seconds=10,
+        id="config_reload",
+        replace_existing=True,
+    )
+    logger.info("Config reload check set for every 10 seconds")
 
 
 @asynccontextmanager
@@ -300,7 +375,13 @@ async def health():
             "id": j.id,
             "next_run": j.next_run_time.isoformat() if j.next_run_time else None,
         })
-    return {"status": "ok", "jobs": jobs, "lock_held_externally": is_locked_externally()}
+    return {
+        "status": "ok",
+        "process_id": os.getpid(),
+        "config_path": str(CONFIG_PATH.resolve()),
+        "jobs": jobs,
+        "lock_held_externally": is_locked_externally(),
+    }
 
 
 if __name__ == "__main__":

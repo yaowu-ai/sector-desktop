@@ -568,6 +568,26 @@ export interface ActionLogFilter {
   limit?: number
 }
 
+export interface SchedulerJobRunFilter {
+  platform?: Platform | 'all'
+  accountId?: string
+  startTs?: string
+  endTs?: string
+  includePending?: boolean
+  limit?: number
+}
+
+export interface SchedulerJobRunRecord {
+  jobId: string
+  platform: Platform
+  accountId: string
+  scheduledRun?: string
+  status: 'pending' | 'running' | 'success' | 'failed' | 'skipped' | string
+  startedAt?: string
+  endedAt?: string
+  detail: string
+}
+
 export interface TargetRecordFilter {
   platform?: Platform | 'all'
   accountId?: string
@@ -694,6 +714,7 @@ export interface SqliteStatus {
   path: string
   exists: boolean
   actionLog: boolean
+  schedulerJobRuns: boolean
   targetEngagements: boolean
   targetFollows: boolean
 }

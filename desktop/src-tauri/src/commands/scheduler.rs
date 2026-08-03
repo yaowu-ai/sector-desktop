@@ -1,5 +1,6 @@
 use chrono::Local;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -9,7 +10,6 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 use tauri::State;
 
-use crate::commands::bitbrowser::check_bitbrowser_api;
 use crate::commands::config::load_config;
 use crate::paths::{normalize, project_paths, project_root, python_command_parts, ProjectPaths};
 use crate::state::AppState;
@@ -106,6 +106,8 @@ struct RawHealthJob {
 #[derive(Debug, Deserialize)]
 struct RawHealth {
     status: String,
+    process_id: Option<u32>,
+    config_path: Option<String>,
     jobs: Vec<RawHealthJob>,
     lock_held_externally: Option<bool>,
 }
@@ -129,16 +131,39 @@ pub fn start_scheduler(state: State<'_, AppState>) -> Result<SchedulerStartResul
         }
     }
 
-    let api_status = check_bitbrowser_api();
-    if !api_status.available() {
+    let paths = project_paths()?;
+    if let Ok(raw) = read_health_endpoint() {
+        let process_id = raw.process_id.or_else(scheduler_port_process_id);
+        if raw
+            .config_path
+            .as_deref()
+            .map(|path| same_path(path, &paths.config_path))
+            .unwrap_or(false)
+        {
+            if let Some(process_id) = process_id.filter(|pid| process_is_alive(*pid)) {
+                let mut scheduler = state
+                    .scheduler_process
+                    .lock()
+                    .map_err(|_| "failed to lock scheduler state".to_string())?;
+                *scheduler = Some(process_id);
+                return Ok(SchedulerStartResult {
+                    process_id,
+                    command: scheduler_command_for_paths(&paths)?.0,
+                    status: "running".to_string(),
+                });
+            }
+        }
+
         return Err(format!(
-            "BitBrowser API is not available at {}: {}",
-            api_status.api_url(),
-            api_status.error().unwrap_or("unknown error")
+            "scheduler port {} is already occupied by an existing scheduler{}; stop it before starting the current configuration {}",
+            SCHEDULER_PORT,
+            process_id
+                .map(|pid| format!(" (PID {})", pid))
+                .unwrap_or_default(),
+            paths.config_path
         ));
     }
 
-    let paths = project_paths()?;
     let (command, current_dir) = scheduler_command_for_paths(&paths)?;
     let mut command_builder = Command::new(&command[0]);
     command_builder
@@ -182,9 +207,15 @@ fn hide_console_window(command: &mut Command) {
     }
 }
 
+fn hidden_command(program: &str) -> Command {
+    let mut command = Command::new(program);
+    hide_console_window(&mut command);
+    command
+}
+
 #[tauri::command]
 pub fn stop_scheduler(state: State<'_, AppState>) -> Result<SchedulerStopResult, String> {
-    let process_id = {
+    let mut process_id = {
         let scheduler = state
             .scheduler_process
             .lock()
@@ -192,11 +223,16 @@ pub fn stop_scheduler(state: State<'_, AppState>) -> Result<SchedulerStopResult,
         *scheduler
     };
 
+    if process_id.is_none() && read_health_endpoint().is_ok() {
+        process_id = scheduler_port_process_id();
+    }
+
     let Some(process_id) = process_id else {
         return Ok(SchedulerStopResult {
             status: "stopped".to_string(),
             process_id: None,
-            message: "scheduler process is not tracked".to_string(),
+            message: "scheduler endpoint is not running or its process could not be identified"
+                .to_string(),
         });
     };
 
@@ -252,13 +288,50 @@ pub fn get_scheduler_process_status(
                 error: Some("tracked scheduler process is no longer alive".to_string()),
             })
         }
-        None => Ok(SchedulerProcessStatus {
-            status: "stopped".to_string(),
-            process_id: None,
-            command: scheduler_command()?,
-            health_url: health_url(),
-            error: None,
-        }),
+        None => match read_health_endpoint() {
+            Ok(raw) => {
+                let paths = project_paths()?;
+                let discovered_pid = raw.process_id.or_else(scheduler_port_process_id);
+                if raw
+                    .config_path
+                    .as_deref()
+                    .map(|path| same_path(path, &paths.config_path))
+                    .unwrap_or(false)
+                {
+                    if let Some(process_id) = discovered_pid.filter(|pid| process_is_alive(*pid)) {
+                        let mut scheduler = state
+                            .scheduler_process
+                            .lock()
+                            .map_err(|_| "failed to lock scheduler state".to_string())?;
+                        *scheduler = Some(process_id);
+                        return Ok(SchedulerProcessStatus {
+                            status: "running".to_string(),
+                            process_id: Some(process_id),
+                            command: scheduler_command_for_paths(&paths)?.0,
+                            health_url: health_url(),
+                            error: None,
+                        });
+                    }
+                }
+                Ok(SchedulerProcessStatus {
+                    status: "error".to_string(),
+                    process_id: discovered_pid,
+                    command: scheduler_command_for_paths(&paths)?.0,
+                    health_url: health_url(),
+                    error: Some(
+                        "an untracked scheduler is using port 9601 with a different or unknown config path"
+                            .to_string(),
+                    ),
+                })
+            }
+            Err(_) => Ok(SchedulerProcessStatus {
+                status: "stopped".to_string(),
+                process_id: None,
+                command: scheduler_command()?,
+                health_url: health_url(),
+                error: None,
+            }),
+        },
     }
 }
 
@@ -272,6 +345,40 @@ pub fn get_scheduler_health(state: State<'_, AppState>) -> Result<SchedulerHealt
 
     match read_health_endpoint() {
         Ok(raw) => {
+            let expected_config_path = project_paths()?.config_path;
+            if raw
+                .config_path
+                .as_deref()
+                .map(|path| !same_path(path, &expected_config_path))
+                .unwrap_or(false)
+            {
+                return Ok(SchedulerHealth {
+                    status: "error".to_string(),
+                    process_id: raw.process_id.or_else(scheduler_port_process_id),
+                    jobs: vec![],
+                    next_run: None,
+                    next_account_id: None,
+                    lock_held_externally: raw.lock_held_externally,
+                    today_schedule_count: 0,
+                    fires_per_day,
+                    run_lock,
+                    ip_group_conflicts,
+                    error: Some(format!(
+                        "scheduler is using {}, but the app is using {}; stop and restart the scheduler",
+                        raw.config_path.as_deref().unwrap_or("an unknown config"),
+                        expected_config_path
+                    )),
+                });
+            }
+
+            let scheduled_account_ids = config
+                .accounts()
+                .iter()
+                .filter(|account| {
+                    account.enabled() && account.scheduled() && account.platform() == "tiktok"
+                })
+                .map(|account| account.id().to_string())
+                .collect::<HashSet<_>>();
             let mut jobs = raw
                 .jobs
                 .into_iter()
@@ -280,6 +387,12 @@ pub fn get_scheduler_health(state: State<'_, AppState>) -> Result<SchedulerHealt
                     status: Some("scheduled".to_string()),
                     id: job.id,
                     next_run: job.next_run,
+                })
+                .filter(|job| {
+                    job.account_id
+                        .as_ref()
+                        .map(|account_id| scheduled_account_ids.contains(account_id))
+                        .unwrap_or(false)
                 })
                 .collect::<Vec<_>>();
             jobs.sort_by(|left, right| {
@@ -310,7 +423,10 @@ pub fn get_scheduler_health(state: State<'_, AppState>) -> Result<SchedulerHealt
                 } else {
                     raw.status
                 },
-                process_id: process.process_id,
+                process_id: process
+                    .process_id
+                    .or(raw.process_id)
+                    .or_else(scheduler_port_process_id),
                 next_run: next_job.and_then(|job| job.next_run.clone()),
                 next_account_id: next_job.and_then(|job| job.account_id.clone()),
                 jobs,
@@ -466,6 +582,61 @@ fn read_health_endpoint() -> Result<RawHealth, String> {
         .map_err(|err| format!("failed to parse scheduler health response: {}", err))
 }
 
+fn same_path(left: &str, right: &str) -> bool {
+    let normalize_value = |value: &str| {
+        let normalized = value.replace('\\', "/").trim_end_matches('/').to_string();
+        #[cfg(windows)]
+        {
+            normalized.to_lowercase()
+        }
+        #[cfg(not(windows))]
+        {
+            normalized
+        }
+    };
+    normalize_value(left) == normalize_value(right)
+}
+
+fn scheduler_port_process_id() -> Option<u32> {
+    #[cfg(windows)]
+    {
+        let output = hidden_command("netstat")
+            .args(["-ano", "-p", "tcp"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        for line in String::from_utf8_lossy(&output.stdout).lines() {
+            let columns = line.split_whitespace().collect::<Vec<_>>();
+            if columns.len() >= 5
+                && columns[1].ends_with(&format!(":{}", SCHEDULER_PORT))
+                && columns[3].eq_ignore_ascii_case("LISTENING")
+            {
+                if let Ok(process_id) = columns[4].parse::<u32>() {
+                    return Some(process_id);
+                }
+            }
+        }
+        None
+    }
+
+    #[cfg(not(windows))]
+    {
+        let output = hidden_command("lsof")
+            .args(["-t", &format!("-iTCP:{}", SCHEDULER_PORT), "-sTCP:LISTEN"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .output()
+            .ok()?;
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .find_map(|line| line.trim().parse::<u32>().ok())
+    }
+}
+
 fn read_run_lock_status() -> Result<RunLockStatus, String> {
     let paths = project_paths()?;
     let lock_path = std::path::PathBuf::from(&paths.lock_file_path);
@@ -542,7 +713,7 @@ fn account_id_from_job_id(job_id: &str) -> Option<String> {
 fn process_is_alive(process_id: u32) -> bool {
     #[cfg(windows)]
     {
-        let Ok(output) = Command::new("tasklist")
+        let Ok(output) = hidden_command("tasklist")
             .args([
                 "/FI",
                 &format!("PID eq {}", process_id),
@@ -564,7 +735,7 @@ fn process_is_alive(process_id: u32) -> bool {
 
     #[cfg(not(windows))]
     {
-        Command::new("kill")
+        hidden_command("kill")
             .args(["-0", &process_id.to_string()])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -577,7 +748,7 @@ fn process_is_alive(process_id: u32) -> bool {
 fn stop_process(process_id: u32) -> Result<(), String> {
     #[cfg(windows)]
     {
-        let status = Command::new("taskkill")
+        let status = hidden_command("taskkill")
             .args(["/PID", &process_id.to_string(), "/T", "/F"])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -594,7 +765,7 @@ fn stop_process(process_id: u32) -> Result<(), String> {
 
     #[cfg(not(windows))]
     {
-        let status = Command::new("kill")
+        let status = hidden_command("kill")
             .arg(process_id.to_string())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -604,5 +775,31 @@ fn stop_process(process_id: u32) -> Result<(), String> {
             return Err(format!("kill failed for scheduler process {}", process_id));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{account_id_from_job_id, same_path};
+
+    #[test]
+    fn parses_account_ids_with_underscores() {
+        assert_eq!(
+            account_id_from_job_id("fire_tiktok_109_20260803_090400").as_deref(),
+            Some("tiktok_109")
+        );
+        assert_eq!(account_id_from_job_id("daily_reschedule"), None);
+    }
+
+    #[test]
+    fn compares_normalized_config_paths() {
+        assert!(same_path(
+            "C:\\Account Matrix\\config\\accounts.yaml",
+            "C:/Account Matrix/config/accounts.yaml"
+        ));
+        assert!(!same_path(
+            "C:/Account Matrix/config/accounts.yaml",
+            "D:/Account Matrix/config/accounts.yaml"
+        ));
     }
 }

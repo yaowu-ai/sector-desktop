@@ -5,7 +5,7 @@ import time
 from typing import Any, Mapping
 
 from core import runtime
-from patchright_runtime import start_sync_playwright
+from patchright_runtime import start_sync_playwright, stop_sync_playwright
 from platforms.registration.base import (
     RegistrationAdapter,
     RegistrationErrorCode,
@@ -33,6 +33,9 @@ CONTINUE_WITH_GOOGLE_SELECTORS = [
     'button:has-text("Continue with Google")',
     '[role="button"]:has-text("Continue with Google")',
     'text=/Continue with Google/i',
+    'button:has-text("\u4f7f\u7528 Google \u767b\u5f55")',
+    '[role="button"]:has-text("\u4f7f\u7528 Google \u767b\u5f55")',
+    'text=/\u4f7f\u7528\\s*Google\\s*\u767b\u5f55/i',
 ]
 
 BIRTHDAY_SELECTORS = {
@@ -99,6 +102,10 @@ GOOGLE_EMAIL_SELECTORS = [
     'input[autocomplete="username"]',
     'input[aria-label*="Email" i]',
     'input[aria-label*="phone" i]',
+    'input[aria-label*="\u90ae\u7bb1"]',
+    'input[aria-label*="\u7535\u8bdd\u53f7\u7801"]',
+    'input[placeholder*="\u90ae\u7bb1"]',
+    'input[placeholder*="\u7535\u8bdd\u53f7\u7801"]',
     'input[name="identifier"]',
 ]
 
@@ -106,12 +113,17 @@ GOOGLE_PASSWORD_SELECTORS = [
     'input[type="password"]',
     'input[autocomplete="current-password"]',
     'input[aria-label*="password" i]',
+    'input[aria-label*="\u5bc6\u7801"]',
+    'input[placeholder*="\u5bc6\u7801"]',
     'input[name="Passwd"]',
 ]
 
 GOOGLE_NEXT_SELECTORS = [
     'button:has-text("Next")',
     '[role="button"]:has-text("Next")',
+    'button:has-text("\u4e0b\u4e00\u6b65")',
+    '[role="button"]:has-text("\u4e0b\u4e00\u6b65")',
+    'text=/^\u4e0b\u4e00\u6b65$/',
     '#identifierNext button',
     '#passwordNext button',
 ]
@@ -359,7 +371,23 @@ class TikTokGoogleRegistrationAdapter:
                             manual_reason="registration_google_flow_pending",
                         )
                     finally:
-                        playwright_manager.__exit__()
+                        cleanup_error = stop_sync_playwright(playwright_manager)
+                        if cleanup_error:
+                            cleanup_detail = runtime.redact_runtime_text(
+                                f"Patchright cleanup failed: {cleanup_error}"
+                            )
+                            runtime.session_log(
+                                f"{account_id} | REGISTER RUNTIME CLEANUP | warning: {cleanup_detail}",
+                                self.platform,
+                            )
+                            runtime.log_action(
+                                conn,
+                                self.platform,
+                                account_id,
+                                "register_runtime_cleanup",
+                                "warning",
+                                cleanup_detail,
+                            )
                 except Exception as exc:
                     detail = registration_network_error_detail(exc)
                     error_code = registration_error_code_for_exception(

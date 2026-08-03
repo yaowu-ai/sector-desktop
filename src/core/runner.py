@@ -53,7 +53,7 @@ def run(account_id=None, platform=None):
     if not executable_accounts:
         scope = f" {requested_platform}" if requested_platform else ""
         print(f"[info] no executable{scope} accounts to run")
-        return
+        return []
 
     runtime.session_log(f"BATCH START | {len(executable_accounts)} account(s)")
     conn = runtime.init_db()
@@ -77,6 +77,7 @@ def run(account_id=None, platform=None):
     title, body = build_batch_message(summaries)
     runtime.session_log(f"BATCH END | {title}")
     notify_send(config.get("notify", {}), title, body)
+    return summaries
 
 
 def build_batch_message(summaries):

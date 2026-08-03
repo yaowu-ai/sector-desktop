@@ -4,9 +4,15 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import warnings
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
+
+
+_PIPE_TRANSPORT_UNAWAITED_WARNING = (
+    r"coroutine 'PipeTransport\.wait_until_stopped' was never awaited"
+)
 
 
 def start_sync_playwright():
@@ -21,6 +27,83 @@ def start_sync_playwright():
     except Exception as exc:
         raise RuntimeError(patchright_startup_error_detail(manager, exc)) from exc
     return manager, playwright
+
+
+def stop_sync_playwright(manager: Any) -> str | None:
+    """Stop Patchright without allowing a cleanup failure to mask task results."""
+    loop = getattr(manager, "_loop", None)
+    if loop is not None and loop.is_closed():
+        forced_error = _force_stop_patchright_driver(manager)
+        detail = "RuntimeError: Patchright event loop was already closed"
+        if forced_error:
+            detail = f"{detail}; forcedCleanup={forced_error}"
+        return detail
+
+    try:
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message=_PIPE_TRANSPORT_UNAWAITED_WARNING,
+                category=RuntimeWarning,
+            )
+            manager.__exit__()
+    except Exception as exc:
+        forced_error = _force_stop_patchright_driver(manager)
+        detail = f"{type(exc).__name__}: {exc}"
+        if forced_error:
+            detail = f"{detail}; forcedCleanup={forced_error}"
+        return detail
+    return None
+
+
+def _force_stop_patchright_driver(manager: Any) -> str | None:
+    errors: list[str] = []
+    try:
+        manager._exit_was_called = True
+    except Exception as exc:
+        errors.append(f"managerState={type(exc).__name__}: {exc}")
+
+    connection = getattr(manager, "_connection", None)
+    transport = getattr(connection, "_transport", None)
+    if transport is None:
+        return "; ".join(errors) or None
+
+    try:
+        transport._stopped = True
+    except Exception as exc:
+        errors.append(f"transportState={type(exc).__name__}: {exc}")
+
+    process = getattr(transport, "_proc", None)
+    process_transport = getattr(process, "_transport", None)
+    inner_process = getattr(process_transport, "_proc", None)
+    target_process = inner_process or process
+    if target_process is None:
+        return "; ".join(errors) or None
+
+    try:
+        poll = getattr(target_process, "poll", None)
+        is_running = poll() is None if callable(poll) else getattr(target_process, "returncode", None) is None
+        if is_running:
+            target_process.terminate()
+            wait = getattr(target_process, "wait", None)
+            if callable(wait):
+                try:
+                    wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    target_process.kill()
+                    wait(timeout=2)
+    except Exception as exc:
+        errors.append(f"driverProcess={type(exc).__name__}: {exc}")
+
+    for stream_name in ("stdin", "stdout", "stderr"):
+        stream = getattr(target_process, stream_name, None)
+        if stream is None:
+            continue
+        try:
+            stream.close()
+        except Exception as exc:
+            errors.append(f"driverStream[{stream_name}]={type(exc).__name__}: {exc}")
+    return "; ".join(errors) or None
 
 
 def patchright_driver_check() -> dict[str, str]:

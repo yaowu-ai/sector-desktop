@@ -14,7 +14,7 @@ if str(SRC) not in sys.path:
 
 from browser_providers import bitbrowser_profile_id, builtin_user_data_dir
 from core import runtime
-from platforms.registration.base import RegistrationStatus
+from platforms.registration.base import RegistrationErrorCode, RegistrationStatus
 from platforms.registration.browser_session import close_registration_browser
 from platforms.registration.cookies import persist_registration_session, session_profile_detail
 from platforms.registration.random_identity import (
@@ -298,6 +298,63 @@ def assert_complete_result_preserves_success_on_close_failure(conn):
     assert any(action == "register_complete" and status == "ok" for action, status, _ in logged_actions(conn))
 
 
+def assert_runtime_cleanup_does_not_mask_registration_error(conn):
+    registration_browser = fake_browser()
+
+    class BrowserContextManager:
+        def __enter__(self):
+            return registration_browser
+
+        def __exit__(self, *_args):
+            return None
+
+    class FailingPlaywrightManager:
+        def __exit__(self, *_args):
+            raise RuntimeError("This event loop is already running")
+
+    original_open_browser = tiktok_register.open_registration_browser
+    original_start_playwright = tiktok_register.start_sync_playwright
+    original_choose_page = tiktok_register.choose_tiktok_registration_page
+    original_open_login = tiktok_register.open_tiktok_login_page
+    original_google_login = tiktok_register.run_google_login_from_tiktok_login_page
+    try:
+        tiktok_register.open_registration_browser = lambda *_args, **_kwargs: BrowserContextManager()
+        tiktok_register.start_sync_playwright = lambda: (
+            FailingPlaywrightManager(),
+            types.SimpleNamespace(
+                chromium=types.SimpleNamespace(
+                    connect_over_cdp=lambda _endpoint: types.SimpleNamespace(contexts=[object()])
+                )
+            ),
+        )
+        tiktok_register.choose_tiktok_registration_page = lambda _context: FakePage("done")
+        tiktok_register.open_tiktok_login_page = lambda _page: None
+
+        def raise_google_popup_error(*_args, **_kwargs):
+            raise RuntimeError(RegistrationErrorCode.GOOGLE_POPUP_NOT_FOUND.value)
+
+        tiktok_register.run_google_login_from_tiktok_login_page = raise_google_popup_error
+        result = tiktok_register.TikTokGoogleRegistrationAdapter().register(
+            {"id": "acct_1"},
+            {},
+            conn,
+        )
+    finally:
+        tiktok_register.open_registration_browser = original_open_browser
+        tiktok_register.start_sync_playwright = original_start_playwright
+        tiktok_register.choose_tiktok_registration_page = original_choose_page
+        tiktok_register.open_tiktok_login_page = original_open_login
+        tiktok_register.run_google_login_from_tiktok_login_page = original_google_login
+
+    assert result.status == RegistrationStatus.ERROR
+    assert result.error_code == RegistrationErrorCode.GOOGLE_POPUP_NOT_FOUND
+    assert "event loop" not in result.detail
+    assert any(
+        action == "register_runtime_cleanup" and status == "warning" and "event loop" in detail
+        for action, status, detail in logged_actions(conn)
+    )
+
+
 def assert_strict_tiktok_auth_blocks_incomplete_sessions():
     logged_in = tiktok_auth.classify_tiktok_page(FakePage("logged_in"), account_id="acct_1")
     one_tap = tiktok_auth.classify_tiktok_page(FakePage("google_one_tap"), account_id="acct_1")
@@ -366,6 +423,7 @@ def main():
         assert_username_retries(conn)
         assert_session_save_and_browser_close(conn, data_dir)
         assert_complete_result_preserves_success_on_close_failure(conn)
+        assert_runtime_cleanup_does_not_mask_registration_error(conn)
         assert_strict_tiktok_auth_blocks_incomplete_sessions()
         assert_existing_google_account_skips_email_entry()
         assert_profiles_and_redaction(data_dir)

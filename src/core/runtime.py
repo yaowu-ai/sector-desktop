@@ -129,6 +129,19 @@ def init_db():
             PRIMARY KEY (platform, our_account, handle)
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS scheduler_job_runs (
+            job_id TEXT PRIMARY KEY,
+            platform TEXT NOT NULL,
+            account_id TEXT NOT NULL,
+            scheduled_run TEXT,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            started_at TEXT,
+            ended_at TEXT,
+            detail TEXT
+        )
+    """)
     ensure_platform_column(conn, "action_log")
     ensure_platform_column(conn, "target_engagements")
     ensure_platform_column(conn, "target_follows")
@@ -153,6 +166,72 @@ def ensure_platform_column(conn, table_name):
 
 def require_platform(platform):
     return normalize_platform(platform)
+
+
+def record_scheduler_job_scheduled(job_id, platform, account_id, scheduled_run):
+    platform = require_platform(platform)
+    conn = init_db()
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO scheduler_job_runs "
+            "(job_id, platform, account_id, scheduled_run, status, created_at) "
+            "VALUES (?,?,?,?,?,?)",
+            (
+                job_id,
+                platform,
+                account_id,
+                scheduled_run,
+                "pending",
+                datetime.now().isoformat(),
+            ),
+        )
+        conn.execute(
+            "UPDATE scheduler_job_runs "
+            "SET platform=?, account_id=?, scheduled_run=? "
+            "WHERE job_id=? AND status='pending'",
+            (platform, account_id, scheduled_run, job_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def record_scheduler_job_started(job_id, platform, account_id):
+    platform = require_platform(platform)
+    conn = init_db()
+    try:
+        now = datetime.now().isoformat()
+        conn.execute(
+            "INSERT OR IGNORE INTO scheduler_job_runs "
+            "(job_id, platform, account_id, status, created_at) VALUES (?,?,?,?,?)",
+            (job_id, platform, account_id, "pending", now),
+        )
+        conn.execute(
+            "UPDATE scheduler_job_runs "
+            "SET platform=?, account_id=?, status='running', started_at=?, detail=NULL "
+            "WHERE job_id=?",
+            (platform, account_id, now, job_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def record_scheduler_job_finished(job_id, status, detail=""):
+    if status not in {"success", "failed", "skipped"}:
+        raise ValueError(f"unsupported scheduler job status: {status}")
+    conn = init_db()
+    try:
+        now = datetime.now().isoformat()
+        conn.execute(
+            "UPDATE scheduler_job_runs "
+            "SET status=?, ended_at=?, detail=? "
+            "WHERE job_id=?",
+            (status, now, redact_runtime_text(str(detail or "")), job_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def has_followed_target(conn, platform, account_id, handle):

@@ -3,10 +3,12 @@ import {
   Button,
   Card,
   Col,
+  Empty,
   Form,
   InputNumber,
   Modal,
   Row,
+  Segmented,
   Space,
   Statistic,
   Switch,
@@ -31,6 +33,7 @@ import {
   getSchedulerHealth,
   getSchedulerProcessStatus,
   loadConfig,
+  querySchedulerJobRuns,
   saveSchedulerSettings,
   startScheduler,
   stopScheduler,
@@ -44,6 +47,7 @@ import type {
   SchedulerAccountSettings,
   SchedulerHealth,
   SchedulerJob,
+  SchedulerJobRunRecord,
   SchedulerProcessStatus,
 } from '../services/types'
 
@@ -60,6 +64,8 @@ interface SchedulerRow {
 interface ActiveHoursFormValues {
   activeHours: Array<{ start?: number; end?: number }>
 }
+
+type RunHistoryRange = 1 | 3
 
 const EMPTY_HEALTH: SchedulerHealth = {
   status: 'stopped',
@@ -87,8 +93,11 @@ export function SchedulerPage() {
   const [health, setHealth] = useState<SchedulerHealth>(EMPTY_HEALTH)
   const [processStatus, setProcessStatus] = useState<SchedulerProcessStatus>(EMPTY_PROCESS)
   const [rows, setRows] = useState<SchedulerRow[]>([])
+  const [runHistory, setRunHistory] = useState<SchedulerJobRunRecord[]>([])
+  const [runHistoryDays, setRunHistoryDays] = useState<RunHistoryRange>(1)
   const [firesPerDay, setFiresPerDay] = useState(3)
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [starting, setStarting] = useState(false)
   const [stopping, setStopping] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -109,6 +118,10 @@ export function SchedulerPage() {
     () => health.jobs.filter((job) => !job.accountId || rowAccountIds.has(job.accountId)),
     [health.jobs, rowAccountIds],
   )
+  const nextScopedJob = useMemo(
+    () => scopedJobs.find((job) => job.accountId && job.nextRun),
+    [scopedJobs],
+  )
   const scopedConflicts = useMemo(
     () =>
       health.ipGroupConflicts.filter(
@@ -116,18 +129,45 @@ export function SchedulerPage() {
       ),
     [health.ipGroupConflicts, rowAccountIds],
   )
-  const plannedToday = schedulableRows.length * Math.max(0, firesPerDay)
+  const scopedRunHistory = useMemo(
+    () => runHistory.filter((record) => rowAccountIds.has(record.accountId)),
+    [rowAccountIds, runHistory],
+  )
+  const todayRunHistory = useMemo(
+    () => scopedRunHistory.filter((record) => isToday(record.startedAt ?? record.scheduledRun)),
+    [scopedRunHistory],
+  )
+  const todayPendingJobs = useMemo(
+    () => scopedJobs.filter((job) => isToday(job.nextRun)),
+    [scopedJobs],
+  )
+  const todayTaskTotal = useMemo(
+    () => new Set([...todayRunHistory.map((record) => record.jobId), ...todayPendingJobs.map((job) => job.id)]).size,
+    [todayPendingJobs, todayRunHistory],
+  )
 
-  const refresh = useCallback(async () => {
-    setLoading(true)
+  const refresh = useCallback(async (options: { showLoading?: boolean } = {}) => {
+    const showLoading = options.showLoading ?? false
+    if (showLoading) {
+      setLoading(true)
+    } else {
+      setRefreshing(true)
+    }
     try {
-      const [snapshot, nextProcess, nextHealth, nextBitbrowser] = await Promise.all([
+      const historyStartTs = dayjs().subtract(runHistoryDays, 'day').format('YYYY-MM-DDTHH:mm:ss')
+      const [snapshot, nextProcess, nextHealth, nextBitbrowser, nextRunHistory] = await Promise.all([
         loadConfig(),
         getSchedulerProcessStatus(),
         getSchedulerHealth(),
         checkBitbrowserApi(),
+        querySchedulerJobRuns({
+          platform: currentPlatform,
+          startTs: historyStartTs,
+          limit: 120,
+        }),
       ])
       setRows(snapshot.accounts.filter((account) => account.platform === currentPlatform).map(accountToRow))
+      setRunHistory(nextRunHistory)
       setFiresPerDay(snapshot.schedulerSettings?.firesPerDay ?? nextHealth.firesPerDay ?? 3)
       setProcessStatus(nextProcess)
       setHealth(nextHealth)
@@ -135,12 +175,16 @@ export function SchedulerPage() {
     } catch (error) {
       message.error(formatError(error))
     } finally {
-      setLoading(false)
+      if (showLoading) {
+        setLoading(false)
+      } else {
+        setRefreshing(false)
+      }
     }
-  }, [currentPlatform])
+  }, [currentPlatform, runHistoryDays])
 
   useEffect(() => {
-    void refresh()
+    void refresh({ showLoading: true })
     const timer = window.setInterval(() => {
       void refresh()
     }, 10000)
@@ -278,14 +322,14 @@ export function SchedulerPage() {
         description="按平台和账号 active_hours 生成本机时间排期；当前只调度已适配自动执行的平台。"
         extra={
           <Space>
-            <Button icon={<RefreshCw size={16} />} loading={loading} onClick={() => void refresh()}>
+            <Button icon={<RefreshCw size={16} />} loading={loading || refreshing} onClick={() => void refresh({ showLoading: true })}>
               刷新
             </Button>
             <Button
               icon={<PauseCircle size={16} />}
               danger
               loading={stopping}
-              disabled={processStatus.status !== 'running'}
+              disabled={processStatus.status !== 'running' && !health.processId}
               onClick={confirmStop}
             >
               停止调度
@@ -313,7 +357,7 @@ export function SchedulerPage() {
             showIcon
             type="info"
             message="V1 调度使用运行机器本地时间"
-            description="修改 fires_per_day、ip_group 或 active_hours 后，需要保存配置；已经启动的 scheduler.py 不会自动重载旧进程中的排期，建议停止后重新启动调度服务。"
+            description="保存账号或调度配置后，scheduler 会在约 10 秒内自动重建剩余排期；如果检测到旧版本或配置路径不一致的调度进程，请先停止后重新启动。"
           />
         </Col>
 
@@ -343,9 +387,9 @@ export function SchedulerPage() {
         <Col xs={24} md={8} xl={4}>
           <Card>
             <Statistic
-              title="今日排期"
-              value={scopedJobs.length}
-              suffix={`/ ${plannedToday}`}
+              title="今日任务"
+              value={todayRunHistory.length}
+              suffix={`/ ${todayTaskTotal}`}
               prefix={<CalendarClock size={16} />}
             />
           </Card>
@@ -357,7 +401,7 @@ export function SchedulerPage() {
         </Col>
         <Col xs={24} md={8} xl={4}>
           <Card>
-            <Statistic title="下一账号" value={health.nextAccountId ?? '-'} />
+            <Statistic title="下一账号" value={nextScopedJob?.accountId ?? '-'} />
           </Card>
         </Col>
         <Col xs={24} md={8} xl={4}>
@@ -378,7 +422,7 @@ export function SchedulerPage() {
                   overflow: 'hidden',
                 }}
               >
-                <ScheduleSummaryItem label="下次执行" value={formatScheduleTime(health.nextRun)} />
+                <ScheduleSummaryItem label="下次执行" value={formatScheduleTime(nextScopedJob?.nextRun)} />
                 <ScheduleSummaryItem label="调度状态" value={formatSchedulerStatusText(health.status)} />
                 <ScheduleSummaryItem label="服务状态" value={formatServiceStatus(health, processStatus)} />
                 <ScheduleSummaryItem label="排班检查" value={formatConflictSummary(scopedConflicts)} />
@@ -428,7 +472,7 @@ export function SchedulerPage() {
                 />
               </Space>
               <Typography.Text type="secondary">
-                今日预计排期 = 启用且参与调度账号数 {schedulableRows.length} × fires_per_day {firesPerDay}。
+                今日任务 = 已运行 {todayRunHistory.length} / 总任务 {todayTaskTotal}；当前配置预计 {schedulableRows.length} × fires_per_day {firesPerDay}。
               </Typography.Text>
             </Space>
           </Card>
@@ -445,6 +489,53 @@ export function SchedulerPage() {
               scroll={{ x: 680 }}
             />
           </Card>
+        </Col>
+
+        <Col span={24}>
+          <section>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 12,
+                marginBottom: 12,
+              }}
+            >
+              <Space direction="vertical" size={2}>
+                <Typography.Title level={4} style={{ margin: 0 }}>
+                  已运行任务 {scopedRunHistory.length}
+                </Typography.Title>
+                <Typography.Text type="secondary">
+                  一次调度 Job 显示一条，按当前平台和账号范围展示。
+                </Typography.Text>
+              </Space>
+              <Segmented
+                value={runHistoryDays}
+                options={[
+                  { label: '最近 1 天', value: 1 },
+                  { label: '最近 3 天', value: 3 },
+                ]}
+                onChange={(value) => setRunHistoryDays(value as RunHistoryRange)}
+              />
+            </div>
+            <Table
+              rowKey="jobId"
+              loading={loading}
+              columns={runHistoryColumns}
+              dataSource={scopedRunHistory}
+              pagination={{ pageSize: 7, showSizeChanger: true }}
+              scroll={{ x: 1180 }}
+              locale={{
+                emptyText: (
+                  <Empty
+                    image={Empty.PRESENTED_IMAGE_SIMPLE}
+                    description={`最近 ${runHistoryDays} 天暂无已运行任务`}
+                  />
+                ),
+              }}
+            />
+          </section>
         </Col>
 
         <Col span={24}>
@@ -521,6 +612,90 @@ const jobColumns: ColumnsType<SchedulerJob> = [
     render: (value?: string) => <Tag color="blue">{value ?? 'scheduled'}</Tag>,
   },
 ]
+
+const runHistoryColumns: ColumnsType<SchedulerJobRunRecord> = [
+  {
+    title: 'Job ID',
+    dataIndex: 'jobId',
+    width: 280,
+    render: (value: string) => <Typography.Text code>{value}</Typography.Text>,
+  },
+  { title: '账号', dataIndex: 'accountId', width: 150 },
+  {
+    title: '运行开始时间',
+    dataIndex: 'startedAt',
+    width: 190,
+    render: (value?: string) => formatScheduleTime(value),
+  },
+  {
+    title: '运行结束时间',
+    dataIndex: 'endedAt',
+    width: 190,
+    render: (value?: string) => (value ? formatScheduleTime(value) : '-'),
+  },
+  {
+    title: '运行结果',
+    dataIndex: 'status',
+    width: 130,
+    render: (status: SchedulerJobRunRecord['status']) => (
+      <Tag color={schedulerJobRunStatusColor(status)}>{formatSchedulerJobRunStatus(status)}</Tag>
+    ),
+  },
+  {
+    title: '运行详情',
+    dataIndex: 'detail',
+    render: (detail: string, record) => {
+      const visibleDetail = shouldShowRunDetail(record.status) ? detail || '-' : '-'
+      return (
+        <Typography.Paragraph
+          style={{ marginBottom: 0, maxWidth: 460, whiteSpace: 'pre-wrap' }}
+          ellipsis={{ rows: 2, expandable: true, symbol: '展开' }}
+        >
+          {visibleDetail}
+        </Typography.Paragraph>
+      )
+    },
+  },
+]
+
+function formatSchedulerJobRunStatus(status: SchedulerJobRunRecord['status']) {
+  if (status === 'pending') {
+    return '未运行'
+  }
+  if (status === 'running') {
+    return '运行中'
+  }
+  if (status === 'success') {
+    return '成功运行'
+  }
+  if (status === 'failed') {
+    return '运行失败'
+  }
+  if (status === 'skipped') {
+    return '未运行'
+  }
+  return status || '-'
+}
+
+function schedulerJobRunStatusColor(status: SchedulerJobRunRecord['status']) {
+  if (status === 'success') {
+    return 'green'
+  }
+  if (status === 'failed') {
+    return 'red'
+  }
+  if (status === 'skipped' || status === 'pending') {
+    return 'gold'
+  }
+  if (status === 'running') {
+    return 'blue'
+  }
+  return 'default'
+}
+
+function shouldShowRunDetail(status: SchedulerJobRunRecord['status']) {
+  return status === 'pending' || status === 'failed' || status === 'skipped'
+}
 
 function accountColumns(
   onIpGroupChange: (accountId: string, value: number | null) => void,
@@ -709,6 +884,14 @@ function formatScheduleTime(value?: string) {
   }
   const parsed = dayjs(value)
   return parsed.isValid() ? parsed.format('YYYY-MM-DD HH:mm') : value
+}
+
+function isToday(value?: string) {
+  if (!value) {
+    return false
+  }
+  const parsed = dayjs(value)
+  return parsed.isValid() && parsed.isSame(dayjs(), 'day')
 }
 
 function formatSchedulerStatusText(status: SchedulerHealth['status']) {

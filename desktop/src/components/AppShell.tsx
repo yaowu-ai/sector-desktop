@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { appRoutes, routes } from '../app/routes'
 import { PROCESS_STARTED_EVENT, checkBitbrowserApi, getCurrentRunStatus } from '../services/api'
+import { runStatusLabel } from '../services/runStatus'
 import type { ApiStatus, ProcessStatus } from '../services/types'
 import { PlatformSelector } from './PlatformSelector'
 import { RouteScopeFrame } from './RouteScopeFrame'
@@ -203,7 +204,7 @@ function processTone(status: ProcessStatus | null): StatusTone {
 function processLabel(status: ProcessStatus | null) {
   if (!status) return '当前任务待检测'
   if (status.status === 'idle') return '当前任务空闲'
-  return `当前任务：${status.status}`
+  return `当前任务：${runStatusLabel(status.status)}`
 }
 
 function handleBackgroundError(setShellError: (value: string) => void) {

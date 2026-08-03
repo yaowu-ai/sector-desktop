@@ -90,6 +90,30 @@ pub struct ActionLogRecord {
     ts: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SchedulerJobRunFilter {
+    platform: Option<String>,
+    account_id: Option<String>,
+    start_ts: Option<String>,
+    end_ts: Option<String>,
+    include_pending: Option<bool>,
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SchedulerJobRunRecord {
+    job_id: String,
+    platform: String,
+    account_id: String,
+    scheduled_run: Option<String>,
+    status: String,
+    started_at: Option<String>,
+    ended_at: Option<String>,
+    detail: String,
+}
+
 #[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct TargetRecordFilter {
@@ -187,6 +211,7 @@ pub struct SqliteStatus {
     path: String,
     exists: bool,
     action_log: bool,
+    scheduler_job_runs: bool,
     target_engagements: bool,
     target_follows: bool,
 }
@@ -200,6 +225,7 @@ pub fn get_sqlite_status() -> Result<SqliteStatus, String> {
             path: paths.actions_db_path,
             exists: false,
             action_log: false,
+            scheduler_job_runs: false,
             target_engagements: false,
             target_follows: false,
         });
@@ -211,6 +237,7 @@ pub fn get_sqlite_status() -> Result<SqliteStatus, String> {
         path: paths.actions_db_path,
         exists: true,
         action_log: table_exists(&conn, "action_log")?,
+        scheduler_job_runs: table_exists(&conn, "scheduler_job_runs")?,
         target_engagements: table_exists(&conn, "target_engagements")?,
         target_follows: table_exists(&conn, "target_follows")?,
     })
@@ -394,6 +421,74 @@ pub fn query_action_logs(filter: ActionLogFilter) -> Result<Vec<ActionLogRecord>
     let mut result = Vec::new();
     for row in rows {
         result.push(row.map_err(|err| format!("failed to read action_log row: {}", err))?);
+    }
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn query_scheduler_job_runs(
+    filter: SchedulerJobRunFilter,
+) -> Result<Vec<SchedulerJobRunRecord>, String> {
+    let paths = project_paths()?;
+    let db_path = std::path::PathBuf::from(&paths.actions_db_path);
+    if !db_path.exists() {
+        return Ok(vec![]);
+    }
+
+    let conn = Connection::open(&db_path)
+        .map_err(|err| format!("failed to open {}: {}", paths.actions_db_path, err))?;
+    if !table_exists(&conn, "scheduler_job_runs")? {
+        return Ok(vec![]);
+    }
+
+    let platform = normalized_platform_filter(filter.platform.as_deref())?;
+    let account_id = optional_trim(filter.account_id.as_deref());
+    let start_ts = optional_trim(filter.start_ts.as_deref());
+    let end_ts = optional_trim(filter.end_ts.as_deref());
+    let include_pending = filter.include_pending.unwrap_or(false);
+    let limit = normalized_limit(filter.limit) as i64;
+
+    let query = "
+        SELECT job_id, platform, account_id, scheduled_run, status, started_at, ended_at, detail
+        FROM scheduler_job_runs
+        WHERE (?1 IS NULL OR platform = ?1)
+          AND (?2 IS NULL OR account_id = ?2)
+          AND (?3 IS NULL OR COALESCE(started_at, scheduled_run, created_at) >= ?3)
+          AND (?4 IS NULL OR COALESCE(started_at, scheduled_run, created_at) <= ?4)
+          AND (?5 OR status <> 'pending')
+        ORDER BY COALESCE(started_at, scheduled_run, created_at) DESC, job_id DESC
+        LIMIT ?6";
+    let mut stmt = conn
+        .prepare(query)
+        .map_err(|err| format!("failed to prepare scheduler_job_runs query: {}", err))?;
+    let rows = stmt
+        .query_map(
+            params![
+                platform,
+                account_id,
+                start_ts,
+                end_ts,
+                include_pending,
+                limit
+            ],
+            |row| {
+                Ok(SchedulerJobRunRecord {
+                    job_id: row.get(0)?,
+                    platform: row.get(1)?,
+                    account_id: row.get(2)?,
+                    scheduled_run: row.get(3)?,
+                    status: row.get(4)?,
+                    started_at: row.get(5)?,
+                    ended_at: row.get(6)?,
+                    detail: redact_line(&row.get::<_, Option<String>>(7)?.unwrap_or_default(), &[]),
+                })
+            },
+        )
+        .map_err(|err| format!("failed to query scheduler_job_runs: {}", err))?;
+
+    let mut result = Vec::new();
+    for row in rows {
+        result.push(row.map_err(|err| format!("failed to read scheduler_job_runs row: {}", err))?);
     }
     Ok(result)
 }

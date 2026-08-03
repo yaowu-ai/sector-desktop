@@ -10,6 +10,7 @@ import {
   skipAuthIntervention,
   stopCurrentRun,
 } from '../services/api'
+import { runStatusLabel } from '../services/runStatus'
 import type { ProcessStatus } from '../services/types'
 import { confirmDanger } from './ConfirmDanger'
 import { LogViewer } from './LogViewer'
@@ -177,7 +178,7 @@ export function ProcessOutputPanel({ title = '运行输出' }: ProcessOutputPane
         size="small"
         extra={
           <Space wrap>
-            <StatusTag status={statusTone(status)} label={status?.status ?? 'idle'} />
+            <StatusTag status={statusTone(status)} label={runStatusLabel(status?.status)} />
             <Button icon={<Terminal size={16} />} onClick={() => setOutputOpen(true)}>
               {outputButtonLabel}
             </Button>

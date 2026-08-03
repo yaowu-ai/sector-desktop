@@ -80,6 +80,7 @@ fn main() {
             commands::stats::get_sqlite_status,
             commands::stats::query_fyp_stats,
             commands::stats::query_action_logs,
+            commands::stats::query_scheduler_job_runs,
             commands::stats::query_target_engagements,
             commands::stats::query_target_follows,
             commands::stats::query_target_watermarks,

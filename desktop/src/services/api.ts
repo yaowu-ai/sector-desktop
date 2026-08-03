@@ -46,6 +46,8 @@ import type {
   SaveCommentPoolsRequest,
   SaveCommentPoolsResult,
   SchedulerHealth,
+  SchedulerJobRunFilter,
+  SchedulerJobRunRecord,
   SchedulerProcessStatus,
   SchedulerSettingsPayload,
   SchedulerStartResult,
@@ -177,6 +179,10 @@ export function queryAccountLogs(accountId: string, limit = 80) {
 
 export function queryActionLogs(filter: ActionLogFilter) {
   return invoke<ActionLog[]>('query_action_logs', { filter })
+}
+
+export function querySchedulerJobRuns(filter: SchedulerJobRunFilter) {
+  return invoke<SchedulerJobRunRecord[]>('query_scheduler_job_runs', { filter })
 }
 
 export function queryTargetEngagements(filter: TargetRecordFilter) {

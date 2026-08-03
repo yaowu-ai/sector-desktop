@@ -1796,7 +1796,12 @@ fn macos_keychain_read_password(credential_ref: &str) -> Result<String, String> 
         let bytes = std::slice::from_raw_parts(password_data as *const u8, password_len as usize);
         String::from_utf8(bytes.to_vec())
     }
-    .map_err(|err| format!("macOS Keychain returned non-UTF-8 login credential: {}", err));
+    .map_err(|err| {
+        format!(
+            "macOS Keychain returned non-UTF-8 login credential: {}",
+            err
+        )
+    });
     unsafe {
         SecKeychainItemFreeContent(std::ptr::null_mut(), password_data);
     }
@@ -1849,7 +1854,10 @@ fn macos_status_to_result(status: OsStatus, action: &str) -> Result<(), String> 
     if status == ERR_SEC_SUCCESS {
         Ok(())
     } else if status == ERR_SEC_ITEM_NOT_FOUND {
-        Err(format!("macOS Keychain failed to {}: item not found", action))
+        Err(format!(
+            "macOS Keychain failed to {}: item not found",
+            action
+        ))
     } else {
         Err(format!(
             "macOS Keychain failed to {}: OSStatus {}",
