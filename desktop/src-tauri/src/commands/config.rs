@@ -2847,17 +2847,24 @@ fn enrich_accounts_with_recent_runs(accounts: &mut [Account], actions_db_path: &
         }
 
         let latest_login_check = conn.query_row(
-            "SELECT status, detail, ts
+            "SELECT action, status, detail, ts
              FROM action_log
-             WHERE account_id = ?1 AND action = 'login_check'
+             WHERE account_id = ?1
+               AND action IN ('login_check', 'register_auto_complete')
              ORDER BY ts DESC, id DESC
              LIMIT 1",
             params![account.id.as_str()],
             |row| {
+                let action = row.get::<_, String>(0)?;
+                let status = row.get::<_, String>(1)?;
                 Ok(AccountLoginCheck {
-                    status: row.get(0)?,
-                    detail: redact_line(&row.get::<_, String>(1)?, &[]),
-                    ts: row.get(2)?,
+                    status: if action == "register_auto_complete" && status == "ok" {
+                        "logged_in".to_string()
+                    } else {
+                        status
+                    },
+                    detail: redact_line(&row.get::<_, String>(2)?, &[]),
+                    ts: row.get(3)?,
                 })
             },
         );

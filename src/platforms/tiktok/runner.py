@@ -360,6 +360,14 @@ def run_tiktok_registration(account, config, conn):
             conn,
             platform,
             account_id,
+            "login_check",
+            LoginState.LOGGED_IN.value,
+            "registration completed and browser session saved",
+        )
+        log_action(
+            conn,
+            platform,
+            account_id,
             "register_auto_complete",
             "ok",
             result.summary(),

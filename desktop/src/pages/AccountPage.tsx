@@ -21,7 +21,7 @@ import {
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import type { Key } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronUp,
@@ -130,6 +130,7 @@ export function AccountPage() {
   const [registeringBatch, setRegisteringBatch] = useState(false);
   const [currentRunStatus, setCurrentRunStatus] =
     useState<ProcessStatus | null>(null);
+  const previousRunStatusRef = useRef<ProcessStatus | null>(null);
   const [selectedRowKeys, setSelectedRowKeys] = useState<Key[]>([]);
   const [query, setQuery] = useState("");
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -226,7 +227,16 @@ export function AccountPage() {
       try {
         const nextStatus = await getCurrentRunStatus();
         if (!disposed) {
+          const previousStatus = previousRunStatusRef.current;
+          previousRunStatusRef.current = nextStatus;
           setCurrentRunStatus(nextStatus);
+          if (
+            previousStatus?.taskType === "tiktok_register" &&
+            BUSY_RUN_STATUSES.has(previousStatus.status) &&
+            !BUSY_RUN_STATUSES.has(nextStatus.status)
+          ) {
+            await refresh();
+          }
         }
       } catch {
         if (!disposed) {

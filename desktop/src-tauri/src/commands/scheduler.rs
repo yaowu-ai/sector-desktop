@@ -1,6 +1,6 @@
 use chrono::Local;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -10,12 +10,13 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 use tauri::State;
 
-use crate::commands::config::load_config;
+use crate::commands::config::{load_config, read_login_password_for_runtime};
 use crate::paths::{normalize, project_paths, project_root, python_command_parts, ProjectPaths};
 use crate::state::AppState;
 
 const SCHEDULER_HOST: &str = "127.0.0.1";
 const SCHEDULER_PORT: u16 = 9601;
+const SCHEDULER_LOGIN_CREDENTIALS_ENV: &str = "AM_SCHEDULER_LOGIN_CREDENTIALS";
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
@@ -25,6 +26,12 @@ pub struct SchedulerStartResult {
     process_id: u32,
     command: Vec<String>,
     status: String,
+}
+
+#[derive(Debug, Serialize)]
+struct SchedulerLoginCredential {
+    username: String,
+    password: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -164,12 +171,14 @@ pub fn start_scheduler(state: State<'_, AppState>) -> Result<SchedulerStartResul
         ));
     }
 
+    let login_credentials = scheduler_login_credentials()?;
     let (command, current_dir) = scheduler_command_for_paths(&paths)?;
     let mut command_builder = Command::new(&command[0]);
     command_builder
         .args(&command[1..])
         .current_dir(&current_dir)
         .env("PYTHONUNBUFFERED", "1")
+        .env(SCHEDULER_LOGIN_CREDENTIALS_ENV, login_credentials)
         .env(
             "AM_AUTO_CLOSE_PROFILE",
             if paths.auto_close_profile { "1" } else { "0" },
@@ -198,6 +207,47 @@ pub fn start_scheduler(state: State<'_, AppState>) -> Result<SchedulerStartResul
         command,
         status: "starting".to_string(),
     })
+}
+
+fn scheduler_login_credentials() -> Result<String, String> {
+    let config = load_config()?;
+    let mut credentials = HashMap::new();
+
+    for account in config.accounts().iter().filter(|account| {
+        account.enabled()
+            && account.scheduled()
+            && account.platform() == "tiktok"
+            && account.login_enabled()
+    }) {
+        let username = account
+            .login_username()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                format!(
+                    "account '{}' auto login is enabled but login.username is missing",
+                    account.id()
+                )
+            })?;
+        let password = read_login_password_for_runtime(account.id())?
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                format!(
+                    "account '{}' auto login is enabled but its saved password is missing or unreadable",
+                    account.id()
+                )
+            })?;
+        credentials.insert(
+            account.id().to_string(),
+            SchedulerLoginCredential {
+                username: username.to_string(),
+                password,
+            },
+        );
+    }
+
+    serde_json::to_string(&credentials)
+        .map_err(|err| format!("failed to serialize scheduler login credentials: {}", err))
 }
 
 fn hide_console_window(command: &mut Command) {

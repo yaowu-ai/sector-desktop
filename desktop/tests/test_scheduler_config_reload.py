@@ -1,3 +1,5 @@
+import json
+import os
 import sys
 import unittest
 from datetime import datetime, timedelta
@@ -98,6 +100,60 @@ class SchedulerConfigReloadTests(unittest.TestCase):
             scheduler_module.reload_schedule_if_config_changed()
 
         rebuild.assert_not_called()
+
+    def test_account_login_environment_selects_and_restores_credentials(self):
+        payload = {
+            "tiktok_101": {
+                "username": "first@example.com",
+                "password": "first-secret",
+            },
+            "tiktok_102": {
+                "username": "second@example.com",
+                "password": "second-secret",
+            },
+        }
+        original = {
+            "AM_LOGIN_ACCOUNT_ID": "manual_account",
+            "AM_LOGIN_USERNAME": "manual@example.com",
+            "AM_LOGIN_PASSWORD": "manual-secret",
+            "AM_LOGIN_CREDENTIAL_SOURCE": "local_secure_store",
+        }
+
+        with patch.dict(
+            os.environ,
+            {
+                scheduler_module.SCHEDULER_LOGIN_CREDENTIALS_ENV: json.dumps(payload),
+                **original,
+            },
+            clear=False,
+        ):
+            with scheduler_module.account_login_environment("tiktok_102"):
+                self.assertEqual(os.environ["AM_LOGIN_ACCOUNT_ID"], "tiktok_102")
+                self.assertEqual(os.environ["AM_LOGIN_USERNAME"], "second@example.com")
+                self.assertEqual(os.environ["AM_LOGIN_PASSWORD"], "second-secret")
+                self.assertEqual(
+                    os.environ["AM_LOGIN_CREDENTIAL_SOURCE"], "local_secure_store"
+                )
+
+            for key, value in original.items():
+                self.assertEqual(os.environ[key], value)
+
+    def test_account_login_environment_clears_credentials_for_unknown_account(self):
+        with patch.dict(
+            os.environ,
+            {
+                scheduler_module.SCHEDULER_LOGIN_CREDENTIALS_ENV: "{}",
+                "AM_LOGIN_USERNAME": "unrelated@example.com",
+                "AM_LOGIN_PASSWORD": "unrelated-secret",
+                "AM_LOGIN_CREDENTIAL_SOURCE": "local_secure_store",
+            },
+            clear=False,
+        ):
+            with scheduler_module.account_login_environment("tiktok_404"):
+                self.assertEqual(os.environ["AM_LOGIN_ACCOUNT_ID"], "tiktok_404")
+                self.assertNotIn("AM_LOGIN_USERNAME", os.environ)
+                self.assertNotIn("AM_LOGIN_PASSWORD", os.environ)
+                self.assertNotIn("AM_LOGIN_CREDENTIAL_SOURCE", os.environ)
 
 
 if __name__ == "__main__":

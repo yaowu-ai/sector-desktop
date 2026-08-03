@@ -11,11 +11,12 @@ any manual `python main.py` invocation.
 import asyncio
 import argparse
 import hashlib
+import json
 import logging
 import os
 import random
 import sys
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -31,6 +32,51 @@ from core.runtime import acquire_lock, pid_alive, release_lock
 from runtime_config import resolve_config_path
 from platform_config import account_platform, load_runtime_config, scheduler_config
 from browser_providers import account_provider_name, BITBROWSER
+
+
+SCHEDULER_LOGIN_CREDENTIALS_ENV = "AM_SCHEDULER_LOGIN_CREDENTIALS"
+ACCOUNT_LOGIN_ENV_KEYS = (
+    "AM_LOGIN_ACCOUNT_ID",
+    "AM_LOGIN_USERNAME",
+    "AM_LOGIN_PASSWORD",
+    "AM_LOGIN_CREDENTIAL_SOURCE",
+)
+
+
+def scheduler_login_credentials():
+    raw = os.environ.get(SCHEDULER_LOGIN_CREDENTIALS_ENV, "").strip()
+    if not raw:
+        return {}
+    try:
+        credentials = json.loads(raw)
+    except (TypeError, ValueError):
+        logger.error("Scheduler login credential payload is invalid JSON")
+        return {}
+    return credentials if isinstance(credentials, dict) else {}
+
+
+@contextmanager
+def account_login_environment(account_id):
+    previous = {key: os.environ.get(key) for key in ACCOUNT_LOGIN_ENV_KEYS}
+    credentials = scheduler_login_credentials().get(account_id)
+    try:
+        for key in ACCOUNT_LOGIN_ENV_KEYS:
+            os.environ.pop(key, None)
+        os.environ["AM_LOGIN_ACCOUNT_ID"] = account_id
+        if isinstance(credentials, dict):
+            username = str(credentials.get("username") or "").strip()
+            password = str(credentials.get("password") or "")
+            if username and password:
+                os.environ["AM_LOGIN_USERNAME"] = username
+                os.environ["AM_LOGIN_PASSWORD"] = password
+                os.environ["AM_LOGIN_CREDENTIAL_SOURCE"] = "local_secure_store"
+        yield
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 
 def setup_windows_event_loop():
@@ -156,7 +202,8 @@ async def account_session_task(account_id, job_id=None):
             except SystemExit:
                 return ("skipped", "lock taken between check and acquire")
             try:
-                summaries = run(account_id=account_id)
+                with account_login_environment(account_id):
+                    summaries = run(account_id=account_id)
             finally:
                 release_lock()
             if not summaries:
