@@ -12,13 +12,12 @@ import {
   Spin,
   Switch,
   Table,
-  Tag,
   Tooltip,
   Typography,
   message,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { Play, RefreshCw, Save, Target, Users } from 'lucide-react'
+import { Play, RefreshCw, Save, Users } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { PageHeader } from '../components/PageHeader'
@@ -32,23 +31,15 @@ import {
   runPlatformTask,
   saveFypSettings,
 } from '../services/api'
-import { getPlatformLabel, isExecutablePlatform, PLATFORMS } from '../services/platforms'
-import type { Account, ConfigSnapshot, FypSettings, Platform, ProcessStatus, RunStatus } from '../services/types'
+import { getPlatformLabel, isExecutablePlatform } from '../services/platforms'
+import type { Account, ConfigSnapshot, FypSettings, ProcessStatus, RunStatus } from '../services/types'
 
 type AccountMode = 'all' | 'single' | 'selected'
-type StartTaskKind = 'fyp' | 'target'
-
-interface DisabledTask {
-  key: string
-  platform: Platform
-  taskName: string
-  reason: string
-}
 
 interface TaskCatalogRow {
-  key: StartTaskKind
+  key: 'fyp'
   taskName: string
-  status: 'enabled' | 'warning'
+  status: 'enabled'
   statusLabel: string
   summary: string
   disabledReason?: string
@@ -57,6 +48,7 @@ interface TaskCatalogRow {
 }
 
 const TERMINAL_STATUS: RunStatus[] = ['completed', 'partial_failed', 'failed', 'stopped', 'idle']
+const FYP_COMMENTS_FILE = 'comments.txt'
 
 const DEFAULT_FYP_SETTINGS: FypSettings = {
   fypBrowseMinutes: [2, 5],
@@ -70,18 +62,6 @@ const DEFAULT_FYP_SETTINGS: FypSettings = {
   },
 }
 
-const RESERVED_TASK_NAMES = ['养号任务', '目标号互动', '调度任务']
-const DISABLED_TASKS: DisabledTask[] = PLATFORMS.filter(
-  (platform) => !platform.automaticExecutionSupported,
-).flatMap((platform) =>
-  RESERVED_TASK_NAMES.map((taskName) => ({
-    key: `${platform.id}-${taskName}`,
-    platform: platform.id,
-    taskName: `${platform.localeName} ${taskName}`,
-    reason: platform.summary,
-  })),
-)
-
 export function TaskPage() {
   const { currentPlatform, currentPlatformDefinition } = usePlatformContext()
   const [form] = Form.useForm<FypSettings>()
@@ -92,7 +72,7 @@ export function TaskPage() {
   const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [startingTask, setStartingTask] = useState<StartTaskKind>()
+  const [startingTask, setStartingTask] = useState(false)
   const [watchingRun, setWatchingRun] = useState(false)
   const [runStatus, setRunStatus] = useState<ProcessStatus | null>(null)
 
@@ -117,11 +97,6 @@ export function TaskPage() {
     () => resolveRunAccounts(accountMode, runnableAccounts, singleAccountId, selectedAccountIds),
     [accountMode, runnableAccounts, selectedAccountIds, singleAccountId],
   )
-  const targetParticipants = snapshot?.targetEngagement?.participants ?? []
-  const targetRunnableAccounts = useMemo(() => {
-    const participantSet = new Set(targetParticipants)
-    return runnableAccounts.filter((account) => participantSet.has(account.id))
-  }, [runnableAccounts, targetParticipants])
 
   const refresh = useCallback(
     async (showLoading = true) => {
@@ -196,17 +171,14 @@ export function TaskPage() {
     }
   }
 
-  const confirmStart = (kind: StartTaskKind) => {
-    const runAccounts = kind === 'fyp' ? selectedRunAccounts : targetRunnableAccounts
+  const confirmStart = () => {
+    const runAccounts = selectedRunAccounts
     if (runAccounts.length === 0) {
-      message.warning(kind === 'fyp' ? '请选择可执行平台的启用账号' : '目标号互动没有可执行参与账号')
+      message.warning('请选择可执行平台的启用账号')
       return
     }
 
-    const taskName =
-      kind === 'fyp'
-        ? `${currentPlatformDefinition.localeName} FYP 养号`
-        : `${currentPlatformDefinition.localeName} 目标号互动`
+    const taskName = `${currentPlatformDefinition.localeName} FYP 养号`
     const fypSettings = normalizeFypSettings(form.getFieldsValue(true))
     Modal.confirm({
       title: `确认启动 ${taskName}`,
@@ -241,20 +213,20 @@ export function TaskPage() {
         </Descriptions>
       ),
       onOk: async () => {
-        await startTask(kind, runAccounts)
+        await startTask(runAccounts)
       },
     })
   }
 
-  const startTask = async (kind: StartTaskKind, runAccounts: Account[]) => {
-    setStartingTask(kind)
+  const startTask = async (runAccounts: Account[]) => {
+    setStartingTask(true)
     try {
       const accountIds = runAccounts.map((account) => account.id)
       const result = await runPlatformTask({
         platform: currentPlatform,
-        taskType: kind === 'fyp' ? 'fyp' : 'target_engagement',
+        taskType: 'fyp',
         accountIds,
-        mode: kind === 'fyp' && accountMode === 'all' ? 'all' : accountIds.length === 1 ? 'single' : 'selected',
+        mode: accountMode === 'all' ? 'all' : accountIds.length === 1 ? 'single' : 'selected',
       })
       setWatchingRun(true)
       setRunStatus(null)
@@ -264,18 +236,12 @@ export function TaskPage() {
       message.error(formatError(error))
       throw error
     } finally {
-      setStartingTask(undefined)
+      setStartingTask(false)
     }
   }
 
   const fypSettings = normalizeFypSettings(snapshot?.fypSettings)
-  const targetEnabled = Boolean(snapshot?.targetEngagement?.enabled)
   const fypDisabledReason = selectedRunAccounts.length === 0 ? '没有可执行的 FYP 账号' : undefined
-  const targetDisabledReason = !targetEnabled
-    ? '目标号互动配置未启用'
-    : targetRunnableAccounts.length === 0
-      ? '没有可执行的目标号参与账号'
-      : undefined
 
   return (
     <>
@@ -434,6 +400,16 @@ export function TaskPage() {
                       <InputNumber min={0} precision={0} className="full-width" disabled={!commentEnabled} />
                     </Form.Item>
                   </Col>
+                  <Col xs={24} md={12}>
+                    <Form.Item label="评论池">
+                      <Space wrap>
+                        <Typography.Text code disabled={!commentEnabled}>
+                          {FYP_COMMENTS_FILE}
+                        </Typography.Text>
+                        <Typography.Text type="secondary">内容从评论素材页面维护。</Typography.Text>
+                      </Space>
+                    </Form.Item>
+                  </Col>
                 </Row>
               </Form>
             </Card>
@@ -484,10 +460,6 @@ export function TaskPage() {
                       <AccountBrowserEnvironment accounts={selectedRunAccounts} />
                     </div>
                   </Descriptions.Item>
-                  <Descriptions.Item label="目标号参与账号">{targetRunnableAccounts.length}</Descriptions.Item>
-                  <Descriptions.Item label="目标号浏览器">
-                    <AccountBrowserEnvironment accounts={targetRunnableAccounts} />
-                  </Descriptions.Item>
                   <Descriptions.Item label="当前 FYP 配置">
                     {fypSettings.fypBrowseMinutes[0]}-{fypSettings.fypBrowseMinutes[1]} 分钟，点赞{' '}
                     {formatPercent(fypSettings.likeProbability)}
@@ -500,22 +472,10 @@ export function TaskPage() {
                         type="primary"
                         icon={<Play size={16} />}
                         disabled={Boolean(fypDisabledReason)}
-                        loading={startingTask === 'fyp'}
-                        onClick={() => confirmStart('fyp')}
+                        loading={startingTask}
+                        onClick={confirmStart}
                       >
                         启动 FYP 养号
-                      </Button>
-                    </span>
-                  </Tooltip>
-                  <Tooltip title={targetDisabledReason}>
-                    <span>
-                      <Button
-                        icon={<Target size={16} />}
-                        disabled={Boolean(targetDisabledReason)}
-                        loading={startingTask === 'target'}
-                        onClick={() => confirmStart('target')}
-                      >
-                        启动目标号互动
                       </Button>
                     </span>
                   </Tooltip>
@@ -526,12 +486,8 @@ export function TaskPage() {
 
           <Col span={24}>
             <TaskCatalog
-              targetEnabled={targetEnabled}
-              targetRunnableCount={targetRunnableAccounts.length}
-              onRunFyp={() => confirmStart('fyp')}
-              onRunTarget={() => confirmStart('target')}
+              onRunFyp={confirmStart}
               fypDisabledReason={fypDisabledReason}
-              targetDisabledReason={targetDisabledReason}
             />
           </Col>
 
@@ -546,19 +502,11 @@ export function TaskPage() {
 
 
 function TaskCatalog({
-  targetEnabled,
-  targetRunnableCount,
   fypDisabledReason,
-  targetDisabledReason,
   onRunFyp,
-  onRunTarget,
 }: {
-  targetEnabled: boolean
-  targetRunnableCount: number
   fypDisabledReason?: string
-  targetDisabledReason?: string
   onRunFyp: () => void
-  onRunTarget: () => void
 }) {
   const rows: TaskCatalogRow[] = [
     {
@@ -570,16 +518,6 @@ function TaskCatalog({
       disabledReason: fypDisabledReason,
       actionLabel: '启动',
       onRun: onRunFyp,
-    },
-    {
-      key: 'target',
-      taskName: 'TikTok 目标号互动',
-      status: targetEnabled ? 'enabled' : 'warning',
-      statusLabel: targetEnabled ? '可执行' : '未启用',
-      summary: `当前可执行参与账号 ${targetRunnableCount} 个。`,
-      disabledReason: targetDisabledReason,
-      actionLabel: '启动',
-      onRun: onRunTarget,
     },
   ]
 
@@ -599,7 +537,7 @@ function TaskCatalog({
           <span>
             <Button
               type="link"
-              icon={row.key === 'target' ? <Target size={15} /> : <Play size={15} />}
+              icon={<Play size={15} />}
               disabled={Boolean(row.disabledReason)}
               onClick={row.onRun}
             >
@@ -612,32 +550,6 @@ function TaskCatalog({
   ]
 
   return <Table rowKey="key" title={() => '可执行任务'} columns={columns} dataSource={rows} pagination={false} />
-}
-
-function DisabledTaskTable({ tasks }: { tasks: DisabledTask[] }) {
-  const columns: ColumnsType<DisabledTask> = [
-    {
-      title: '平台',
-      dataIndex: 'platform',
-      width: 140,
-      render: (platform: Platform) => getPlatformLabel(platform),
-    },
-    {
-      title: '任务',
-      dataIndex: 'taskName',
-    },
-    {
-      title: '状态',
-      width: 120,
-      render: () => <Tag color="gold">预留</Tag>,
-    },
-    {
-      title: '原因',
-      dataIndex: 'reason',
-    },
-  ]
-
-  return <Table rowKey="key" title={() => '预留平台任务'} columns={columns} dataSource={tasks} pagination={false} />
 }
 
 function resolveRunAccounts(

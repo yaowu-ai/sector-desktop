@@ -5,6 +5,7 @@ import time
 from typing import Any, Mapping
 
 from core import runtime
+from auth_adapters import AuthResult, InterventionState, LoginState
 from patchright_runtime import start_sync_playwright, stop_sync_playwright
 from platforms.registration.base import (
     RegistrationAdapter,
@@ -39,11 +40,26 @@ CONTINUE_WITH_GOOGLE_SELECTORS = [
 ]
 
 BIRTHDAY_SELECTORS = {
-    "page": 'text=/When\\\'s your birthday/i',
-    "month": '[role="combobox"]:has-text("Month"), select:has(option:has-text("Month"))',
-    "day": '[role="combobox"]:has-text("Day"), select:has(option:has-text("Day"))',
-    "year": '[role="combobox"]:has-text("Year"), select:has(option:has-text("Year"))',
-    "next": 'button:has-text("Next")',
+    "page": 'text=/When\\\'s your birthday|\u4f60\u7684\u751f\u65e5\u662f\u54ea\u5929|\u51fa\u751f\u65e5\u671f/i',
+    "month": (
+        '[role="combobox"]:has-text("Month"), [role="combobox"]:has-text("\u6708"), '
+        'select:has(option:has-text("Month")), select:has(option:has-text("\u6708")), '
+        '[role="combobox"][aria-label*="Month" i], [role="combobox"][aria-label*="\u6708"], '
+        'select[aria-label*="Month" i], select[aria-label*="\u6708"]'
+    ),
+    "day": (
+        '[role="combobox"]:has-text("Day"), [role="combobox"]:has-text("\u65e5"), '
+        'select:has(option:has-text("Day")), select:has(option:has-text("\u65e5")), '
+        '[role="combobox"][aria-label*="Day" i], [role="combobox"][aria-label*="\u65e5"], '
+        'select[aria-label*="Day" i], select[aria-label*="\u65e5"]'
+    ),
+    "year": (
+        '[role="combobox"]:has-text("Year"), [role="combobox"]:has-text("\u5e74"), '
+        'select:has(option:has-text("Year")), select:has(option:has-text("\u5e74")), '
+        '[role="combobox"][aria-label*="Year" i], [role="combobox"][aria-label*="\u5e74"], '
+        'select[aria-label*="Year" i], select[aria-label*="\u5e74"]'
+    ),
+    "next": 'button:has-text("Next"), button:has-text("\u4e0b\u4e00\u6b65")',
 }
 
 USERNAME_SELECTORS = {
@@ -468,6 +484,132 @@ def finish_intermediate_registration_result(
         conn,
     )
     return result
+
+
+def ensure_tiktok_google_login(
+    page: Any,
+    account: Mapping[str, Any],
+    config: Mapping[str, Any],
+    conn: Any,
+    platform: str = "tiktok",
+    credentials: Any = None,
+    registration_browser: Any = None,
+) -> AuthResult:
+    account_id = str(account.get("id") or "")
+    credentials = credentials or read_registration_credentials(account)
+    try:
+        if not is_tiktok_login_page(page):
+            open_tiktok_login_page(page)
+        runtime.log_action(conn, platform, account_id, "login_google_start", "start", "task=auth_recovery")
+        _google_page, google_result, _retried_login = run_google_login_from_tiktok_login_page(
+            page,
+            account,
+            credentials,
+            conn,
+            platform,
+        )
+        if google_result is not None:
+            return auth_result_from_registration_result(google_result, page)
+
+        finalize_tiktok_registration_session(page, account, conn, platform)
+        result = classify_tiktok_page(page, account_id=account_id)
+        if not result.logged_in:
+            runtime.log_action(conn, platform, account_id, "login_google", result.state.value, result.summary())
+            return result
+
+        try:
+            persist_registration_session(page, account, config, conn, platform, registration_browser)
+        except Exception as exc:
+            detail = registration_network_error_detail(exc, action="Google login session save")
+            runtime.log_action(conn, platform, account_id, "login_google", "error", detail)
+            return AuthResult(
+                platform=platform,
+                account_id=account_id,
+                state=LoginState.UNKNOWN,
+                detail=detail,
+                url=getattr(page, "url", None),
+                error_code=RegistrationErrorCode.SESSION_SAVE_FAILED.value,
+                intervention=InterventionState(
+                    required=True,
+                    state=LoginState.UNKNOWN,
+                    reason="session_save_failed",
+                    detail=detail,
+                ),
+            )
+
+        detail = "TikTok Google login completed and session saved"
+        runtime.log_action(conn, platform, account_id, "login_google", "ok", detail)
+        runtime.session_log(f"{account_id} | AUTH GOOGLE | ok: {detail}", platform)
+        return AuthResult(
+            platform=platform,
+            account_id=account_id,
+            state=LoginState.LOGGED_IN,
+            detail=detail,
+            url=getattr(page, "url", None),
+        )
+    except Exception as exc:
+        detail = registration_network_error_detail(exc, action="Google login")
+        runtime.log_action(conn, platform, account_id, "login_google", "error", detail)
+        return AuthResult(
+            platform=platform,
+            account_id=account_id,
+            state=LoginState.UNKNOWN,
+            detail=detail,
+            url=getattr(page, "url", None),
+            error_code=RegistrationErrorCode.GOOGLE_FLOW_BLOCKED.value,
+            intervention=InterventionState(
+                required=True,
+                state=LoginState.UNKNOWN,
+                reason="google_login_failed",
+                detail=detail,
+            ),
+        )
+
+
+def auth_result_from_registration_result(result: RegistrationResult, page: Any) -> AuthResult:
+    error_code = result.error_code.value if result.error_code else None
+    if result.status == RegistrationStatus.MANUAL_REQUIRED:
+        state = login_state_for_registration_manual_reason(result.manual_reason)
+        reason = result.manual_reason or "google_login_manual_required"
+        return AuthResult(
+            platform=result.platform,
+            account_id=result.account_id,
+            state=state,
+            detail=result.detail,
+            url=getattr(page, "url", None),
+            error_code=error_code,
+            intervention=InterventionState(
+                required=True,
+                state=state,
+                reason=reason,
+                detail=result.detail,
+            ),
+        )
+    return AuthResult(
+        platform=result.platform,
+        account_id=result.account_id,
+        state=LoginState.UNKNOWN,
+        detail=result.detail,
+        url=getattr(page, "url", None),
+        error_code=error_code,
+        intervention=InterventionState(
+            required=True,
+            state=LoginState.UNKNOWN,
+            reason=error_code or "google_login_failed",
+            detail=result.detail,
+        ),
+    )
+
+
+def login_state_for_registration_manual_reason(reason: str | None) -> LoginState:
+    lowered = (reason or "").lower()
+    if "captcha" in lowered:
+        return LoginState.CAPTCHA
+    if "mfa" in lowered or "code" in lowered or "verification" in lowered:
+        return LoginState.MFA
+    if "missing" in lowered:
+        return LoginState.LOGIN_PAGE
+    return LoginState.SECURITY_CHECK
 
 
 def complete_registration_result(
@@ -952,8 +1094,21 @@ def is_tiktok_birthday_page(page: Any) -> bool:
     if first_visible_locator(page, [BIRTHDAY_SELECTORS["page"]], timeout=500) is not None:
         return True
     text = page_body_text(page).lower()
-    return "when's your birthday" in text or (
-        "birthday" in text and "month" in text and "year" in text
+    return (
+        "when's your birthday" in text
+        or "\u4f60\u7684\u751f\u65e5\u662f\u54ea\u5929" in text
+        or "\u51fa\u751f\u65e5\u671f" in text
+        or (
+            "birthday" in text
+            and "month" in text
+            and "year" in text
+        )
+        or (
+            "\u6708" in text
+            and "\u65e5" in text
+            and "\u5e74" in text
+            and "\u4e0b\u4e00\u6b65" in text
+        )
     )
 
 
@@ -966,18 +1121,18 @@ def select_tiktok_birthday(page: Any, birthday: Mapping[str, int]) -> None:
 
     select_tiktok_dropdown_option(
         page,
-        [BIRTHDAY_SELECTORS["month"], 'select[aria-label*="Month" i]'],
-        [MONTH_NAMES[month - 1], str(month)],
+        [BIRTHDAY_SELECTORS["month"], 'select[aria-label*="Month" i]', 'select[aria-label*="\u6708"]'],
+        [MONTH_NAMES[month - 1], str(month), f"{month}\u6708"],
     )
     select_tiktok_dropdown_option(
         page,
-        [BIRTHDAY_SELECTORS["day"], 'select[aria-label*="Day" i]'],
-        [str(day)],
+        [BIRTHDAY_SELECTORS["day"], 'select[aria-label*="Day" i]', 'select[aria-label*="\u65e5"]'],
+        [str(day), f"{day}\u65e5"],
     )
     select_tiktok_dropdown_option(
         page,
-        [BIRTHDAY_SELECTORS["year"], 'select[aria-label*="Year" i]'],
-        [str(year)],
+        [BIRTHDAY_SELECTORS["year"], 'select[aria-label*="Year" i]', 'select[aria-label*="\u5e74"]'],
+        [str(year), f"{year}\u5e74"],
     )
 
     next_button = first_visible_locator(page, [BIRTHDAY_SELECTORS["next"]], timeout=3000)

@@ -4,7 +4,6 @@ import {
   Col,
   Descriptions,
   Form,
-  Input,
   InputNumber,
   Modal,
   Row,
@@ -137,10 +136,10 @@ export function TargetEngagementPage({ hideProcessOutput = false, onDataChanged 
   }, [refresh])
 
   const saveSettings = async () => {
-    const values = await form.validateFields()
+    const values = normalizeTargetSettings(await form.validateFields())
     setSaving(true)
     try {
-      await saveTargetEngagementSettings(normalizeTargetSettings(values), currentPlatform)
+      await saveTargetEngagementSettings(values, currentPlatform)
       message.success('目标号互动配置已保存到 accounts.yaml')
       await refresh()
       await onDataChanged?.()
@@ -309,25 +308,20 @@ export function TargetEngagementPage({ hideProcessOutput = false, onDataChanged 
                     </Form.Item>
                   </Col>
                   <Col xs={24} md={16}>
-                    <Form.Item
-                      name="commentsFile"
-                      label="评论池文件"
-                      rules={[{ required: true, message: '请输入评论池文件' }]}
-                    >
-                      <Input
-                        placeholder="comments_brand.txt"
-                        addonAfter={
-                          <Button
-                            type="text"
-                            size="small"
-                            icon={<Upload size={15} />}
-                            loading={importingCommentsFile}
-                            onClick={selectCommentsFile}
-                          >
-                            导入
-                          </Button>
-                        }
-                      />
+                    <Form.Item label="评论池文件">
+                      <Space wrap>
+                        <Typography.Text code>{DEFAULT_TARGET_SETTINGS.commentsFile}</Typography.Text>
+                        <Button
+                          icon={<Upload size={15} />}
+                          loading={importingCommentsFile}
+                          onClick={selectCommentsFile}
+                        >
+                          导入
+                        </Button>
+                        <Typography.Text type="secondary">
+                          内容从评论素材页面维护；导入会覆盖品牌目标号评论池。
+                        </Typography.Text>
+                      </Space>
                     </Form.Item>
                   </Col>
                   <Col span={24}>
@@ -600,7 +594,7 @@ function normalizeTargetSettings(settings?: Partial<TargetEngagementSettings>): 
     maxVideosPerRun: normalizeInteger(settings?.maxVideosPerRun, DEFAULT_TARGET_SETTINGS.maxVideosPerRun),
     likeProbability: Number(settings?.likeProbability ?? DEFAULT_TARGET_SETTINGS.likeProbability),
     commentProbability: Number(settings?.commentProbability ?? DEFAULT_TARGET_SETTINGS.commentProbability),
-    commentsFile: settings?.commentsFile?.trim() || DEFAULT_TARGET_SETTINGS.commentsFile,
+    commentsFile: DEFAULT_TARGET_SETTINGS.commentsFile,
     follow: Boolean(settings?.follow ?? DEFAULT_TARGET_SETTINGS.follow),
     followProbability: Number(settings?.followProbability ?? DEFAULT_TARGET_SETTINGS.followProbability),
   }

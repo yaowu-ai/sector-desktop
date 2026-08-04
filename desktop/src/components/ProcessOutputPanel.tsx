@@ -91,18 +91,18 @@ export function ProcessOutputPanel({ title = '运行输出' }: ProcessOutputPane
 
     notifiedRegistrationRunRef.current = runKey
     if (status.status === 'stopped') {
-      message.warning('注册任务已停止')
+      message.warning('自动登录任务已停止')
       return
     }
     if (status.status === 'failed' || status.status === 'partial_failed') {
-      message.error(`注册失败：${status.error ?? '任务未完整完成'}`)
+      message.error(`自动登录失败：${status.error ?? '任务未完整完成'}`)
       return
     }
     if (outcome?.failed) {
-      message.error(`注册失败：${outcome.ok}/${outcome.total} 完成，${outcome.failed} 个失败`)
+      message.error(`自动登录失败：${outcome.ok}/${outcome.total} 完成，${outcome.failed} 个失败`)
       return
     }
-    message.success(`注册完成：${outcome?.ok ?? status.completedAccounts.length}/${outcome?.total ?? status.completedAccounts.length} 个账号`)
+    message.success(`自动登录完成：${outcome?.ok ?? status.completedAccounts.length}/${outcome?.total ?? status.completedAccounts.length} 个账号`)
   }, [status, stdout])
 
   const stopAfterCurrent = async () => {

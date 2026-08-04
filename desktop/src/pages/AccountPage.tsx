@@ -402,7 +402,7 @@ export function AccountPage() {
     try {
       const result = await runTikTokRegisterBatch(accountIds);
       message.success(
-        `批量注册流程已启动，${accountIds.length} 个账号，PID ${
+        `批量自动登录流程已启动，${accountIds.length} 个账号，PID ${
           result.processId ?? "-"
         }`,
       );
@@ -453,7 +453,7 @@ export function AccountPage() {
     setRegisteringAccountId(account.id);
     try {
       const result = await runTikTokRegister(account.id);
-      message.success(`账号注册流程已启动，PID ${result.processId ?? "-"}`);
+      message.success(`账号自动登录流程已启动，PID ${result.processId ?? "-"}`);
       setCurrentRunStatus(await getCurrentRunStatus());
       await refresh();
     } catch (error) {
@@ -641,11 +641,12 @@ export function AccountPage() {
       title: "操作",
       key: "actions",
       fixed: "right",
-      width: 220,
+      width: 260,
       render: (_, account) => (
-        <Space size={6}>
+        <Space size={6} style={{ whiteSpace: "nowrap" }}>
           <Tooltip title="编辑" placement="top">
             <Button
+              size="small"
               aria-label="编辑"
               icon={<Edit3 size={15} />}
               onClick={() => openEdit(account)}
@@ -658,13 +659,14 @@ export function AccountPage() {
                 currentRunBusy,
                 registeringAccountId,
                 registeringBatch,
-              ) ?? "打开该账号浏览器环境并进入 TikTok 注册"
+              ) ?? "打开该账号浏览器环境并执行 TikTok 自动登录"
             }
             placement="top"
           >
             <span>
               <Button
-                aria-label="注册"
+                size="small"
+                aria-label="自动登录"
                 icon={<UserPlus size={15} />}
                 onClick={() => void registerAccount(account)}
                 loading={registeringAccountId === account.id}
@@ -677,12 +679,13 @@ export function AccountPage() {
                   ),
                 )}
               >
-                注册
+                自动登录
               </Button>
             </span>
           </Tooltip>
           <Tooltip title="日志" placement="top">
             <Button
+              size="small"
               aria-label="日志"
               icon={<FileSearch size={15} />}
               onClick={() => void openLogs(account)}
@@ -690,6 +693,7 @@ export function AccountPage() {
           </Tooltip>
           <Tooltip title="删除" placement="top">
             <Button
+              size="small"
               danger
               aria-label="删除"
               icon={<Trash2 size={15} />}
@@ -773,7 +777,7 @@ export function AccountPage() {
                         currentRunBusy,
                         registeringAccountId,
                         registeringBatch,
-                      ) ?? "对已选账号依次启动 TikTok Google 注册"
+                      ) ?? "对已选账号依次启动 TikTok 自动登录"
                     }
                     placement="top"
                   >
@@ -791,7 +795,7 @@ export function AccountPage() {
                         loading={registeringBatch}
                         onClick={() => void batchRegisterAccounts()}
                       >
-                        批量注册
+                        批量自动登录
                       </Button>
                     </span>
                   </Tooltip>
@@ -823,7 +827,7 @@ export function AccountPage() {
                   selectedRowKeys,
                   onChange: setSelectedRowKeys,
                 }}
-                scroll={{ x: 2250 }}
+                scroll={{ x: 2290 }}
                 pagination={{ pageSize: 12, showSizeChanger: true }}
               />
             </Space>
@@ -1666,16 +1670,16 @@ function accountRegisterDisabledReason(
   registeringBatch: boolean,
 ) {
   if (account.platform !== "tiktok") {
-    return "仅 TikTok 账号支持注册";
+    return "仅 TikTok 账号支持自动登录";
   }
   if (currentRunBusy) {
     return "当前已有任务运行，请到任务输出面板停止或等待完成";
   }
   if (registeringBatch) {
-    return "当前已有批量注册入口正在处理";
+    return "当前已有批量自动登录入口正在处理";
   }
   if (registeringAccountId && registeringAccountId !== account.id) {
-    return "当前已有注册入口正在处理";
+    return "当前已有自动登录入口正在处理";
   }
   const provider = resolveBrowserProvider(account);
   if (
@@ -1701,10 +1705,10 @@ function batchRegisterDisabledReason(
     return "当前已有任务运行，请到任务输出面板停止或等待完成";
   }
   if (registeringBatch) {
-    return "当前已有批量注册入口正在处理";
+    return "当前已有批量自动登录入口正在处理";
   }
   if (registeringAccountId) {
-    return "当前已有注册入口正在处理";
+    return "当前已有自动登录入口正在处理";
   }
   const blockedAccount = accounts
     .map((account) => ({

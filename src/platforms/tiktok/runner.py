@@ -22,8 +22,9 @@ from patchright_runtime import start_sync_playwright
 from platforms.base import PlatformRunner
 from platforms.registration.base import RegistrationStatus
 from platforms.registration.registry import adapter_for_platform
-from platforms.tiktok.auth import TikTokAuthAdapter
+from platforms.tiktok.auth import TikTokAuthAdapter, auto_login_enabled
 from platforms.tiktok.fyp import build_fyp_plan, run_tiktok_fyp
+from platforms.tiktok.register import ensure_tiktok_google_login
 from platforms.tiktok.target import run_target_engagement
 
 
@@ -188,6 +189,27 @@ def ensure_tiktok_authenticated(page, account, config, conn):
             return auth_result
 
         log_action(conn, platform, account_id, "login_check", auth_result.state.value, detail)
+        if (
+            auth_result.state in {LoginState.LOGIN_PAGE, LoginState.LOGGED_OUT}
+            and auto_login_enabled(account)
+            and auth_result.error_code != "AUTH_TIKTOK_CREDENTIAL_MISSING"
+        ):
+            session_log(
+                f"{account_id} | AUTH GOOGLE | login page detected; trying Google login recovery",
+                platform,
+            )
+            auth_result = ensure_tiktok_google_login(page, account, config, conn, platform)
+            detail = auth_result.summary()
+            emit_auth_event(
+                account_id,
+                platform,
+                auth_result.state.value,
+                auth_result.detail,
+                url=auth_result.url,
+                reason=auth_result.intervention.reason if auth_result.intervention else auth_result.state.value,
+            )
+            log_action(conn, platform, account_id, "login_check", auth_result.state.value, detail)
+            return auth_result
         if auth_result.state not in {
             LoginState.MFA,
             LoginState.CAPTCHA,
