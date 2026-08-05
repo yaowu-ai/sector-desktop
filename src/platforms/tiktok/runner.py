@@ -248,6 +248,7 @@ def run_session(account, config, conn):
         "status": "unknown",
         "videos": 0,
         "likes": 0,
+        "like_failures": 0,
         "follows": 0,
         "comments": 0,
         "target_videos": 0,
@@ -310,6 +311,7 @@ def run_session(account, config, conn):
                 target = run_target_engagement(page, account, config, conn)
                 summary["target_videos"] = target["videos"]
                 summary["target_likes"] = target["likes"]
+                summary["like_failures"] += target.get("like_failures", 0)
                 summary["target_comments"] = target["comments"]
                 summary["target_follows"] = target["follows"]
 
@@ -322,7 +324,7 @@ def run_session(account, config, conn):
         summary["duration_actual_min"] = round(actual, 1)
         session_log(
             f"{account_id} | OK | {summary['videos']}v / {summary['likes']}L / "
-            f"{summary['follows']}F / {summary['comments']}C "
+            f"{summary['like_failures']}LF / {summary['follows']}F / {summary['comments']}C "
             f"(+target {summary['target_videos']}v/{summary['target_likes']}L/"
             f"{summary['target_comments']}C) in {actual:.1f}min",
             platform,
@@ -359,6 +361,7 @@ def run_tiktok_registration(account, config, conn):
         "status": "unknown",
         "videos": 0,
         "likes": 0,
+        "like_failures": 0,
         "follows": 0,
         "comments": 0,
         "target_videos": 0,

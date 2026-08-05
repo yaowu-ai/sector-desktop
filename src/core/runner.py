@@ -138,7 +138,8 @@ def build_batch_message(summaries):
                 )
             lines.append(
                 f"{prefix}: OK ({item['videos']}v / {item['likes']}L / "
-                f"{item['follows']}F / {item.get('comments', 0)}C{target}, "
+                f"{item.get('like_failures', 0)}LF / {item['follows']}F / "
+                f"{item.get('comments', 0)}C{target}, "
                 f"{item['duration_actual_min']}min)"
             )
         elif item["status"] == "error":

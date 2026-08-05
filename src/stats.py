@@ -29,6 +29,16 @@ def parse_count(detail, key):
     return 0
 
 
+def parse_value(detail, key):
+    """Extract a string after `key=` from a space-separated detail string."""
+    if not detail:
+        return ""
+    for part in detail.split():
+        if part.startswith(f"{key}="):
+            return part.split("=", 1)[1]
+    return ""
+
+
 def aggregate(since=None):
     """Read action_log and aggregate per account."""
     if not LOG_DB.exists():
@@ -51,7 +61,8 @@ def aggregate(since=None):
         if account_id not in stats:
             stats[account_id] = {
                 "ok": 0, "err": 0, "skip": 0,
-                "videos": 0, "likes": 0, "follows": 0, "comments": 0,
+                "videos": 0, "likes": 0, "like_failures": 0,
+                "follows": 0, "comments": 0,
             }
         s = stats[account_id]
 
@@ -64,6 +75,8 @@ def aggregate(since=None):
             s["skip"] += 1
         elif action == "like" and status == "ok":
             s["likes"] += parse_count(detail, "count")
+        elif action == "like" and status == "fail":
+            s["like_failures"] += parse_count(detail, "count")
         elif action == "follow" and status == "ok":
             s["follows"] += parse_count(detail, "count")
         elif action == "comment" and status == "ok":
@@ -108,15 +121,32 @@ def aggregate_target(since=None):
             ).fetchall()
     except sqlite3.OperationalError:
         follow_rows = []
+
+    try:
+        if since:
+            like_failure_rows = conn.execute(
+                "SELECT account_id, detail FROM action_log "
+                "WHERE action='target_like' AND status='fail' AND ts >= ?",
+                (since.isoformat(),),
+            ).fetchall()
+        else:
+            like_failure_rows = conn.execute(
+                "SELECT account_id, detail FROM action_log "
+                "WHERE action='target_like' AND status='fail'"
+            ).fetchall()
+    except sqlite3.OperationalError:
+        like_failure_rows = []
     conn.close()
 
     def _acc(acc):
         return by_account.setdefault(
-            acc, {"videos": 0, "likes": 0, "comments": 0, "follows": 0, "handles": set()})
+            acc, {"videos": 0, "likes": 0, "like_failures": 0,
+                  "comments": 0, "follows": 0, "handles": set()})
 
     def _hdl(handle):
         return by_handle.setdefault(
-            handle, {"videos": 0, "likes": 0, "comments": 0, "follows": 0, "accounts": set()})
+            handle, {"videos": 0, "likes": 0, "like_failures": 0,
+                     "comments": 0, "follows": 0, "accounts": set()})
 
     by_account, by_handle = {}, {}
     for acc, handle, liked, commented in rows:
@@ -140,73 +170,89 @@ def aggregate_target(since=None):
         h["follows"] += 1
         h["accounts"].add(acc)
 
+    for acc, detail in like_failure_rows:
+        handle = parse_value(detail, "handle")
+        a = _acc(acc)
+        a["like_failures"] += 1
+        if handle:
+            a["handles"].add(handle)
+            h = _hdl(handle)
+            h["like_failures"] += 1
+            h["accounts"].add(acc)
+
     return by_account, by_handle
 
 
 def print_target_table(by_account, by_handle, title):
     print()
     print(title)
-    print("=" * 80)
+    print("=" * 90)
 
     if not by_account:
         print("(no target engagement yet)")
-        print("=" * 80)
+        print("=" * 90)
         return
 
     print("By account")
     print(f"{'Account':<15} {'Targets':>8} {'Videos':>8} {'Likes':>7} "
-          f"{'Comments':>9} {'Follows':>8}")
-    print("-" * 80)
-    tot = {"videos": 0, "likes": 0, "comments": 0, "follows": 0}
+          f"{'LikeFail':>8} {'Comments':>9} {'Follows':>8}")
+    print("-" * 90)
+    tot = {"videos": 0, "likes": 0, "like_failures": 0,
+           "comments": 0, "follows": 0}
     for acc in sorted(by_account):
         s = by_account[acc]
         print(f"{acc:<15} {len(s['handles']):>8} {s['videos']:>8} "
-              f"{s['likes']:>7} {s['comments']:>9} {s['follows']:>8}")
+              f"{s['likes']:>7} {s['like_failures']:>8} "
+              f"{s['comments']:>9} {s['follows']:>8}")
         for k in tot:
             tot[k] += s[k]
-    print("-" * 80)
+    print("-" * 90)
     print(f"{'Total':<15} {'':>8} {tot['videos']:>8} {tot['likes']:>7} "
-          f"{tot['comments']:>9} {tot['follows']:>8}")
+          f"{tot['like_failures']:>8} {tot['comments']:>9} {tot['follows']:>8}")
 
     print()
     print("By target")
     print(f"{'Handle':<20} {'Accounts':>9} {'Videos':>8} {'Likes':>7} "
-          f"{'Comments':>9} {'Follows':>8}")
-    print("-" * 80)
+          f"{'LikeFail':>8} {'Comments':>9} {'Follows':>8}")
+    print("-" * 90)
     for handle in sorted(by_handle):
         s = by_handle[handle]
         print(f"{handle:<20} {len(s['accounts']):>9} {s['videos']:>8} "
-              f"{s['likes']:>7} {s['comments']:>9} {s['follows']:>8}")
-    print("=" * 80)
+              f"{s['likes']:>7} {s['like_failures']:>8} "
+              f"{s['comments']:>9} {s['follows']:>8}")
+    print("=" * 90)
 
 
 def print_table(stats, title):
     print()
     print(title)
-    print("=" * 80)
+    print("=" * 92)
     print(f"{'Account':<15} {'OK':>5} {'ERR':>5} {'SKIP':>5} {'Videos':>8} "
-          f"{'Likes':>7} {'Follows':>8} {'Cmts':>6}")
-    print("-" * 80)
+          f"{'Likes':>7} {'LikeFail':>8} {'Follows':>8} {'Cmts':>6}")
+    print("-" * 92)
 
     if not stats:
         print("(no data yet)")
-        print("=" * 80)
+        print("=" * 92)
         return
 
     totals = {"ok": 0, "err": 0, "skip": 0, "videos": 0,
-              "likes": 0, "follows": 0, "comments": 0}
+              "likes": 0, "like_failures": 0,
+              "follows": 0, "comments": 0}
     for acc_id in sorted(stats.keys()):
         s = stats[acc_id]
         print(f"{acc_id:<15} {s['ok']:>5} {s['err']:>5} {s['skip']:>5} "
-              f"{s['videos']:>8} {s['likes']:>7} {s['follows']:>8} {s['comments']:>6}")
+              f"{s['videos']:>8} {s['likes']:>7} {s['like_failures']:>8} "
+              f"{s['follows']:>8} {s['comments']:>6}")
         for k in totals:
             totals[k] += s[k]
 
-    print("-" * 80)
+    print("-" * 92)
     print(f"{'Total':<15} {totals['ok']:>5} {totals['err']:>5} {totals['skip']:>5} "
-          f"{totals['videos']:>8} {totals['likes']:>7} {totals['follows']:>8} "
+          f"{totals['videos']:>8} {totals['likes']:>7} "
+          f"{totals['like_failures']:>8} {totals['follows']:>8} "
           f"{totals['comments']:>6}")
-    print("=" * 80)
+    print("=" * 92)
 
 
 def target_summary_json(by_account, by_handle, scope, since):
@@ -218,6 +264,7 @@ def target_summary_json(by_account, by_handle, scope, since):
                 "account_id": account_id,
                 "videos": stats["videos"],
                 "likes": stats["likes"],
+                "like_failures": stats["like_failures"],
                 "comments": stats["comments"],
                 "follows": stats["follows"],
                 "handles": sorted(stats["handles"]),
@@ -229,6 +276,7 @@ def target_summary_json(by_account, by_handle, scope, since):
                 "handle": handle,
                 "videos": stats["videos"],
                 "likes": stats["likes"],
+                "like_failures": stats["like_failures"],
                 "comments": stats["comments"],
                 "follows": stats["follows"],
                 "accounts": sorted(stats["accounts"]),
@@ -240,7 +288,8 @@ def target_summary_json(by_account, by_handle, scope, since):
 
 def fyp_summary_json(stats, scope, since):
     totals = {"ok": 0, "err": 0, "skip": 0, "videos": 0,
-              "likes": 0, "follows": 0, "comments": 0}
+              "likes": 0, "like_failures": 0,
+              "follows": 0, "comments": 0}
     by_account = []
     for account_id, values in sorted(stats.items()):
         row = {"account_id": account_id, **values}

@@ -11,6 +11,7 @@ from auth_adapters import AuthResult, InterventionState, LoginState
 
 TIKTOK_FORYOU_URL = "https://www.tiktok.com/foryou"
 TIKTOK_LOGIN_URL = "https://www.tiktok.com/login"
+TIKTOK_POST_LOAD_WAIT_SECONDS = 15
 LOCAL_CREDENTIAL_SOURCES = {"local_secure_store", "dpapi"}
 
 
@@ -106,7 +107,7 @@ class TikTokAuthAdapter:
         try:
             page.goto(TIKTOK_FORYOU_URL, timeout=60000)
             page.wait_for_load_state("domcontentloaded", timeout=30000)
-            time.sleep(3)
+            time.sleep(TIKTOK_POST_LOAD_WAIT_SECONDS)
         except Exception as exc:
             return AuthResult(
                 platform=self.platform,

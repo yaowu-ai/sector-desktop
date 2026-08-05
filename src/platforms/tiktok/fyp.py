@@ -95,6 +95,7 @@ def run_tiktok_fyp(page, account, plan, conn):
     return {
         "videos": videos,
         "likes": likes,
+        "like_failures": like_failures,
         "follows": follows,
         "comments": comments,
     }

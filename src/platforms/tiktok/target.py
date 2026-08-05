@@ -20,7 +20,7 @@ from platforms.tiktok.engagement import (
 
 
 def run_target_engagement(page, account, config, conn):
-    counts = {"videos": 0, "likes": 0, "comments": 0, "follows": 0}
+    counts = {"videos": 0, "likes": 0, "like_failures": 0, "comments": 0, "follows": 0}
     account_id = account["id"]
     platform = account.get("platform", "tiktok")
     tcfg = target_engagement_config(config, platform)
@@ -118,6 +118,8 @@ def run_target_engagement(page, account, config, conn):
             )
             counts["videos"] += 1
             counts["likes"] += int(result["liked"])
+            if result.get("like_attempted") and not result["liked"]:
+                counts["like_failures"] += 1
             counts["comments"] += int(result["commented"])
             if result.get("like_attempted"):
                 log_action(
@@ -158,7 +160,8 @@ def run_target_engagement(page, account, config, conn):
     if counts["videos"] or counts["follows"]:
         session_log(
             f"{account_id} | TARGET | {counts['videos']}v / "
-            f"{counts['likes']}L / {counts['comments']}C / {counts['follows']}Fo",
+            f"{counts['likes']}L / {counts['like_failures']}LF / "
+            f"{counts['comments']}C / {counts['follows']}Fo",
             platform,
         )
     return counts
