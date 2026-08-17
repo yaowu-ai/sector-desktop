@@ -1,13 +1,14 @@
 use chrono::Local;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value as JsonValue};
 use serde_yaml::{Mapping, Value};
 use std::collections::{HashMap, HashSet};
 use std::fs;
-#[cfg(target_os = "windows")]
 use std::io::Write;
-use std::path::PathBuf;
-#[cfg(target_os = "windows")]
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::paths::{normalize, project_paths, ProjectPaths};
@@ -17,6 +18,15 @@ const CONFIG_SCHEMA_VERSION: i64 = 1;
 const DEFAULT_BROWSER_PROVIDER: &str = "bitbrowser";
 const DEFAULT_LOGIN_METHOD: &str = "password";
 const LOGIN_CREDENTIAL_PREFIX: &str = "account-login/";
+const AI_COMMENT_CREDENTIAL_PREFIX: &str = "ai-comment/";
+const DEFAULT_AI_COMMENT_PROVIDER: &str = "kimi_moonshot";
+const DEFAULT_AI_COMMENT_BASE_URL: &str = "https://api.moonshot.cn/v1";
+const DEFAULT_AI_COMMENT_MODEL: &str = "kimi-k2.6";
+const DEFAULT_AI_COMMENT_TIMEOUT_SECONDS: i64 = 5;
+const DEFAULT_AI_COMMENT_MAX_LENGTH: i64 = 80;
+const DEFAULT_AI_COMMENT_LANGUAGE: &str = "auto";
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 #[derive(Debug, Deserialize)]
 struct ConfigYaml {
@@ -27,6 +37,7 @@ struct ConfigYaml {
     scheduler: Option<SchedulerYaml>,
     target_accounts: Option<TargetAccountsYaml>,
     platforms: Option<HashMap<String, PlatformYaml>>,
+    ai_comment: Option<AiCommentYaml>,
     notify: Option<NotifyYaml>,
     accounts: Option<Vec<AccountYaml>>,
 }
@@ -104,6 +115,19 @@ struct SchedulerYaml {
 struct PlatformCommentsYaml {
     general_file: Option<String>,
     target_file: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AiCommentYaml {
+    enabled: Option<bool>,
+    provider: Option<String>,
+    base_url: Option<String>,
+    model: Option<String>,
+    timeout_seconds: Option<i64>,
+    max_comment_length: Option<i64>,
+    fallback_to_pool: Option<bool>,
+    language: Option<String>,
+    blocked_words: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -282,6 +306,27 @@ pub struct LoginPasswordPayload {
     pub password: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiCommentSettingsPayload {
+    pub enabled: bool,
+    pub provider: String,
+    pub base_url: String,
+    pub model: String,
+    pub timeout_seconds: i64,
+    pub max_comment_length: i64,
+    pub fallback_to_pool: Option<bool>,
+    pub language: String,
+    pub blocked_words: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiCommentApiKeyPayload {
+    pub provider: Option<String>,
+    pub api_key: String,
+}
+
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct LoginCredentialStatus {
@@ -290,6 +335,58 @@ pub struct LoginCredentialStatus {
     saved: bool,
     readable: bool,
     error: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AiCommentSettings {
+    enabled: bool,
+    provider: String,
+    base_url: String,
+    model: String,
+    timeout_seconds: i64,
+    max_comment_length: i64,
+    fallback_to_pool: bool,
+    language: String,
+    blocked_words: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AiCommentApiKeyStatus {
+    provider: String,
+    credential_ref: String,
+    saved: bool,
+    readable: bool,
+    error: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiCommentTestPayload {
+    pub settings: AiCommentSettingsPayload,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiCommentPreviewPayload {
+    pub settings: AiCommentSettingsPayload,
+    pub title: String,
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AiCommentGenerationResult {
+    ok: bool,
+    comment: String,
+    source: String,
+    reason: String,
+    #[serde(rename = "latencyMs", alias = "latency_ms")]
+    latency_ms: i64,
+    error: Option<String>,
+    provider: String,
+    model: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -302,6 +399,7 @@ pub struct ConfigSnapshot {
     fyp_settings: Option<FypSettings>,
     target_engagement: Option<TargetEngagementSettings>,
     scheduler_settings: SchedulerSettings,
+    ai_comment: AiCommentSettings,
     notify: Option<NotifySettings>,
     validation: ValidationResult,
 }
@@ -353,6 +451,14 @@ impl ConfigSnapshot {
 
     pub fn accounts(&self) -> &[Account] {
         &self.accounts
+    }
+
+    pub fn ai_comment_enabled(&self) -> bool {
+        self.ai_comment.enabled
+    }
+
+    pub fn ai_comment_provider(&self) -> &str {
+        &self.ai_comment.provider
     }
 
     pub fn scheduler_fires_per_day(&self) -> Option<i64> {
@@ -867,6 +973,137 @@ pub fn delete_login_password(account_id: String) -> Result<LoginCredentialStatus
 }
 
 #[tauri::command]
+pub fn load_ai_comment_settings() -> Result<AiCommentSettings, String> {
+    Ok(load_config()?.ai_comment)
+}
+
+#[tauri::command]
+pub fn save_ai_comment_settings(payload: AiCommentSettingsPayload) -> Result<SaveResult, String> {
+    validate_ai_comment_settings_payload(&payload)?;
+
+    let paths = project_paths()?;
+    let raw_yaml = fs::read_to_string(&paths.config_path)
+        .map_err(|err| format!("failed to read {}: {}", paths.config_path, err))?;
+    let mut config_value: Value = serde_yaml::from_str(&raw_yaml)
+        .map_err(|err| format!("failed to parse {}: {}", paths.config_path, err))?;
+
+    let Value::Mapping(root) = &mut config_value else {
+        return Err("accounts.yaml root must be a mapping".to_string());
+    };
+    root.insert(
+        Value::String("ai_comment".to_string()),
+        ai_comment_payload_to_yaml_value(&payload)?,
+    );
+
+    let next_yaml = serde_yaml::to_string(&config_value)
+        .map_err(|err| format!("failed to serialize accounts.yaml: {}", err))?;
+    let validation = validate_raw_yaml(&next_yaml);
+    if !validation.valid {
+        return Err(format_validation_errors(&validation));
+    }
+
+    let backup = backup_config_file()?;
+    fs::write(&paths.config_path, next_yaml)
+        .map_err(|err| format!("failed to write {}: {}", paths.config_path, err))?;
+
+    Ok(SaveResult {
+        saved_path: paths.config_path,
+        backup_path: backup.backup_path,
+        validation,
+    })
+}
+
+#[tauri::command]
+pub fn save_ai_comment_api_key(
+    payload: AiCommentApiKeyPayload,
+) -> Result<AiCommentApiKeyStatus, String> {
+    let provider = normalize_ai_comment_provider(payload.provider.as_deref())?;
+    if payload.api_key.trim().is_empty() {
+        return Err("AI comment API Key must not be empty".to_string());
+    }
+    let credential_ref = ai_comment_credential_ref(&provider)?;
+    let encrypted = protect_ai_comment_secret(&credential_ref, payload.api_key.trim())?;
+    let credential_path = ai_comment_credential_ref_path(&credential_ref)?;
+    if let Some(parent) = credential_path.parent() {
+        fs::create_dir_all(parent).map_err(|err| {
+            format!(
+                "failed to create AI comment credential directory {}: {}",
+                normalize(parent),
+                err
+            )
+        })?;
+    }
+    fs::write(&credential_path, encrypted).map_err(|err| {
+        format!(
+            "failed to write encrypted AI comment credential {}: {}",
+            normalize(&credential_path),
+            err
+        )
+    })?;
+    Ok(ai_comment_api_key_status_for_provider(&provider))
+}
+
+#[tauri::command]
+pub fn delete_ai_comment_api_key(provider: Option<String>) -> Result<AiCommentApiKeyStatus, String> {
+    let provider = normalize_ai_comment_provider(provider.as_deref())?;
+    let credential_ref = ai_comment_credential_ref(&provider)?;
+    delete_ai_comment_secret(&credential_ref)?;
+    let credential_path = ai_comment_credential_ref_path(&credential_ref)?;
+    if credential_path.exists() {
+        fs::remove_file(&credential_path).map_err(|err| {
+            format!(
+                "failed to delete encrypted AI comment credential {}: {}",
+                normalize(&credential_path),
+                err
+            )
+        })?;
+    }
+    Ok(ai_comment_api_key_status_for_provider(&provider))
+}
+
+#[tauri::command]
+pub fn get_ai_comment_api_key_status(
+    provider: Option<String>,
+) -> Result<AiCommentApiKeyStatus, String> {
+    let provider = normalize_ai_comment_provider(provider.as_deref())?;
+    Ok(ai_comment_api_key_status_for_provider(&provider))
+}
+
+#[tauri::command]
+pub fn test_ai_comment_connection(
+    payload: AiCommentTestPayload,
+) -> Result<AiCommentGenerationResult, String> {
+    validate_ai_comment_settings_payload(&payload.settings)?;
+    run_ai_comment_generation(
+        &payload.settings,
+        "A short TikTok video about a useful everyday tip",
+        "The creator demonstrates a simple idea in a natural, friendly style.",
+    )
+}
+
+#[tauri::command]
+pub fn preview_ai_comment(
+    payload: AiCommentPreviewPayload,
+) -> Result<AiCommentGenerationResult, String> {
+    validate_ai_comment_settings_payload(&payload.settings)?;
+    let title = payload.title.trim();
+    let description = payload.description.as_deref().unwrap_or("").trim();
+    if title.is_empty() && description.is_empty() {
+        return Ok(AiCommentGenerationResult {
+            ok: false,
+            comment: String::new(),
+            source: "ai".to_string(),
+            reason: "missing_context".to_string(),
+            latency_ms: 0,
+            error: None,
+            provider: payload.settings.provider.trim().to_string(),
+            model: payload.settings.model.trim().to_string(),
+        });
+    }
+    run_ai_comment_generation(&payload.settings, title, description)
+}
+
+#[tauri::command]
 pub fn save_fyp_settings(payload: FypSettingsPayload) -> Result<SaveResult, String> {
     let platform = normalize_platform(payload.platform.as_deref().unwrap_or("tiktok"), "platform")?;
     ensure_platform_capability(&platform, "warmupTask")?;
@@ -1251,6 +1488,7 @@ fn config_snapshot(paths: ProjectPaths, raw_yaml: String) -> Result<ConfigSnapsh
         .map_err(|err| format!("failed to parse {}: {}", paths.config_path, err))?;
     let mut validation = validate_config_model(&config);
     validate_no_plaintext_login_passwords(&config_value, &mut validation.errors);
+    validate_no_plaintext_ai_comment_api_key(&config_value, &mut validation.errors);
     validation.valid = validation.errors.is_empty();
 
     let default_browser_provider = config_default_browser_provider(&config);
@@ -1266,6 +1504,7 @@ fn config_snapshot(paths: ProjectPaths, raw_yaml: String) -> Result<ConfigSnapsh
         fyp_settings: map_fyp_settings(resolve_tiktok_warmup(&config)),
         target_engagement: map_target_engagement(resolve_tiktok_target_engagement(&config)),
         scheduler_settings: map_scheduler_settings(resolve_tiktok_scheduler(&config)),
+        ai_comment: map_ai_comment_settings(config.ai_comment.as_ref()),
         notify: map_notify(config.notify.as_ref()),
         raw_yaml,
         config: config_value,
@@ -1492,6 +1731,242 @@ fn login_credential_status(
     }
 }
 
+fn ai_comment_api_key_status_for_provider(provider: &str) -> AiCommentApiKeyStatus {
+    let provider = match normalize_ai_comment_provider(Some(provider)) {
+        Ok(provider) => provider,
+        Err(error) => {
+            return AiCommentApiKeyStatus {
+                provider: provider.to_string(),
+                credential_ref: String::new(),
+                saved: false,
+                readable: false,
+                error: Some(error),
+            };
+        }
+    };
+    let credential_ref = match ai_comment_credential_ref(&provider) {
+        Ok(credential_ref) => credential_ref,
+        Err(error) => {
+            return AiCommentApiKeyStatus {
+                provider,
+                credential_ref: String::new(),
+                saved: false,
+                readable: false,
+                error: Some(error),
+            };
+        }
+    };
+    let path = match ai_comment_credential_ref_path(&credential_ref) {
+        Ok(path) => path,
+        Err(error) => {
+            return AiCommentApiKeyStatus {
+                provider,
+                credential_ref,
+                saved: false,
+                readable: false,
+                error: Some(error),
+            };
+        }
+    };
+    if !path.exists() {
+        return AiCommentApiKeyStatus {
+            provider,
+            credential_ref,
+            saved: false,
+            readable: false,
+            error: None,
+        };
+    }
+    let encrypted = match fs::read_to_string(&path) {
+        Ok(encrypted) => encrypted,
+        Err(error) => {
+            return AiCommentApiKeyStatus {
+                provider,
+                credential_ref,
+                saved: true,
+                readable: false,
+                error: Some(format!(
+                    "failed to read encrypted AI comment credential {}: {}",
+                    normalize(&path),
+                    error
+                )),
+            };
+        }
+    };
+    match unprotect_ai_comment_secret(&credential_ref, &encrypted) {
+        Ok(_) => AiCommentApiKeyStatus {
+            provider,
+            credential_ref,
+            saved: true,
+            readable: true,
+            error: None,
+        },
+        Err(error) => AiCommentApiKeyStatus {
+            provider,
+            credential_ref,
+            saved: true,
+            readable: false,
+            error: Some(format!(
+                "stored AI comment credential exists but secure credential read failed: {}",
+                error
+            )),
+        },
+    }
+}
+
+fn run_ai_comment_generation(
+    settings: &AiCommentSettingsPayload,
+    title: &str,
+    description: &str,
+) -> Result<AiCommentGenerationResult, String> {
+    let provider = normalize_ai_comment_provider(Some(&settings.provider))?;
+    let missing_api_key_result = || AiCommentGenerationResult {
+        ok: false,
+        comment: String::new(),
+        source: "ai".to_string(),
+        reason: "missing_api_key".to_string(),
+        latency_ms: 0,
+        error: None,
+        provider: provider.clone(),
+        model: settings.model.trim().to_string(),
+    };
+    let Some(api_key) = read_ai_comment_api_key_for_runtime(Some(&provider))? else {
+        return Ok(missing_api_key_result());
+    };
+    if api_key.trim().is_empty() {
+        return Ok(missing_api_key_result());
+    }
+
+    let result = run_ai_comment_python(settings, title, description, &provider, &api_key)?;
+    Ok(AiCommentGenerationResult {
+        error: result
+            .error
+            .map(|error| redact_text(&error, &vec![api_key.to_string()])),
+        ..result
+    })
+}
+
+fn run_ai_comment_python(
+    settings: &AiCommentSettingsPayload,
+    title: &str,
+    description: &str,
+    provider: &str,
+    api_key: &str,
+) -> Result<AiCommentGenerationResult, String> {
+    let paths = project_paths()?;
+    let payload = json!({
+        "config": ai_comment_payload_to_python_config(settings)?,
+        "context": {
+            "platform": "tiktok",
+            "title": title,
+            "description": description,
+        },
+    });
+    let (program, args, current_dir) = if paths.runtime_mode == "bundled" {
+        let runtime_dir = Path::new(&paths.runtime_path)
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."));
+        (
+            paths.runtime_path.clone(),
+            vec!["ai-comment".to_string()],
+            runtime_dir,
+        )
+    } else {
+        let command = crate::paths::python_command_parts()?;
+        let (program, args) = command
+            .split_first()
+            .ok_or_else(|| "python command is empty".to_string())?;
+        let script = r#"
+import json
+import os
+import sys
+
+sys.path.insert(0, os.environ["AM_PROJECT_SRC_DIR"])
+from ai_comment import generate_ai_comment, read_api_key_from_env
+
+payload = json.loads(sys.stdin.read() or "{}")
+config = payload.get("config") or {}
+result = generate_ai_comment(payload.get("context") or {}, config, read_api_key_from_env)
+result["provider"] = str(config.get("provider") or "")
+result["model"] = str(config.get("model") or "")
+print(json.dumps(result, ensure_ascii=True))
+"#;
+        let mut source_args = args.to_vec();
+        source_args.push("-B".to_string());
+        source_args.push("-c".to_string());
+        source_args.push(script.to_string());
+        (program.clone(), source_args, PathBuf::from("."))
+    };
+
+    let mut command_builder = Command::new(program);
+    command_builder
+        .args(args)
+        .current_dir(current_dir)
+        .env("AM_PROJECT_SRC_DIR", &paths.src_dir)
+        .env("AM_AI_COMMENT_API_KEY", api_key)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    hide_console_window(&mut command_builder);
+    let mut child = command_builder
+        .spawn()
+        .map_err(|err| format!("failed to start Python AI comment preview: {}", err))?;
+
+    if let Some(stdin) = child.stdin.as_mut() {
+        stdin
+            .write_all(payload.to_string().as_bytes())
+            .map_err(|err| format!("failed to write AI comment preview payload: {}", err))?;
+    }
+
+    let output = child
+        .wait_with_output()
+        .map_err(|err| format!("failed to run AI comment preview: {}", err))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = redact_text(&String::from_utf8_lossy(&output.stderr), &vec![api_key.to_string()]);
+    if !output.status.success() {
+        return Ok(AiCommentGenerationResult {
+            ok: false,
+            comment: String::new(),
+            source: "ai".to_string(),
+            reason: "runtime_error".to_string(),
+            latency_ms: 0,
+            error: blank_to_none(Some(&stderr)),
+            provider: provider.to_string(),
+            model: settings.model.trim().to_string(),
+        });
+    }
+    let mut result: AiCommentGenerationResult = serde_json::from_str(&stdout)
+        .map_err(|err| format!("failed to parse AI comment preview result: {}", err))?;
+    result.provider = provider.to_string();
+    result.model = settings.model.trim().to_string();
+    Ok(result)
+}
+
+fn hide_console_window(command: &mut Command) {
+    #[cfg(windows)]
+    {
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+}
+
+fn ai_comment_payload_to_python_config(
+    settings: &AiCommentSettingsPayload,
+) -> Result<JsonValue, String> {
+    let provider = normalize_ai_comment_provider(Some(&settings.provider))?;
+    Ok(json!({
+        "enabled": true,
+        "provider": provider,
+        "base_url": settings.base_url.trim().trim_end_matches('/'),
+        "model": settings.model.trim(),
+        "timeout_seconds": settings.timeout_seconds,
+        "max_comment_length": settings.max_comment_length,
+        "fallback_to_pool": settings.fallback_to_pool.unwrap_or(true),
+        "language": settings.language.trim(),
+        "blocked_words": normalize_plain_string_list(&settings.blocked_words),
+    }))
+}
+
 #[allow(dead_code)]
 pub(crate) fn read_login_password_for_runtime(account_id: &str) -> Result<Option<String>, String> {
     let account_id = normalize_account_id(account_id)?;
@@ -1512,20 +1987,60 @@ pub(crate) fn read_login_password_for_runtime(account_id: &str) -> Result<Option
     unprotect_login_secret(&credential_ref, &encrypted).map(Some)
 }
 
+#[allow(dead_code)]
+pub(crate) fn read_ai_comment_api_key_for_runtime(
+    provider: Option<&str>,
+) -> Result<Option<String>, String> {
+    let provider = normalize_ai_comment_provider(provider)?;
+    let credential_ref = ai_comment_credential_ref(&provider)?;
+    let credential_path = ai_comment_credential_ref_path(&credential_ref)?;
+    if !credential_path.exists() {
+        return Ok(None);
+    }
+    let encrypted = fs::read_to_string(&credential_path).map_err(|err| {
+        format!(
+            "failed to read encrypted AI comment credential {}: {}",
+            normalize(&credential_path),
+            err
+        )
+    })?;
+    unprotect_ai_comment_secret(&credential_ref, &encrypted).map(Some)
+}
+
 fn credential_ref_path(credential_ref: &str) -> Result<PathBuf, String> {
+    local_secret_ref_path(credential_ref, LOGIN_CREDENTIAL_PREFIX, "login")
+}
+
+fn ai_comment_credential_ref_path(credential_ref: &str) -> Result<PathBuf, String> {
+    local_secret_ref_path(credential_ref, AI_COMMENT_CREDENTIAL_PREFIX, "ai_comment")
+}
+
+fn local_secret_ref_path(
+    credential_ref: &str,
+    expected_prefix: &str,
+    category: &str,
+) -> Result<PathBuf, String> {
     let normalized = credential_ref.trim();
-    let Some(name) = normalized.strip_prefix(LOGIN_CREDENTIAL_PREFIX) else {
+    let Some(name) = normalized.strip_prefix(expected_prefix) else {
         return Err(format!(
             "unsupported credential_ref '{}'; expected prefix {}",
-            normalized, LOGIN_CREDENTIAL_PREFIX
+            normalized, expected_prefix
         ));
     };
     let name = sanitize_credential_component(name);
     let paths = project_paths()?;
     Ok(PathBuf::from(paths.data_dir)
         .join("credentials")
-        .join("login")
+        .join(category)
         .join(format!("{}.dpapi", name)))
+}
+
+fn ai_comment_credential_ref(provider: &str) -> Result<String, String> {
+    let provider = normalize_ai_comment_provider(Some(provider))?;
+    Ok(format!(
+        "{}{}/api-key",
+        AI_COMMENT_CREDENTIAL_PREFIX, provider
+    ))
 }
 
 fn sanitize_credential_component(value: &str) -> String {
@@ -1557,20 +2072,45 @@ fn is_valid_login_credential_ref(value: &str) -> bool {
             .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
 }
 
+const LOGIN_SECRET_SERVICE: &str = "星域 Login Credential";
+const LEGACY_LOGIN_SECRET_SERVICE: &str = "Account Matrix Login Credential";
+const AI_COMMENT_SECRET_SERVICE: &str = "星域 AI Comment API Key";
+const LEGACY_AI_COMMENT_SECRET_SERVICE: &str = "Account Matrix AI Comment API Key";
+
 fn protect_login_secret(credential_ref: &str, secret: &str) -> Result<String, String> {
-    protect_login_secret_impl(credential_ref, secret)
+    protect_os_secret(LOGIN_SECRET_SERVICE, credential_ref, secret)
 }
 
 fn unprotect_login_secret(credential_ref: &str, encrypted: &str) -> Result<String, String> {
-    unprotect_login_secret_impl(credential_ref, encrypted)
+    unprotect_os_secret(LOGIN_SECRET_SERVICE, credential_ref, encrypted).or_else(|_| {
+        unprotect_os_secret(LEGACY_LOGIN_SECRET_SERVICE, credential_ref, encrypted)
+    })
 }
 
 fn delete_login_secret(credential_ref: &str) -> Result<(), String> {
-    delete_login_secret_impl(credential_ref)
+    delete_os_secret(LOGIN_SECRET_SERVICE, credential_ref)?;
+    let _ = delete_os_secret(LEGACY_LOGIN_SECRET_SERVICE, credential_ref);
+    Ok(())
+}
+
+fn protect_ai_comment_secret(credential_ref: &str, secret: &str) -> Result<String, String> {
+    protect_os_secret(AI_COMMENT_SECRET_SERVICE, credential_ref, secret)
+}
+
+fn unprotect_ai_comment_secret(credential_ref: &str, encrypted: &str) -> Result<String, String> {
+    unprotect_os_secret(AI_COMMENT_SECRET_SERVICE, credential_ref, encrypted).or_else(|_| {
+        unprotect_os_secret(LEGACY_AI_COMMENT_SECRET_SERVICE, credential_ref, encrypted)
+    })
+}
+
+fn delete_ai_comment_secret(credential_ref: &str) -> Result<(), String> {
+    delete_os_secret(AI_COMMENT_SECRET_SERVICE, credential_ref)?;
+    let _ = delete_os_secret(LEGACY_AI_COMMENT_SECRET_SERVICE, credential_ref);
+    Ok(())
 }
 
 #[cfg(target_os = "windows")]
-fn protect_login_secret_impl(_credential_ref: &str, secret: &str) -> Result<String, String> {
+fn protect_os_secret(_service: &str, _credential_ref: &str, secret: &str) -> Result<String, String> {
     let script = r#"$ErrorActionPreference = 'Stop'; $secret = [Console]::In.ReadToEnd(); $secure = ConvertTo-SecureString -String $secret -AsPlainText -Force; $secure | ConvertFrom-SecureString"#;
     let encrypted = run_powershell_with_stdin(script, secret, "encrypt login credential")?;
     let encrypted = encrypted.trim();
@@ -1582,14 +2122,14 @@ fn protect_login_secret_impl(_credential_ref: &str, secret: &str) -> Result<Stri
 }
 
 #[cfg(target_os = "windows")]
-fn unprotect_login_secret_impl(_credential_ref: &str, encrypted: &str) -> Result<String, String> {
+fn unprotect_os_secret(_service: &str, _credential_ref: &str, encrypted: &str) -> Result<String, String> {
     let script = r#"$ErrorActionPreference = 'Stop'; $blob = [Console]::In.ReadToEnd(); $secure = ConvertTo-SecureString -String $blob; $ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure); try { [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) }"#;
     run_powershell_with_stdin(script, encrypted, "read login credential")
         .map(|value| value.trim_end_matches(['\r', '\n']).to_string())
 }
 
 #[cfg(target_os = "windows")]
-fn delete_login_secret_impl(_credential_ref: &str) -> Result<(), String> {
+fn delete_os_secret(_service: &str, _credential_ref: &str) -> Result<(), String> {
     Ok(())
 }
 
@@ -1629,29 +2169,27 @@ fn run_powershell_with_stdin(script: &str, input: &str, action: &str) -> Result<
 
 #[cfg(target_os = "macos")]
 const MACOS_KEYCHAIN_MARKER: &str = "account-matrix-macos-keychain-v1";
-#[cfg(target_os = "macos")]
-const MACOS_KEYCHAIN_SERVICE: &str = "Account Matrix Login Credential";
 
 #[cfg(target_os = "macos")]
-fn protect_login_secret_impl(credential_ref: &str, secret: &str) -> Result<String, String> {
-    macos_keychain_save_password(credential_ref, secret)?;
+fn protect_os_secret(service: &str, credential_ref: &str, secret: &str) -> Result<String, String> {
+    macos_keychain_save_password(service, credential_ref, secret)?;
     Ok(format!(
         "{}\nservice={}\naccount={}\n",
-        MACOS_KEYCHAIN_MARKER, MACOS_KEYCHAIN_SERVICE, credential_ref
+        MACOS_KEYCHAIN_MARKER, service, credential_ref
     ))
 }
 
 #[cfg(target_os = "macos")]
-fn unprotect_login_secret_impl(credential_ref: &str, encrypted: &str) -> Result<String, String> {
+fn unprotect_os_secret(service: &str, credential_ref: &str, encrypted: &str) -> Result<String, String> {
     if encrypted.lines().next() != Some(MACOS_KEYCHAIN_MARKER) {
         return Err("stored credential marker is not a macOS Keychain credential".to_string());
     }
-    macos_keychain_read_password(credential_ref)
+    macos_keychain_read_password(service, credential_ref)
 }
 
 #[cfg(target_os = "macos")]
-fn delete_login_secret_impl(credential_ref: &str) -> Result<(), String> {
-    macos_keychain_delete_password(credential_ref)
+fn delete_os_secret(service: &str, credential_ref: &str) -> Result<(), String> {
+    macos_keychain_delete_password(service, credential_ref)
 }
 
 #[cfg(target_os = "macos")]
@@ -1713,8 +2251,8 @@ unsafe extern "C" {
 }
 
 #[cfg(target_os = "macos")]
-fn macos_keychain_save_password(credential_ref: &str, secret: &str) -> Result<(), String> {
-    let service = MACOS_KEYCHAIN_SERVICE.as_bytes();
+fn macos_keychain_save_password(service: &str, credential_ref: &str, secret: &str) -> Result<(), String> {
+    let service = service.as_bytes();
     let account = credential_ref.as_bytes();
     let password = secret.as_bytes();
     let service_len = macos_len(service.len(), "Keychain service")?;
@@ -1745,10 +2283,10 @@ fn macos_keychain_save_password(credential_ref: &str, secret: &str) -> Result<()
             )
         };
         macos_release_item(item_ref);
-        return macos_status_to_result(update_status, "update login credential in macOS Keychain");
+        return macos_status_to_result(update_status, "update credential in macOS Keychain");
     }
     if find_status != ERR_SEC_ITEM_NOT_FOUND {
-        return macos_status_to_result(find_status, "find login credential in macOS Keychain");
+        return macos_status_to_result(find_status, "find credential in macOS Keychain");
     }
 
     let add_status = unsafe {
@@ -1763,12 +2301,12 @@ fn macos_keychain_save_password(credential_ref: &str, secret: &str) -> Result<()
             std::ptr::null_mut(),
         )
     };
-    macos_status_to_result(add_status, "save login credential to macOS Keychain")
+    macos_status_to_result(add_status, "save credential to macOS Keychain")
 }
 
 #[cfg(target_os = "macos")]
-fn macos_keychain_read_password(credential_ref: &str) -> Result<String, String> {
-    let service = MACOS_KEYCHAIN_SERVICE.as_bytes();
+fn macos_keychain_read_password(service: &str, credential_ref: &str) -> Result<String, String> {
+    let service = service.as_bytes();
     let account = credential_ref.as_bytes();
     let service_len = macos_len(service.len(), "Keychain service")?;
     let account_len = macos_len(account.len(), "Keychain account")?;
@@ -1788,7 +2326,7 @@ fn macos_keychain_read_password(credential_ref: &str) -> Result<String, String> 
         )
     };
     if status != ERR_SEC_SUCCESS {
-        return macos_status_to_result(status, "read login credential from macOS Keychain")
+        return macos_status_to_result(status, "read credential from macOS Keychain")
             .map(|_| String::new());
     }
 
@@ -1798,7 +2336,7 @@ fn macos_keychain_read_password(credential_ref: &str) -> Result<String, String> 
     }
     .map_err(|err| {
         format!(
-            "macOS Keychain returned non-UTF-8 login credential: {}",
+            "macOS Keychain returned non-UTF-8 credential: {}",
             err
         )
     });
@@ -1809,8 +2347,8 @@ fn macos_keychain_read_password(credential_ref: &str) -> Result<String, String> 
 }
 
 #[cfg(target_os = "macos")]
-fn macos_keychain_delete_password(credential_ref: &str) -> Result<(), String> {
-    let service = MACOS_KEYCHAIN_SERVICE.as_bytes();
+fn macos_keychain_delete_password(service: &str, credential_ref: &str) -> Result<(), String> {
+    let service = service.as_bytes();
     let account = credential_ref.as_bytes();
     let service_len = macos_len(service.len(), "Keychain service")?;
     let account_len = macos_len(account.len(), "Keychain account")?;
@@ -1832,12 +2370,12 @@ fn macos_keychain_delete_password(credential_ref: &str) -> Result<(), String> {
         return Ok(());
     }
     if find_status != ERR_SEC_SUCCESS {
-        return macos_status_to_result(find_status, "find login credential in macOS Keychain");
+        return macos_status_to_result(find_status, "find credential in macOS Keychain");
     }
 
     let delete_status = unsafe { SecKeychainItemDelete(item_ref) };
     macos_release_item(item_ref);
-    macos_status_to_result(delete_status, "delete login credential from macOS Keychain")
+    macos_status_to_result(delete_status, "delete credential from macOS Keychain")
 }
 
 #[cfg(target_os = "macos")]
@@ -1872,17 +2410,21 @@ fn macos_len(len: usize, label: &str) -> Result<u32, String> {
 }
 
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-fn protect_login_secret_impl(_credential_ref: &str, _secret: &str) -> Result<String, String> {
-    Err("secure login credential storage is not supported on this operating system".to_string())
+fn protect_os_secret(_service: &str, _credential_ref: &str, _secret: &str) -> Result<String, String> {
+    Err("secure credential storage is not supported on this operating system".to_string())
 }
 
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-fn unprotect_login_secret_impl(_credential_ref: &str, _encrypted: &str) -> Result<String, String> {
-    Err("secure login credential storage is not supported on this operating system".to_string())
+fn unprotect_os_secret(
+    _service: &str,
+    _credential_ref: &str,
+    _encrypted: &str,
+) -> Result<String, String> {
+    Err("secure credential storage is not supported on this operating system".to_string())
 }
 
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-fn delete_login_secret_impl(_credential_ref: &str) -> Result<(), String> {
+fn delete_os_secret(_service: &str, _credential_ref: &str) -> Result<(), String> {
     Ok(())
 }
 
@@ -2186,6 +2728,7 @@ fn validate_raw_yaml(raw_yaml: &str) -> ValidationResult {
             let mut validation = validate_config_model(&config);
             if let Ok(config_value) = serde_yaml::from_str::<Value>(raw_yaml) {
                 validate_no_plaintext_login_passwords(&config_value, &mut validation.errors);
+                validate_no_plaintext_ai_comment_api_key(&config_value, &mut validation.errors);
                 validation.valid = validation.errors.is_empty();
             }
             validation
@@ -2235,6 +2778,29 @@ fn validate_no_plaintext_login_passwords(config: &Value, errors: &mut Vec<Valida
     }
 }
 
+fn validate_no_plaintext_ai_comment_api_key(config: &Value, errors: &mut Vec<ValidationIssue>) {
+    let Some(ai_comment) = config
+        .get("ai_comment")
+        .and_then(Value::as_mapping)
+    else {
+        return;
+    };
+    for key in ai_comment.keys().filter_map(Value::as_str) {
+        let lowered = key.to_ascii_lowercase();
+        if lowered.contains("api_key")
+            || lowered.contains("apikey")
+            || lowered.contains("secret")
+            || lowered.contains("token")
+            || lowered.contains("authorization")
+        {
+            errors.push(issue(
+                format!("ai_comment.{}", key),
+                "AI comment API Key must not be stored in accounts.yaml; save it to local credentials instead",
+            ));
+        }
+    }
+}
+
 fn validate_config_model(config: &ConfigYaml) -> ValidationResult {
     let mut errors = Vec::new();
     let mut warnings = Vec::new();
@@ -2266,6 +2832,7 @@ fn validate_config_model(config: &ConfigYaml) -> ValidationResult {
     validate_defaults(config.defaults.as_ref(), &mut errors);
     validate_bitbrowser(config.bitbrowser.as_ref(), &mut errors);
     validate_scheduler(config.scheduler.as_ref(), "scheduler", &mut errors);
+    validate_ai_comment_yaml(config.ai_comment.as_ref(), "ai_comment", &mut errors);
 
     ValidationResult {
         valid: errors.is_empty(),
@@ -2659,6 +3226,52 @@ fn validate_daily_actions(
             comment.probability,
             errors,
         );
+    }
+}
+
+fn validate_ai_comment_yaml(
+    ai_comment: Option<&AiCommentYaml>,
+    base_path: &str,
+    errors: &mut Vec<ValidationIssue>,
+) {
+    let Some(ai_comment) = ai_comment else {
+        return;
+    };
+    if let Some(provider) = ai_comment.provider.as_deref() {
+        if let Err(message) = validate_ai_comment_provider(provider) {
+            errors.push(issue(format!("{}.provider", base_path), message));
+        }
+    }
+    if let Some(base_url) = ai_comment.base_url.as_deref() {
+        if let Err(message) = validate_ai_comment_base_url(base_url) {
+            errors.push(issue(format!("{}.base_url", base_path), message));
+        }
+    }
+    if let Some(model) = ai_comment.model.as_deref() {
+        if blank_to_none(Some(model)).is_none() {
+            errors.push(issue(
+                format!("{}.model", base_path),
+                "ai_comment.model must not be empty",
+            ));
+        }
+    }
+    validate_optional_positive(
+        &format!("{}.timeout_seconds", base_path),
+        ai_comment.timeout_seconds,
+        errors,
+    );
+    validate_optional_positive(
+        &format!("{}.max_comment_length", base_path),
+        ai_comment.max_comment_length,
+        errors,
+    );
+    if let Some(language) = ai_comment.language.as_deref() {
+        if blank_to_none(Some(language)).is_none() {
+            errors.push(issue(
+                format!("{}.language", base_path),
+                "ai_comment.language must not be empty",
+            ));
+        }
     }
 }
 
@@ -3079,6 +3692,51 @@ fn fyp_payload_to_yaml_mapping(payload: &FypSettingsPayload) -> Result<Mapping, 
     Ok(daily_actions_mapping)
 }
 
+fn ai_comment_payload_to_yaml_value(payload: &AiCommentSettingsPayload) -> Result<Value, String> {
+    let provider = normalize_ai_comment_provider(Some(&payload.provider))?;
+    let mut mapping = Mapping::new();
+    mapping.insert(
+        Value::String("enabled".to_string()),
+        Value::Bool(payload.enabled),
+    );
+    mapping.insert(
+        Value::String("provider".to_string()),
+        Value::String(provider),
+    );
+    mapping.insert(
+        Value::String("base_url".to_string()),
+        Value::String(payload.base_url.trim().trim_end_matches('/').to_string()),
+    );
+    mapping.insert(
+        Value::String("model".to_string()),
+        Value::String(payload.model.trim().to_string()),
+    );
+    mapping.insert(
+        Value::String("timeout_seconds".to_string()),
+        serde_yaml::to_value(payload.timeout_seconds)
+            .map_err(|err| format!("failed to serialize timeout_seconds: {}", err))?,
+    );
+    mapping.insert(
+        Value::String("max_comment_length".to_string()),
+        serde_yaml::to_value(payload.max_comment_length)
+            .map_err(|err| format!("failed to serialize max_comment_length: {}", err))?,
+    );
+    mapping.insert(
+        Value::String("fallback_to_pool".to_string()),
+        Value::Bool(payload.fallback_to_pool.unwrap_or(true)),
+    );
+    mapping.insert(
+        Value::String("language".to_string()),
+        Value::String(payload.language.trim().to_string()),
+    );
+    mapping.insert(
+        Value::String("blocked_words".to_string()),
+        serde_yaml::to_value(normalize_plain_string_list(&payload.blocked_words))
+            .map_err(|err| format!("failed to serialize blocked_words: {}", err))?,
+    );
+    Ok(Value::Mapping(mapping))
+}
+
 fn target_payload_to_yaml_mapping(payload: &TargetEngagementPayload) -> Result<Mapping, String> {
     let mut target_mapping = Mapping::new();
     target_mapping.insert(
@@ -3189,6 +3847,59 @@ fn format_validation_errors(validation: &ValidationResult) -> String {
         .collect::<Vec<_>>()
         .join("; ");
     format!("config validation failed: {}", details)
+}
+
+fn validate_ai_comment_settings_payload(payload: &AiCommentSettingsPayload) -> Result<(), String> {
+    validate_ai_comment_provider(&payload.provider)?;
+    validate_ai_comment_base_url(&payload.base_url)?;
+    if payload.model.trim().is_empty() {
+        return Err("ai_comment.model must not be empty".to_string());
+    }
+    if payload.timeout_seconds <= 0 {
+        return Err("ai_comment.timeout_seconds must be greater than 0".to_string());
+    }
+    if payload.max_comment_length <= 0 {
+        return Err("ai_comment.max_comment_length must be greater than 0".to_string());
+    }
+    if payload.language.trim().is_empty() {
+        return Err("ai_comment.language must not be empty".to_string());
+    }
+    Ok(())
+}
+
+fn validate_ai_comment_provider(provider: &str) -> Result<(), String> {
+    let value = provider.trim();
+    if value.is_empty() {
+        return Err("ai_comment.provider must not be empty".to_string());
+    }
+    if value
+        .chars()
+        .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_')
+    {
+        Ok(())
+    } else {
+        Err("ai_comment.provider must use lowercase letters, digits, and underscores".to_string())
+    }
+}
+
+fn validate_ai_comment_base_url(base_url: &str) -> Result<(), String> {
+    let value = base_url.trim();
+    if value.is_empty() {
+        return Err("ai_comment.base_url must not be empty".to_string());
+    }
+    if value.contains(char::is_whitespace) {
+        return Err("ai_comment.base_url must not contain whitespace".to_string());
+    }
+    if !(value.starts_with("https://") || value.starts_with("http://")) {
+        return Err("ai_comment.base_url must start with http:// or https://".to_string());
+    }
+    Ok(())
+}
+
+fn normalize_ai_comment_provider(provider: Option<&str>) -> Result<String, String> {
+    let value = blank_to_none(provider).unwrap_or_else(|| DEFAULT_AI_COMMENT_PROVIDER.to_string());
+    validate_ai_comment_provider(&value)?;
+    Ok(value)
 }
 
 pub fn normalized_platform_filter(value: Option<&str>) -> Result<Option<String>, String> {
@@ -3365,6 +4076,39 @@ fn map_fyp_settings(daily: Option<&DailyActionsYaml>) -> Option<FypSettings> {
                 .unwrap_or(0.0),
         },
     })
+}
+
+fn map_ai_comment_settings(ai_comment: Option<&AiCommentYaml>) -> AiCommentSettings {
+    AiCommentSettings {
+        enabled: ai_comment
+            .and_then(|ai_comment| ai_comment.enabled)
+            .unwrap_or(false),
+        provider: ai_comment
+            .and_then(|ai_comment| blank_to_none(ai_comment.provider.as_deref()))
+            .unwrap_or_else(|| DEFAULT_AI_COMMENT_PROVIDER.to_string()),
+        base_url: ai_comment
+            .and_then(|ai_comment| blank_to_none(ai_comment.base_url.as_deref()))
+            .unwrap_or_else(|| DEFAULT_AI_COMMENT_BASE_URL.to_string()),
+        model: ai_comment
+            .and_then(|ai_comment| blank_to_none(ai_comment.model.as_deref()))
+            .unwrap_or_else(|| DEFAULT_AI_COMMENT_MODEL.to_string()),
+        timeout_seconds: ai_comment
+            .and_then(|ai_comment| ai_comment.timeout_seconds)
+            .unwrap_or(DEFAULT_AI_COMMENT_TIMEOUT_SECONDS),
+        max_comment_length: ai_comment
+            .and_then(|ai_comment| ai_comment.max_comment_length)
+            .unwrap_or(DEFAULT_AI_COMMENT_MAX_LENGTH),
+        fallback_to_pool: ai_comment
+            .and_then(|ai_comment| ai_comment.fallback_to_pool)
+            .unwrap_or(true),
+        language: ai_comment
+            .and_then(|ai_comment| blank_to_none(ai_comment.language.as_deref()))
+            .unwrap_or_else(|| DEFAULT_AI_COMMENT_LANGUAGE.to_string()),
+        blocked_words: ai_comment
+            .and_then(|ai_comment| ai_comment.blocked_words.as_ref())
+            .map(|words| normalize_plain_string_list(words))
+            .unwrap_or_default(),
+    }
 }
 
 fn map_target_engagement(target: Option<&TargetAccountsYaml>) -> Option<TargetEngagementSettings> {
@@ -3964,6 +4708,14 @@ fn normalize_string_list(values: &[String]) -> Vec<String> {
     values
         .iter()
         .map(|value| value.trim().trim_start_matches('@').to_string())
+        .filter(|value| !value.is_empty())
+        .collect()
+}
+
+fn normalize_plain_string_list(values: &[String]) -> Vec<String> {
+    values
+        .iter()
+        .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
         .collect()
 }

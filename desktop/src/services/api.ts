@@ -7,6 +7,12 @@ import type {
   AccountsPayload,
   ActionLog,
   ActionLogFilter,
+  AiCommentApiKeyPayload,
+  AiCommentApiKeyStatus,
+  AiCommentGenerationResult,
+  AiCommentPreviewPayload,
+  AiCommentSettings,
+  AiCommentTestPayload,
   BackupResult,
   BatchCreateProfileRequest,
   BatchCreateProfileResult,
@@ -25,6 +31,8 @@ import type {
   CreateProfileResult,
   FypSettings,
   FypStatsSummary,
+  FypVideoViewFilter,
+  FypVideoViewRecord,
   GmailSetupRequest,
   HomeSummary,
   LogChunk,
@@ -133,6 +141,34 @@ export function deleteLoginPassword(accountId: string) {
   return invoke<LoginCredentialStatus>('delete_login_password', { accountId })
 }
 
+export function loadAiCommentSettings() {
+  return invoke<AiCommentSettings>('load_ai_comment_settings')
+}
+
+export function saveAiCommentSettings(payload: AiCommentSettings) {
+  return invoke<SaveResult>('save_ai_comment_settings', { payload })
+}
+
+export function saveAiCommentApiKey(payload: AiCommentApiKeyPayload) {
+  return invoke<AiCommentApiKeyStatus>('save_ai_comment_api_key', { payload })
+}
+
+export function deleteAiCommentApiKey(provider?: string) {
+  return invoke<AiCommentApiKeyStatus>('delete_ai_comment_api_key', { provider })
+}
+
+export function getAiCommentApiKeyStatus(provider?: string) {
+  return invoke<AiCommentApiKeyStatus>('get_ai_comment_api_key_status', { provider })
+}
+
+export function testAiCommentConnection(payload: AiCommentTestPayload) {
+  return invoke<AiCommentGenerationResult>('test_ai_comment_connection', { payload })
+}
+
+export function previewAiComment(payload: AiCommentPreviewPayload) {
+  return invoke<AiCommentGenerationResult>('preview_ai_comment', { payload })
+}
+
 export function saveFypSettings(payload: FypSettings, platform: Platform = 'tiktok') {
   return invoke<SaveResult>('save_fyp_settings', { payload: { ...payload, platform } })
 }
@@ -179,6 +215,10 @@ export function queryAccountLogs(accountId: string, limit = 80) {
 
 export function queryActionLogs(filter: ActionLogFilter) {
   return invoke<ActionLog[]>('query_action_logs', { filter })
+}
+
+export function queryFypVideoViews(filter: FypVideoViewFilter) {
+  return invoke<FypVideoViewRecord[]>('query_fyp_video_views', { filter })
 }
 
 export function querySchedulerJobRuns(filter: SchedulerJobRunFilter) {

@@ -5,23 +5,43 @@ import {
   Col,
   Descriptions,
   Input,
+  InputNumber,
   Modal,
   Row,
+  Select,
   Space,
   Spin,
+  Switch,
   Table,
   Tag,
   Typography,
   message,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { ClipboardPaste, Plus, RefreshCw, Save, Trash2, Undo2 } from 'lucide-react'
+import { ClipboardPaste, KeyRound, PlugZap, Plus, RefreshCw, Save, Sparkles, Trash2, Undo2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { PageHeader } from '../components/PageHeader'
 import { usePlatformContext } from '../app/PlatformContext'
-import { loadCommentPools, saveCommentPools } from '../services/api'
-import type { CommentPool, CommentPoolsSnapshot, SaveCommentPoolsResult } from '../services/types'
+import {
+  deleteAiCommentApiKey,
+  getAiCommentApiKeyStatus,
+  loadAiCommentSettings,
+  loadCommentPools,
+  previewAiComment,
+  saveAiCommentApiKey,
+  saveAiCommentSettings,
+  saveCommentPools,
+  testAiCommentConnection,
+} from '../services/api'
+import type {
+  AiCommentApiKeyStatus,
+  AiCommentGenerationResult,
+  AiCommentSettings,
+  CommentPool,
+  CommentPoolsSnapshot,
+  SaveCommentPoolsResult,
+} from '../services/types'
 
 type PoolKey = 'general' | 'brand'
 
@@ -43,6 +63,18 @@ const POOL_LABELS: Record<PoolKey, string> = {
   brand: '品牌评论池',
 }
 
+const DEFAULT_AI_COMMENT_SETTINGS: AiCommentSettings = {
+  enabled: false,
+  provider: 'kimi_moonshot',
+  baseUrl: 'https://api.moonshot.cn/v1',
+  model: 'kimi-k2.6',
+  timeoutSeconds: 5,
+  maxCommentLength: 80,
+  fallbackToPool: true,
+  language: 'auto',
+  blockedWords: [],
+}
+
 export function CommentPoolPage() {
   const { currentPlatform, currentPlatformDefinition } = usePlatformContext()
   const [snapshot, setSnapshot] = useState<CommentPoolsSnapshot | null>(null)
@@ -59,6 +91,19 @@ export function CommentPoolPage() {
     general: 1,
     brand: 1,
   })
+  const [aiSettings, setAiSettings] = useState<AiCommentSettings>(DEFAULT_AI_COMMENT_SETTINGS)
+  const [savedAiSettings, setSavedAiSettings] = useState<AiCommentSettings>(DEFAULT_AI_COMMENT_SETTINGS)
+  const [apiKeyStatus, setApiKeyStatus] = useState<AiCommentApiKeyStatus | null>(null)
+  const [apiKeyDraft, setApiKeyDraft] = useState('')
+  const [savingAiSettings, setSavingAiSettings] = useState(false)
+  const [savingApiKey, setSavingApiKey] = useState(false)
+  const [deletingApiKey, setDeletingApiKey] = useState(false)
+  const [testingAi, setTestingAi] = useState(false)
+  const [previewingAi, setPreviewingAi] = useState(false)
+  const [testResult, setTestResult] = useState<AiCommentGenerationResult | null>(null)
+  const [previewResult, setPreviewResult] = useState<AiCommentGenerationResult | null>(null)
+  const [previewTitle, setPreviewTitle] = useState('A creator shares a simple desk setup tip')
+  const [previewDescription, setPreviewDescription] = useState('')
 
   const dirty = useMemo(() => {
     if (!snapshot) {
@@ -78,12 +123,26 @@ export function CommentPoolPage() {
     [drafts],
   )
 
+  const aiDirty = useMemo(
+    () => JSON.stringify(aiSettings) !== JSON.stringify(savedAiSettings),
+    [aiSettings, savedAiSettings],
+  )
+
   const refresh = useCallback(async () => {
     setLoading(true)
     try {
-      const nextSnapshot = await loadCommentPools(currentPlatform)
+      const [nextSnapshot, nextAiSettings] = await Promise.all([
+        loadCommentPools(currentPlatform),
+        loadAiCommentSettings(),
+      ])
       setSnapshot(nextSnapshot)
       setDrafts(snapshotToDrafts(nextSnapshot))
+      setAiSettings(nextAiSettings)
+      setSavedAiSettings(nextAiSettings)
+      setApiKeyStatus(await getAiCommentApiKeyStatus(nextAiSettings.provider))
+      setApiKeyDraft('')
+      setTestResult(null)
+      setPreviewResult(null)
       setSaveWarnings([])
     } catch (error) {
       message.error(formatError(error))
@@ -110,6 +169,122 @@ export function CommentPoolPage() {
       message.error(formatError(error))
     } finally {
       setSaving(false)
+    }
+  }
+
+  const updateAiSettings = <Key extends keyof AiCommentSettings>(key: Key, value: AiCommentSettings[Key]) => {
+    setAiSettings((current) => ({ ...current, [key]: value }))
+    if (key === 'provider') {
+      void refreshApiKeyStatus(String(value))
+    }
+    setTestResult(null)
+    setPreviewResult(null)
+  }
+
+  const refreshApiKeyStatus = async (provider = aiSettings.provider) => {
+    try {
+      setApiKeyStatus(await getAiCommentApiKeyStatus(provider))
+    } catch (error) {
+      message.error(formatError(error))
+    }
+  }
+
+  const saveAiSettingsOnly = async () => {
+    setSavingAiSettings(true)
+    try {
+      const nextSettings = normalizeAiSettings(aiSettings)
+      const result = await saveAiCommentSettings(nextSettings)
+      setAiSettings(nextSettings)
+      setSavedAiSettings(nextSettings)
+      await refreshApiKeyStatus(nextSettings.provider)
+      message.success(result.validation.valid ? 'AI 评论配置已保存' : 'AI 评论配置已保存，但配置校验存在提示')
+    } catch (error) {
+      message.error(formatError(error))
+    } finally {
+      setSavingAiSettings(false)
+    }
+  }
+
+  const saveApiKey = async () => {
+    if (!apiKeyDraft.trim()) {
+      message.warning('请输入 API Key')
+      return
+    }
+    setSavingApiKey(true)
+    try {
+      const status = await saveAiCommentApiKey({
+        provider: aiSettings.provider,
+        apiKey: apiKeyDraft,
+      })
+      setApiKeyStatus(status)
+      setApiKeyDraft('')
+      message.success('API Key 已保存')
+    } catch (error) {
+      message.error(formatError(error))
+    } finally {
+      setSavingApiKey(false)
+    }
+  }
+
+  const deleteApiKey = () => {
+    Modal.confirm({
+      title: '删除 API Key',
+      content: '删除后，AI 评论会在运行时回退评论池。',
+      okText: '删除',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: async () => {
+        setDeletingApiKey(true)
+        try {
+          setApiKeyStatus(await deleteAiCommentApiKey(aiSettings.provider))
+          setApiKeyDraft('')
+          message.success('API Key 已删除')
+        } catch (error) {
+          message.error(formatError(error))
+        } finally {
+          setDeletingApiKey(false)
+        }
+      },
+    })
+  }
+
+  const testAiConnection = async () => {
+    setTestingAi(true)
+    try {
+      const result = await testAiCommentConnection({ settings: normalizeAiSettings(aiSettings) })
+      setTestResult(result)
+      if (result.ok) {
+        message.success('AI 评论连接正常')
+      } else {
+        message.warning(aiResultLabel(result.reason))
+      }
+    } catch (error) {
+      message.error(formatError(error))
+    } finally {
+      setTestingAi(false)
+    }
+  }
+
+  const previewAi = async () => {
+    if (!previewTitle.trim() && !previewDescription.trim()) {
+      message.warning('请输入示例标题或描述')
+      return
+    }
+    setPreviewingAi(true)
+    try {
+      const result = await previewAiComment({
+        settings: normalizeAiSettings(aiSettings),
+        title: previewTitle,
+        description: previewDescription,
+      })
+      setPreviewResult(result)
+      if (!result.ok) {
+        message.warning(aiResultLabel(result.reason))
+      }
+    } catch (error) {
+      message.error(formatError(error))
+    } finally {
+      setPreviewingAi(false)
     }
   }
 
@@ -260,6 +435,33 @@ export function CommentPoolPage() {
               />
             </Col>
           </Row>
+
+          <AiCommentSettingsPanel
+            settings={aiSettings}
+            saved={apiKeyStatus?.saved ?? false}
+            readable={apiKeyStatus?.readable ?? false}
+            statusError={apiKeyStatus?.error}
+            apiKeyDraft={apiKeyDraft}
+            aiDirty={aiDirty}
+            savingSettings={savingAiSettings}
+            savingApiKey={savingApiKey}
+            deletingApiKey={deletingApiKey}
+            testing={testingAi}
+            previewing={previewingAi}
+            testResult={testResult}
+            previewResult={previewResult}
+            previewTitle={previewTitle}
+            previewDescription={previewDescription}
+            onUpdate={updateAiSettings}
+            onApiKeyDraftChange={setApiKeyDraft}
+            onSaveSettings={() => void saveAiSettingsOnly()}
+            onSaveApiKey={() => void saveApiKey()}
+            onDeleteApiKey={deleteApiKey}
+            onTest={() => void testAiConnection()}
+            onPreview={() => void previewAi()}
+            onPreviewTitleChange={setPreviewTitle}
+            onPreviewDescriptionChange={setPreviewDescription}
+          />
         </Space>
       </Spin>
 
@@ -384,6 +586,234 @@ function CommentPoolEditor({
   )
 }
 
+function AiCommentSettingsPanel({
+  settings,
+  saved,
+  readable,
+  statusError,
+  apiKeyDraft,
+  aiDirty,
+  savingSettings,
+  savingApiKey,
+  deletingApiKey,
+  testing,
+  previewing,
+  testResult,
+  previewResult,
+  previewTitle,
+  previewDescription,
+  onUpdate,
+  onApiKeyDraftChange,
+  onSaveSettings,
+  onSaveApiKey,
+  onDeleteApiKey,
+  onTest,
+  onPreview,
+  onPreviewTitleChange,
+  onPreviewDescriptionChange,
+}: {
+  settings: AiCommentSettings
+  saved: boolean
+  readable: boolean
+  statusError?: string
+  apiKeyDraft: string
+  aiDirty: boolean
+  savingSettings: boolean
+  savingApiKey: boolean
+  deletingApiKey: boolean
+  testing: boolean
+  previewing: boolean
+  testResult: AiCommentGenerationResult | null
+  previewResult: AiCommentGenerationResult | null
+  previewTitle: string
+  previewDescription: string
+  onUpdate: <Key extends keyof AiCommentSettings>(key: Key, value: AiCommentSettings[Key]) => void
+  onApiKeyDraftChange: (value: string) => void
+  onSaveSettings: () => void
+  onSaveApiKey: () => void
+  onDeleteApiKey: () => void
+  onTest: () => void
+  onPreview: () => void
+  onPreviewTitleChange: (value: string) => void
+  onPreviewDescriptionChange: (value: string) => void
+}) {
+  return (
+    <Card
+      title="AI 评论"
+      extra={
+        <Button
+          type="primary"
+          icon={<Save size={16} />}
+          loading={savingSettings}
+          disabled={!aiDirty}
+          onClick={onSaveSettings}
+        >
+          保存配置
+        </Button>
+      }
+    >
+      <Space direction="vertical" size={16} className="full-width">
+        {!saved ? (
+          <Alert type="warning" showIcon message="未配置 API Key，开启后仍会回退评论池。" />
+        ) : null}
+        {saved && !readable ? (
+          <Alert type="error" showIcon message="API Key 无法读取" description={statusError || '请重新保存 API Key。'} />
+        ) : null}
+
+        <Row gutter={[16, 16]}>
+          <Col xs={24} lg={8}>
+            <Space direction="vertical" size={6} className="full-width">
+              <Typography.Text strong>启用 AI 评论</Typography.Text>
+              <Switch checked={settings.enabled} onChange={(checked) => onUpdate('enabled', checked)} />
+            </Space>
+          </Col>
+          <Col xs={24} lg={8}>
+            <Space direction="vertical" size={6} className="full-width">
+              <Typography.Text strong>Provider</Typography.Text>
+              <Select
+                value={settings.provider}
+                options={[
+                  { value: 'kimi_moonshot', label: 'Kimi Moonshot' },
+                  { value: 'openai_compatible_custom', label: 'OpenAI Compatible' },
+                ]}
+                onChange={(value) => onUpdate('provider', value)}
+              />
+            </Space>
+          </Col>
+          <Col xs={24} lg={8}>
+            <Space direction="vertical" size={6} className="full-width">
+              <Typography.Text strong>语言</Typography.Text>
+              <Select
+                value={settings.language}
+                options={[
+                  { value: 'auto', label: '自动' },
+                  { value: 'zh', label: '中文' },
+                  { value: 'en', label: 'English' },
+                ]}
+                onChange={(value) => onUpdate('language', value)}
+              />
+            </Space>
+          </Col>
+          <Col xs={24} lg={12}>
+            <Space direction="vertical" size={6} className="full-width">
+              <Typography.Text strong>Base URL</Typography.Text>
+              <Input value={settings.baseUrl} onChange={(event) => onUpdate('baseUrl', event.target.value)} />
+            </Space>
+          </Col>
+          <Col xs={24} lg={12}>
+            <Space direction="vertical" size={6} className="full-width">
+              <Typography.Text strong>Model</Typography.Text>
+              <Input value={settings.model} onChange={(event) => onUpdate('model', event.target.value)} />
+            </Space>
+          </Col>
+          <Col xs={24} lg={12}>
+            <Space direction="vertical" size={6} className="full-width">
+              <Typography.Text strong>API Key</Typography.Text>
+              <Input.Password
+                value={apiKeyDraft}
+                prefix={<KeyRound size={15} />}
+                placeholder={saved ? '已保存；输入新值可覆盖' : '输入 API Key'}
+                onChange={(event) => onApiKeyDraftChange(event.target.value)}
+              />
+              <Space wrap>
+                <Tag color={saved && readable ? 'green' : 'gold'}>{saved && readable ? '已保存' : '未配置'}</Tag>
+                <Button icon={<Save size={16} />} loading={savingApiKey} onClick={onSaveApiKey}>
+                  保存 API Key
+                </Button>
+                <Button danger icon={<Trash2 size={16} />} loading={deletingApiKey} disabled={!saved} onClick={onDeleteApiKey}>
+                  删除 API Key
+                </Button>
+              </Space>
+            </Space>
+          </Col>
+          <Col xs={24} lg={12}>
+            <Row gutter={[12, 12]}>
+              <Col span={12}>
+                <Space direction="vertical" size={6} className="full-width">
+                  <Typography.Text strong>超时秒数</Typography.Text>
+                  <InputNumber
+                    min={1}
+                    max={60}
+                    value={settings.timeoutSeconds}
+                    className="full-width"
+                    onChange={(value) => onUpdate('timeoutSeconds', Number(value || 1))}
+                  />
+                </Space>
+              </Col>
+              <Col span={12}>
+                <Space direction="vertical" size={6} className="full-width">
+                  <Typography.Text strong>最大评论长度</Typography.Text>
+                  <InputNumber
+                    min={1}
+                    max={300}
+                    value={settings.maxCommentLength}
+                    className="full-width"
+                    onChange={(value) => onUpdate('maxCommentLength', Number(value || 1))}
+                  />
+                </Space>
+              </Col>
+            </Row>
+            <Space direction="vertical" size={6} className="full-width" style={{ marginTop: 12 }}>
+              <Typography.Text strong>敏感词黑名单</Typography.Text>
+              <Input.TextArea
+                rows={3}
+                value={settings.blockedWords.join('\n')}
+                placeholder="每行一个词"
+                onChange={(event) => onUpdate('blockedWords', parseBlockedWords(event.target.value))}
+              />
+            </Space>
+          </Col>
+        </Row>
+
+        <Row gutter={[16, 16]}>
+          <Col xs={24} lg={10}>
+            <Space direction="vertical" size={8} className="full-width">
+              <Button icon={<PlugZap size={16} />} loading={testing} onClick={onTest}>
+                测试连接
+              </Button>
+              {testResult ? <AiCommentResultAlert result={testResult} compact /> : null}
+            </Space>
+          </Col>
+          <Col xs={24} lg={14}>
+            <Space direction="vertical" size={8} className="full-width">
+              <Input
+                value={previewTitle}
+                placeholder="示例标题"
+                onChange={(event) => onPreviewTitleChange(event.target.value)}
+              />
+              <Input.TextArea
+                rows={2}
+                value={previewDescription}
+                placeholder="示例描述"
+                onChange={(event) => onPreviewDescriptionChange(event.target.value)}
+              />
+              <Button icon={<Sparkles size={16} />} loading={previewing} onClick={onPreview}>
+                试生成
+              </Button>
+              {previewResult ? <AiCommentResultAlert result={previewResult} /> : null}
+            </Space>
+          </Col>
+        </Row>
+      </Space>
+    </Card>
+  )
+}
+
+function AiCommentResultAlert({
+  result,
+  compact = false,
+}: {
+  result: AiCommentGenerationResult
+  compact?: boolean
+}) {
+  const type = result.ok ? 'success' : 'warning'
+  const messageText = result.ok ? 'AI 评论连接正常' : aiResultLabel(result.reason)
+  const description = result.ok
+    ? result.comment || `${result.provider} / ${result.model} / ${result.latencyMs}ms`
+    : result.error || `${result.provider} / ${result.model}`
+  return <Alert type={type} showIcon message={messageText} description={compact ? undefined : description} />
+}
+
 function PasteSummary({ text }: { text: string }) {
   const parsed = parseCommentLines(text)
   if (!text.trim()) {
@@ -464,6 +894,58 @@ function activeCommentCount(rows: CommentRow[]) {
 function isIgnoredLine(value: string) {
   const normalized = value.trim()
   return normalized.length === 0 || normalized.startsWith('#')
+}
+
+function normalizeAiSettings(settings: AiCommentSettings): AiCommentSettings {
+  return {
+    ...settings,
+    provider: settings.provider.trim() || DEFAULT_AI_COMMENT_SETTINGS.provider,
+    baseUrl: settings.baseUrl.trim() || DEFAULT_AI_COMMENT_SETTINGS.baseUrl,
+    model: settings.model.trim() || DEFAULT_AI_COMMENT_SETTINGS.model,
+    timeoutSeconds: Math.max(1, Math.trunc(Number(settings.timeoutSeconds) || 1)),
+    maxCommentLength: Math.max(1, Math.trunc(Number(settings.maxCommentLength) || 1)),
+    language: settings.language.trim() || DEFAULT_AI_COMMENT_SETTINGS.language,
+    blockedWords: settings.blockedWords.map((word) => word.trim()).filter(Boolean),
+  }
+}
+
+function parseBlockedWords(text: string) {
+  return text
+    .split(/\r?\n/)
+    .map((word) => word.trim())
+    .filter(Boolean)
+}
+
+function aiResultLabel(reason: string) {
+  const labels: Record<string, string> = {
+    generated: '生成成功',
+    missing_api_key: '未配置 API Key',
+    missing_context: '缺少视频标题或描述',
+    timeout: '请求超时',
+    network_error: '网络请求失败',
+    invalid_request: '请求参数错误',
+    unauthorized: 'API Key 无效或未授权',
+    forbidden: 'API Key 权限不足',
+    not_found: '模型或接口不存在',
+    rate_limited: '请求被限流',
+    server_error: '模型服务端错误',
+    http_error: '接口请求失败',
+    invalid_response: '模型响应格式异常',
+    unsupported_provider: 'Provider 不支持',
+    credential_error: '密钥读取失败',
+    runtime_error: '运行时错误',
+    empty: '生成内容为空',
+    multiline: '生成内容包含多行',
+    url: '生成内容包含链接',
+    mention: '生成内容包含 @',
+    contact: '生成内容包含联系方式',
+    too_long: '生成内容过长',
+    blocked_word: '生成内容包含敏感词',
+    prefixed_explanation: '生成内容包含解释前缀',
+    unsafe_tone: '生成内容不是正向或中性评论',
+    unsafe_context: '视频内容偏负面或争议，已跳过评论',
+  }
+  return labels[reason] || reason || '生成失败'
 }
 
 function createRow(text: string): CommentRow {

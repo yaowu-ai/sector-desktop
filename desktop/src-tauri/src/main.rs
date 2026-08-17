@@ -37,6 +37,13 @@ fn main() {
             commands::config::get_login_credential_status,
             commands::config::save_login_password,
             commands::config::delete_login_password,
+            commands::config::load_ai_comment_settings,
+            commands::config::save_ai_comment_settings,
+            commands::config::save_ai_comment_api_key,
+            commands::config::delete_ai_comment_api_key,
+            commands::config::get_ai_comment_api_key_status,
+            commands::config::test_ai_comment_connection,
+            commands::config::preview_ai_comment,
             commands::config::save_fyp_settings,
             commands::config::save_target_engagement_settings,
             commands::config::save_scheduler_settings,
@@ -80,6 +87,7 @@ fn main() {
             commands::stats::get_sqlite_status,
             commands::stats::query_fyp_stats,
             commands::stats::query_action_logs,
+            commands::stats::query_fyp_video_views,
             commands::stats::query_scheduler_job_runs,
             commands::stats::query_target_engagements,
             commands::stats::query_target_follows,
@@ -102,5 +110,5 @@ fn main() {
             commands::process::run_account_script
         ])
         .run(tauri::generate_context!())
-        .expect("error while running Account Matrix desktop app");
+        .expect("error while running 星域 desktop app");
 }

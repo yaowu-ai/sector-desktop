@@ -33,6 +33,11 @@ desktop/tests/m20-data/actions.db
 desktop/tests/m20-data/actions.db-*
 desktop/tests/direct-*.txt
 desktop/tests/runtime-smoke-output/
+desktop/.codex-tmp/
+desktop/tests/.m14-temp/
+desktop/tests/.runtime-fyp-video-tests/
+desktop/tests/tmp*/
+.runtime-test/
 
 # Python
 __pycache__/

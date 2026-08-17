@@ -330,7 +330,7 @@ function latestNonEmptyLine(value: string) {
 
 function parseRegistrationBatchOutcome(value: string) {
   const match = value.match(
-    /BATCH END \| (?:\[ERR\] )?Account Matrix 注册: (\d+)\/(\d+) 完成(?:, (\d+) 失败)?/,
+    /BATCH END \| (?:\[ERR\] )?(?:星域|Account Matrix) 注册: (\d+)\/(\d+) 完成(?:, (\d+) 失败)?/,
   )
   if (!match) {
     return null

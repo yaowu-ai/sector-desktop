@@ -96,6 +96,52 @@ export interface LoginCredentialStatus {
   error?: string
 }
 
+export interface AiCommentSettings {
+  enabled: boolean
+  provider: string
+  baseUrl: string
+  model: string
+  timeoutSeconds: number
+  maxCommentLength: number
+  fallbackToPool: boolean
+  language: string
+  blockedWords: string[]
+}
+
+export interface AiCommentApiKeyPayload {
+  provider?: string
+  apiKey: string
+}
+
+export interface AiCommentApiKeyStatus {
+  provider: string
+  credentialRef: string
+  saved: boolean
+  readable: boolean
+  error?: string
+}
+
+export interface AiCommentTestPayload {
+  settings: AiCommentSettings
+}
+
+export interface AiCommentPreviewPayload {
+  settings: AiCommentSettings
+  title: string
+  description?: string
+}
+
+export interface AiCommentGenerationResult {
+  ok: boolean
+  comment: string
+  source: string
+  reason: string
+  latencyMs: number
+  error?: string
+  provider: string
+  model: string
+}
+
 export type AccountSummary = Account
 
 export interface BrowserProfile {
@@ -568,6 +614,40 @@ export interface ActionLogFilter {
   limit?: number
 }
 
+export interface FypVideoViewRecord {
+  id: number
+  platform: Platform
+  accountId: string
+  sessionId: string
+  videoIndex: number
+  videoId: string
+  videoUrl: string
+  authorHandle: string
+  authorName: string
+  title: string
+  description: string
+  watchSeconds?: number
+  liked: boolean
+  followed: boolean
+  commented: boolean
+  captureStatus: string
+  captureError: string
+  rawSource: string
+  collectedAt: string
+  updatedAt: string
+}
+
+export interface FypVideoViewFilter {
+  platform?: Platform | 'all'
+  accountId?: string
+  startTs?: string
+  endTs?: string
+  hasTitle?: boolean
+  liked?: boolean
+  commented?: boolean
+  limit?: number
+}
+
 export interface SchedulerJobRunFilter {
   platform?: Platform | 'all'
   accountId?: string
@@ -742,6 +822,7 @@ export interface ConfigSnapshot {
   fypSettings?: FypSettings
   targetEngagement?: TargetEngagementSettings
   schedulerSettings?: SchedulerSettings
+  aiComment: AiCommentSettings
   notify?: NotifySettings
   validation: ValidationResult
 }

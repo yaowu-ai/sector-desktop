@@ -91,10 +91,10 @@ def build_batch_message(summaries):
     )
 
     if registration_task:
-        title = f"Account Matrix 注册: {ok}/{total} 完成"
+        title = f"星域 注册: {ok}/{total} 完成"
         incomplete = err + skip
         if incomplete:
-            title = f"[ERR] Account Matrix 注册: {ok}/{total} 完成, {incomplete} 失败"
+            title = f"[ERR] 星域 注册: {ok}/{total} 完成, {incomplete} 失败"
 
         lines = [
             f"OK={ok}  ERR={err}  SKIP={skip}",
@@ -116,9 +116,9 @@ def build_batch_message(summaries):
                 lines.append(f"{prefix}: {item['status'].upper()} - {item.get('error') or ''}")
         return title, "\n".join(lines)
 
-    title = f"Account Matrix bot: {ok}/{total} OK"
+    title = f"星域 bot: {ok}/{total} OK"
     if err:
-        title = f"[ERR] Account Matrix bot: {ok}/{total} OK, {err} failed"
+        title = f"[ERR] 星域 bot: {ok}/{total} OK, {err} failed"
 
     lines = [
         f"OK={ok}  ERR={err}  SKIP={skip}  videos={total_videos}",

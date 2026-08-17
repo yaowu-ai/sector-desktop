@@ -11,18 +11,15 @@ import {
   Space,
   Spin,
   Switch,
-  Table,
   Tooltip,
   Typography,
   message,
 } from 'antd'
-import type { ColumnsType } from 'antd/es/table'
 import { Play, RefreshCw, Save, Users } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { PageHeader } from '../components/PageHeader'
 import { ProcessOutputPanel } from '../components/ProcessOutputPanel'
-import { StatusTag } from '../components/StatusTag'
 import { AccountBrowserEnvironment } from '../components/AccountBrowserEnvironment'
 import { usePlatformContext } from '../app/PlatformContext'
 import {
@@ -35,17 +32,6 @@ import { getPlatformLabel, isExecutablePlatform } from '../services/platforms'
 import type { Account, ConfigSnapshot, FypSettings, ProcessStatus, RunStatus } from '../services/types'
 
 type AccountMode = 'all' | 'single' | 'selected'
-
-interface TaskCatalogRow {
-  key: 'fyp'
-  taskName: string
-  status: 'enabled'
-  statusLabel: string
-  summary: string
-  disabledReason?: string
-  actionLabel: string
-  onRun: () => void
-}
 
 const TERMINAL_STATUS: RunStatus[] = ['completed', 'partial_failed', 'failed', 'stopped', 'idle']
 const FYP_COMMENTS_FILE = 'comments.txt'
@@ -485,71 +471,12 @@ export function TaskPage() {
           </Col>
 
           <Col span={24}>
-            <TaskCatalog
-              onRunFyp={confirmStart}
-              fypDisabledReason={fypDisabledReason}
-            />
-          </Col>
-
-          <Col span={24}>
             <ProcessOutputPanel title="任务运行输出" />
           </Col>
         </Row>
       </Spin>
     </>
   )
-}
-
-
-function TaskCatalog({
-  fypDisabledReason,
-  onRunFyp,
-}: {
-  fypDisabledReason?: string
-  onRunFyp: () => void
-}) {
-  const rows: TaskCatalogRow[] = [
-    {
-      key: 'fyp',
-      taskName: 'TikTok FYP 养号',
-      status: 'enabled',
-      statusLabel: '可执行',
-      summary: '浏览、点赞、关注和评论任务。',
-      disabledReason: fypDisabledReason,
-      actionLabel: '启动',
-      onRun: onRunFyp,
-    },
-  ]
-
-  const columns: ColumnsType<TaskCatalogRow> = [
-    { title: '任务', dataIndex: 'taskName' },
-    {
-      title: '状态',
-      width: 130,
-      render: (_, row) => <StatusTag status={row.status === 'enabled' ? 'ok' : 'warning'} label={row.statusLabel} />,
-    },
-    { title: '说明', dataIndex: 'summary' },
-    {
-      title: '操作',
-      width: 120,
-      render: (_, row) => (
-        <Tooltip title={row.disabledReason}>
-          <span>
-            <Button
-              type="link"
-              icon={<Play size={15} />}
-              disabled={Boolean(row.disabledReason)}
-              onClick={row.onRun}
-            >
-              {row.actionLabel}
-            </Button>
-          </span>
-        </Tooltip>
-      ),
-    },
-  ]
-
-  return <Table rowKey="key" title={() => '可执行任务'} columns={columns} dataSource={rows} pagination={false} />
 }
 
 function resolveRunAccounts(

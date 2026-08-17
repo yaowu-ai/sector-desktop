@@ -26,6 +26,7 @@ import {
   getSqliteStatus,
   loadConfig,
   queryActionLogs,
+  queryFypVideoViews,
   queryTargetEngagements,
   queryTargetFollows,
 } from '../services/api'
@@ -33,6 +34,8 @@ import type {
   Account,
   ActionLog,
   ActionLogFilter,
+  FypVideoViewFilter,
+  FypVideoViewRecord,
   Platform,
   TargetEngagementRecord,
   TargetFollowRecord,
@@ -50,6 +53,9 @@ interface FilterState {
   accountId?: string
   action?: string
   status?: string
+  hasVideoTitle?: 'true' | 'false'
+  videoLiked?: 'true' | 'false'
+  videoCommented?: 'true' | 'false'
   timeRange: TimeRange
 }
 
@@ -74,6 +80,7 @@ export function ExecutionRecordPage() {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [sqliteStatus, setSqliteStatus] = useState<SqliteStatus | null>(null)
   const [actionLogs, setActionLogs] = useState<ActionLog[]>([])
+  const [fypVideoViews, setFypVideoViews] = useState<FypVideoViewRecord[]>([])
   const [targetEngagements, setTargetEngagements] = useState<TargetEngagementRecord[]>([])
   const [targetFollows, setTargetFollows] = useState<TargetFollowRecord[]>([])
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS)
@@ -126,16 +133,19 @@ export function ExecutionRecordPage() {
     try {
       const snapshot = await loadConfig()
       const actionFilter = toActionFilter(sourceFilters)
+      const fypVideoFilter = toFypVideoViewFilter(sourceFilters)
       const targetFilter = toTargetFilter(sourceFilters)
-      const [sqlite, nextActionLogs, nextTargetEngagements, nextTargetFollows] = await Promise.all([
+      const [sqlite, nextActionLogs, nextFypVideoViews, nextTargetEngagements, nextTargetFollows] = await Promise.all([
         getSqliteStatus(),
         queryActionLogs(actionFilter),
+        queryFypVideoViews(fypVideoFilter),
         queryTargetEngagements(targetFilter),
         queryTargetFollows(targetFilter),
       ])
       setAccounts(snapshot.accounts)
       setSqliteStatus(sqlite)
       setActionLogs(nextActionLogs)
+      setFypVideoViews(nextFypVideoViews)
       setTargetEngagements(nextTargetEngagements)
       setTargetFollows(nextTargetFollows)
     } catch (error) {
@@ -248,6 +258,39 @@ export function ExecutionRecordPage() {
                   style={{ width: 150 }}
                   onChange={(value) => updateFilter('status', value)}
                 />
+                <Select
+                  allowClear
+                  placeholder="视频标题"
+                  value={filters.hasVideoTitle}
+                  options={[
+                    { value: 'true', label: '有标题' },
+                    { value: 'false', label: '无标题' },
+                  ]}
+                  style={{ width: 130 }}
+                  onChange={(value) => updateFilter('hasVideoTitle', value)}
+                />
+                <Select
+                  allowClear
+                  placeholder="视频点赞"
+                  value={filters.videoLiked}
+                  options={[
+                    { value: 'true', label: '已点赞' },
+                    { value: 'false', label: '未点赞' },
+                  ]}
+                  style={{ width: 130 }}
+                  onChange={(value) => updateFilter('videoLiked', value)}
+                />
+                <Select
+                  allowClear
+                  placeholder="视频评论"
+                  value={filters.videoCommented}
+                  options={[
+                    { value: 'true', label: '已评论' },
+                    { value: 'false', label: '未评论' },
+                  ]}
+                  style={{ width: 130 }}
+                  onChange={(value) => updateFilter('videoCommented', value)}
+                />
                 <RangePicker
                   showTime
                   value={filters.timeRange}
@@ -280,6 +323,21 @@ export function ExecutionRecordPage() {
                       locale={{ emptyText: emptyText('执行记录') }}
                       pagination={{ pageSize: 12, showSizeChanger: true }}
                       scroll={{ x: 1120 }}
+                    />
+                  ),
+                },
+                {
+                  key: 'fyp-video-views',
+                  label: `FYP 视频明细 ${fypVideoViews.length}`,
+                  children: (
+                    <Table
+                      rowKey="id"
+                      loading={loading}
+                      columns={fypVideoViewColumns}
+                      dataSource={fypVideoViews}
+                      locale={{ emptyText: emptyText('FYP 视频明细') }}
+                      pagination={{ pageSize: 12, showSizeChanger: true }}
+                      scroll={{ x: 1520 }}
                     />
                   ),
                 },
@@ -336,7 +394,10 @@ function RecordEmptyText({
   onGoToTasks: () => void
 }) {
   const title = initialized ? `尚未生成${recordType}` : '未初始化'
-  const description = '首次运行养号任务后会自动创建记录库。'
+  const description =
+    recordType === 'FYP 视频明细'
+      ? '首次运行开启视频信息采集后的养号任务后会生成记录。'
+      : '首次运行养号任务后会自动创建记录库。'
 
   return (
     <Empty
@@ -405,6 +466,119 @@ const actionLogColumns: ColumnsType<ActionLog> = [
   },
 ]
 
+const fypVideoViewColumns: ColumnsType<FypVideoViewRecord> = [
+  {
+    title: '时间',
+    dataIndex: 'collectedAt',
+    width: 190,
+    sorter: (a, b) => a.collectedAt.localeCompare(b.collectedAt),
+  },
+  { title: '账号', dataIndex: 'accountId', width: 140 },
+  { title: '序号', dataIndex: 'videoIndex', width: 80, sorter: (a, b) => a.videoIndex - b.videoIndex },
+  {
+    title: '作者',
+    width: 180,
+    render: (_, row) => {
+      const handle = row.authorHandle ? `@${row.authorHandle}` : ''
+      const label = row.authorName || handle
+      return label ? (
+        <Space direction="vertical" size={0}>
+          <Typography.Text>{label}</Typography.Text>
+          {row.authorName && handle ? <Typography.Text type="secondary">{handle}</Typography.Text> : null}
+        </Space>
+      ) : (
+        '-'
+      )
+    },
+  },
+  {
+    title: '标题 / 描述',
+    width: 360,
+    render: (_, row) => {
+      const primary = row.title || row.description
+      return (
+        <Space size={8} align="start" className="full-width">
+          <Typography.Paragraph
+            style={{ marginBottom: 0, maxWidth: 300, whiteSpace: 'pre-wrap' }}
+            ellipsis={{ rows: 3, expandable: true, symbol: '展开' }}
+            type={primary ? undefined : 'secondary'}
+          >
+            {primary || '未采集到标题'}
+          </Typography.Paragraph>
+          <Tooltip title="复制标题">
+            <Button
+              size="small"
+              icon={<Copy size={14} />}
+              disabled={!primary}
+              onClick={() => void copyText(primary, '标题已复制')}
+            />
+          </Tooltip>
+        </Space>
+      )
+    },
+  },
+  {
+    title: '视频ID',
+    dataIndex: 'videoId',
+    width: 230,
+    render: (videoId: string) => (videoId ? <Typography.Text code>{videoId}</Typography.Text> : '-'),
+  },
+  {
+    title: '观看',
+    dataIndex: 'watchSeconds',
+    width: 90,
+    render: (value?: number) => (typeof value === 'number' ? `${value.toFixed(1)}s` : '-'),
+  },
+  {
+    title: '点赞',
+    dataIndex: 'liked',
+    width: 90,
+    render: (liked: boolean) => <BooleanTag value={liked} />,
+  },
+  {
+    title: '关注',
+    dataIndex: 'followed',
+    width: 90,
+    render: (followed: boolean) => <BooleanTag value={followed} />,
+  },
+  {
+    title: '评论',
+    dataIndex: 'commented',
+    width: 90,
+    render: (commented: boolean) => <BooleanTag value={commented} />,
+  },
+  {
+    title: '采集',
+    dataIndex: 'captureStatus',
+    width: 130,
+    render: (status: string, row) => (
+      <Tooltip title={row.captureError || row.rawSource || status}>
+        <Tag color={captureStatusColor(status)}>{captureStatusLabel(status)}</Tag>
+      </Tooltip>
+    ),
+  },
+  {
+    title: '操作',
+    width: 130,
+    render: (_, row) => {
+      const hasVideoUrl = Boolean(row.videoUrl)
+      return (
+        <Space size={8}>
+          <Tooltip title={hasVideoUrl ? '复制视频链接' : '未获取链接'}>
+            <Button
+              size="small"
+              icon={<Copy size={14} />}
+              disabled={!hasVideoUrl}
+              onClick={() => void copyText(row.videoUrl, '视频链接已复制')}
+            />
+          </Tooltip>
+          {hasVideoUrl ? null : <Typography.Text type="secondary">未获取链接</Typography.Text>}
+        </Space>
+      )
+    },
+  },
+]
+
 const targetEngagementColumns: ColumnsType<TargetEngagementRecord> = [
   { title: '时间', dataIndex: 'ts', width: 190, sorter: (a, b) => a.ts.localeCompare(b.ts) },
   { title: '执行账号', dataIndex: 'ourAccount', width: 150 },
@@ -452,7 +626,7 @@ const targetFollowColumns: ColumnsType<TargetFollowRecord> = [
 ]
 
 function BooleanTag({ value }: { value: boolean }) {
-  return <Tag color={value ? 'green' : 'default'}>{value ? 'true' : 'false'}</Tag>
+  return <Tag color={value ? 'green' : 'default'}>{value ? '是' : '否'}</Tag>
 }
 
 function toActionFilter(filters: FilterState): ActionLogFilter {
@@ -468,6 +642,20 @@ function toActionFilter(filters: FilterState): ActionLogFilter {
   })
 }
 
+function toFypVideoViewFilter(filters: FilterState): FypVideoViewFilter {
+  const [startTs, endTs] = toTimeBounds(filters.timeRange)
+  return compactFilter({
+    platform: filters.platform,
+    accountId: filters.accountId,
+    startTs,
+    endTs,
+    hasTitle: toOptionalBoolean(filters.hasVideoTitle),
+    liked: toOptionalBoolean(filters.videoLiked),
+    commented: toOptionalBoolean(filters.videoCommented),
+    limit: 500,
+  })
+}
+
 function toTargetFilter(filters: FilterState): TargetRecordFilter {
   const [startTs, endTs] = toTimeBounds(filters.timeRange)
   return compactFilter({
@@ -477,6 +665,16 @@ function toTargetFilter(filters: FilterState): TargetRecordFilter {
     endTs,
     limit: 500,
   })
+}
+
+function toOptionalBoolean(value?: 'true' | 'false') {
+  if (value === 'true') {
+    return true
+  }
+  if (value === 'false') {
+    return false
+  }
+  return undefined
 }
 
 function toTimeBounds(timeRange: TimeRange) {
@@ -548,10 +746,44 @@ function statusColor(status: string) {
   return 'default'
 }
 
-async function copyText(text: string) {
+function captureStatusColor(status: string) {
+  const normalized = status.toLowerCase()
+  if (normalized === 'ok') {
+    return 'green'
+  }
+  if (normalized === 'partial') {
+    return 'gold'
+  }
+  if (normalized === 'failed' || normalized === 'error') {
+    return 'red'
+  }
+  if (normalized === 'disabled') {
+    return 'default'
+  }
+  return 'blue'
+}
+
+function captureStatusLabel(status: string) {
+  const normalized = status.toLowerCase()
+  if (normalized === 'ok') {
+    return '已采集'
+  }
+  if (normalized === 'partial') {
+    return '部分采集'
+  }
+  if (normalized === 'failed' || normalized === 'error') {
+    return '采集失败'
+  }
+  if (normalized === 'disabled') {
+    return '未开启'
+  }
+  return status || '-'
+}
+
+async function copyText(text: string, successMessage = '详情已复制') {
   try {
     await navigator.clipboard.writeText(text)
-    message.success('详情已复制')
+    message.success(successMessage)
   } catch (error) {
     message.error(formatError(error))
   }

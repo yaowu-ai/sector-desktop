@@ -480,7 +480,7 @@ export function AccountPage() {
     Modal.confirm({
       title: `清理内置 Chromium 数据 ${account.id}`,
       content:
-        "只会删除该账号在 Account Matrix 内置 Chromium 下的本地用户数据，不会删除 BitBrowser profile。",
+        "只会删除该账号在星域内置 Chromium 下的本地用户数据，不会删除 BitBrowser profile。",
       okText: "清理",
       okType: "danger",
       cancelText: "取消",
@@ -1209,7 +1209,7 @@ function AccountForm({
             type="warning"
             showIcon
             message="内置 Chromium 是生产可选方案。TikTok 默认推荐仍是 BitBrowser。"
-            description="Account Matrix 会为每个账号使用独立用户数据目录，打开临时 CDP 端口，并且只关闭由它自己启动的浏览器进程；它不等价替代 BitBrowser 的指纹环境能力。"
+            description="星域会为每个账号使用独立用户数据目录，打开临时 CDP 端口，并且只关闭由它自己启动的浏览器进程；它不等价替代 BitBrowser 的指纹环境能力。"
           />
           <Row gutter={12}>
             <Col xs={24} md={8}>
@@ -1236,7 +1236,7 @@ function AccountForm({
           <Form.Item
             name="userDataDir"
             label="用户数据目录"
-            extra="可选。留空时 Account Matrix 会自动创建 data/browser/builtin_chromium/<账号>/user-data。"
+            extra="可选。留空时星域会自动创建 data/browser/builtin_chromium/<账号>/user-data。"
           >
             <Input placeholder="留空使用每账号默认目录" />
           </Form.Item>

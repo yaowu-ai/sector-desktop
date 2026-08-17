@@ -4,7 +4,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-const APP_DIR_NAME: &str = "Account Matrix";
+const APP_DIR_NAME: &str = "星域";
+const LEGACY_APP_DIR_NAME: &str = "Account Matrix";
 const ENV_PROJECT_ROOT: &str = "ACCOUNT_MATRIX_ROOT";
 const ENV_SETTINGS_PATH: &str = "ACCOUNT_MATRIX_SETTINGS";
 const LOCAL_SETTINGS_FILE: &str = "local-settings.json";
@@ -467,6 +468,12 @@ fn candidate_settings_paths() -> Vec<PathBuf> {
     if let Ok(path) = app_data_settings_path() {
         push_unique(&mut paths, path);
     }
+    if let Ok(path) = legacy_named_app_data_settings_path() {
+        push_unique(&mut paths, path);
+    }
+    if let Ok(path) = legacy_named_flat_app_data_settings_path() {
+        push_unique(&mut paths, path);
+    }
     if let Ok(path) = legacy_app_data_settings_path() {
         push_unique(&mut paths, path);
     }
@@ -537,6 +544,19 @@ fn app_data_settings_path() -> Result<PathBuf, String> {
 
 fn legacy_app_data_settings_path() -> Result<PathBuf, String> {
     Ok(app_config_root()?.join(LOCAL_SETTINGS_FILE))
+}
+
+fn legacy_named_app_data_settings_path() -> Result<PathBuf, String> {
+    Ok(app_config_base()?
+        .join(LEGACY_APP_DIR_NAME)
+        .join("settings")
+        .join(LOCAL_SETTINGS_FILE))
+}
+
+fn legacy_named_flat_app_data_settings_path() -> Result<PathBuf, String> {
+    Ok(app_config_base()?
+        .join(LEGACY_APP_DIR_NAME)
+        .join(LOCAL_SETTINGS_FILE))
 }
 
 fn default_desktop_settings_path() -> Result<PathBuf, String> {

@@ -1,4 +1,4 @@
-"""Installable runtime CLI for Account Matrix.
+"""Installable runtime CLI for 星域.
 
 This entrypoint is intentionally thin: account execution still goes through the
 existing core runner so current BitBrowser behavior remains unchanged.
@@ -14,7 +14,7 @@ import yaml
 
 RUNTIME_VERSION = "0.1.0"
 SCHEMA_VERSION = 1
-SUPPORTED_COMMANDS = ["run", "scheduler", "gmail", "diagnostic", "version"]
+SUPPORTED_COMMANDS = ["run", "scheduler", "gmail", "diagnostic", "ai-comment", "version"]
 
 
 def main(argv=None):
@@ -52,6 +52,9 @@ def build_parser():
     diagnostic_parser.add_argument("--no-post", action="store_true")
     diagnostic_parser.add_argument("--json", action="store_true", help="Print JSON")
     diagnostic_parser.set_defaults(func=cmd_diagnostic)
+
+    ai_comment_parser = subparsers.add_parser("ai-comment", help="Generate or test an AI comment")
+    ai_comment_parser.set_defaults(func=cmd_ai_comment)
 
     version_parser = subparsers.add_parser("version", help="Print runtime version")
     version_parser.add_argument("--json", action="store_true", help="Print JSON")
@@ -117,6 +120,22 @@ def cmd_diagnostic(args):
         for check in payload["checks"]:
             print(f"{check['name']}: {check['status']} - {check['detail']}")
     return 0 if payload["status"] in {"ok", "warning"} else 1
+
+
+def cmd_ai_comment(_args):
+    from ai_comment import generate_ai_comment, read_api_key_from_env
+
+    payload = json.loads(sys.stdin.read() or "{}")
+    config = payload.get("config") or {}
+    result = generate_ai_comment(payload.get("context") or {}, config, read_api_key_from_env)
+    result["provider"] = str(config.get("provider") or "")
+    result["model"] = str(config.get("model") or "")
+    print_json(result)
+    return 0
+
+
+def print_json(payload):
+    print(json.dumps(payload, ensure_ascii=True))
 
 
 def run_interactive_diagnostic(args):

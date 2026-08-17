@@ -399,7 +399,7 @@ export function BrowserProfilePage() {
     confirmDanger({
       title: "清理内置 Chromium 数据",
       content:
-        "只会删除该账号在 Account Matrix 内置 Chromium 下的本地用户数据，不会删除 BitBrowser profile。如该账号浏览器正在运行，将先终止进程。",
+        "只会删除该账号在星域内置 Chromium 下的本地用户数据，不会删除 BitBrowser profile。如该账号浏览器正在运行，将先终止进程。",
       onOk: () => {
         void (async () => {
           setCleaningAccountId(accountId);

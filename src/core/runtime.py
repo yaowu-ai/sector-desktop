@@ -35,13 +35,26 @@ DATA_DIR.mkdir(exist_ok=True)
 BROWSER_PREVIEW_PREFIX = "AM_BROWSER_PREVIEW "
 AUTH_EVENT_PREFIX = "AM_AUTH_EVENT "
 
+FYP_VIDEO_TEXT_LIMITS = {
+    "session_id": 128,
+    "video_id": 128,
+    "video_url": 1000,
+    "author_handle": 120,
+    "author_name": 200,
+    "title": 300,
+    "description": 600,
+    "capture_status": 32,
+    "capture_error": 500,
+    "raw_source": 80,
+}
+
 PROXY_URL_CREDENTIAL_RE = re.compile(
     r"\b((?:https?|socks5)://[^:\s/@]+:)([^@\s]+)(@[^\s]+)",
     re.IGNORECASE,
 )
 COLON_PROXY_CREDENTIAL_RE = re.compile(r"(?<!\S)([^:\s]+:\d{1,5}:[^:\s]+:)([^\s]+)")
 SENSITIVE_KEY_VALUE_RE = re.compile(
-    r"\b(password|passwd|proxy_password|proxy password|credential|credentials|token|cookie|session)\b"
+    r"\b(password|passwd|proxy_password|proxy password|api_key|apikey|authorization|credential|credentials|token|cookie|session)\b"
     r"(\s*[:=]\s*)"
     r"([^;\s,}\]]+)",
     re.IGNORECASE,
@@ -107,6 +120,11 @@ def release_lock():
 
 def init_db():
     conn = sqlite3.connect(LOG_DB)
+    initialize_db_schema(conn)
+    return conn
+
+
+def initialize_db_schema(conn):
     conn.execute("""
         CREATE TABLE IF NOT EXISTS action_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -142,11 +160,43 @@ def init_db():
             detail TEXT
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS fyp_video_views (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            platform TEXT NOT NULL,
+            account_id TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            video_index INTEGER NOT NULL,
+            video_id TEXT,
+            video_url TEXT,
+            author_handle TEXT,
+            author_name TEXT,
+            title TEXT,
+            description TEXT,
+            watch_seconds REAL,
+            liked INTEGER DEFAULT 0,
+            followed INTEGER DEFAULT 0,
+            commented INTEGER DEFAULT 0,
+            capture_status TEXT NOT NULL,
+            capture_error TEXT,
+            raw_source TEXT,
+            collected_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(platform, account_id, session_id, video_index)
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_fyp_video_views_account_ts
+        ON fyp_video_views(platform, account_id, collected_at)
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_fyp_video_views_video_id
+        ON fyp_video_views(platform, video_id)
+    """)
     ensure_platform_column(conn, "action_log")
     ensure_platform_column(conn, "target_engagements")
     ensure_platform_column(conn, "target_follows")
     conn.commit()
-    return conn
 
 
 def table_columns(conn, table_name):
@@ -282,6 +332,263 @@ def record_target_engagement(conn, platform, account_id, handle, video_id, liked
     conn.commit()
 
 
+def record_fyp_video_view(conn, platform, account_id, record):
+    """Best-effort insert/update of one FYP video view detail row.
+
+    Returns the stored video_index when the row is written or merged, and False
+    when the record cannot be written.
+    """
+    try:
+        platform = require_platform(platform)
+        now = datetime.now().isoformat()
+        session_id = bounded_fyp_video_text(record.get("session_id"), "session_id")
+        video_index = int(record.get("video_index") or 0)
+        if not session_id or video_index <= 0:
+            raise ValueError("session_id and positive video_index are required")
+        collected_at = bounded_fyp_video_text(record.get("collected_at"), "collected_at") or now
+        capture_status = (
+            bounded_fyp_video_text(record.get("capture_status"), "capture_status") or "partial"
+        )
+        account_id = str(account_id)
+        video_id = bounded_fyp_video_text(record.get("video_id"), "video_id")
+        video_url = bounded_fyp_video_text(record.get("video_url"), "video_url")
+        author_handle = bounded_fyp_video_text(record.get("author_handle"), "author_handle")
+        author_name = bounded_fyp_video_text(record.get("author_name"), "author_name")
+        title = bounded_fyp_video_text(record.get("title"), "title")
+        description = bounded_fyp_video_text(record.get("description"), "description")
+        watch_seconds = normalized_optional_float(record.get("watch_seconds"))
+        liked = int(bool(record.get("liked")))
+        followed = int(bool(record.get("followed")))
+        commented = int(bool(record.get("commented")))
+        capture_error = bounded_fyp_video_text(record.get("capture_error"), "capture_error")
+        raw_source = bounded_fyp_video_text(record.get("raw_source"), "raw_source")
+
+        duplicate = find_existing_fyp_video_view(
+            conn,
+            platform,
+            account_id,
+            session_id,
+            video_id,
+            video_url,
+            author_handle,
+            title,
+        )
+        if duplicate:
+            duplicate_id, duplicate_video_index = duplicate
+            conn.execute(
+                """
+                UPDATE fyp_video_views SET
+                    video_id=COALESCE(NULLIF(video_id, ''), ?),
+                    video_url=COALESCE(NULLIF(video_url, ''), ?),
+                    author_handle=COALESCE(NULLIF(author_handle, ''), ?),
+                    author_name=COALESCE(NULLIF(author_name, ''), ?),
+                    title=COALESCE(NULLIF(title, ''), ?),
+                    description=COALESCE(NULLIF(description, ''), ?),
+                    watch_seconds=COALESCE(?, watch_seconds),
+                    liked=MAX(liked, ?),
+                    followed=MAX(followed, ?),
+                    commented=MAX(commented, ?),
+                    capture_status=CASE
+                        WHEN capture_status='ok' THEN capture_status
+                        ELSE ?
+                    END,
+                    capture_error=COALESCE(NULLIF(capture_error, ''), ?),
+                    raw_source=COALESCE(NULLIF(raw_source, ''), ?),
+                    updated_at=?
+                WHERE id=?
+                """,
+                (
+                    video_id,
+                    video_url,
+                    author_handle,
+                    author_name,
+                    title,
+                    description,
+                    watch_seconds,
+                    liked,
+                    followed,
+                    commented,
+                    capture_status,
+                    capture_error,
+                    raw_source,
+                    now,
+                    duplicate_id,
+                ),
+            )
+            conn.commit()
+            return duplicate_video_index
+
+        conn.execute(
+            """
+            INSERT INTO fyp_video_views (
+                platform, account_id, session_id, video_index, video_id, video_url,
+                author_handle, author_name, title, description, watch_seconds,
+                liked, followed, commented, capture_status, capture_error, raw_source,
+                collected_at, updated_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(platform, account_id, session_id, video_index) DO UPDATE SET
+                video_id=excluded.video_id,
+                video_url=excluded.video_url,
+                author_handle=excluded.author_handle,
+                author_name=excluded.author_name,
+                title=excluded.title,
+                description=excluded.description,
+                watch_seconds=excluded.watch_seconds,
+                liked=excluded.liked,
+                followed=excluded.followed,
+                commented=excluded.commented,
+                capture_status=excluded.capture_status,
+                capture_error=excluded.capture_error,
+                raw_source=excluded.raw_source,
+                updated_at=excluded.updated_at
+            """,
+            (
+                platform,
+                account_id,
+                session_id,
+                video_index,
+                video_id,
+                video_url,
+                author_handle,
+                author_name,
+                title,
+                description,
+                watch_seconds,
+                liked,
+                followed,
+                commented,
+                capture_status,
+                capture_error,
+                raw_source,
+                collected_at,
+                now,
+            ),
+        )
+        conn.commit()
+        return video_index
+    except Exception as exc:
+        print(f"[warn] fyp video view write skipped: {redact_runtime_text(exc)}")
+        return False
+
+
+def find_existing_fyp_video_view(
+    conn,
+    platform,
+    account_id,
+    session_id,
+    video_id=None,
+    video_url=None,
+    author_handle=None,
+    title=None,
+):
+    base = (
+        "SELECT id, video_index FROM fyp_video_views "
+        "WHERE platform=? AND account_id=? AND session_id=? AND "
+    )
+    prefix = (platform, account_id, session_id)
+    if video_id:
+        row = conn.execute(
+            base + "video_id=? ORDER BY video_index ASC LIMIT 1",
+            (*prefix, video_id),
+        ).fetchone()
+        if row:
+            return row
+    if video_url:
+        row = conn.execute(
+            base + "video_url=? ORDER BY video_index ASC LIMIT 1",
+            (*prefix, video_url),
+        ).fetchone()
+        if row:
+            return row
+    if title:
+        normalized_title = normalize_fyp_video_identity_text(title)
+        normalized_author = normalize_fyp_video_identity_text(author_handle)
+        row = conn.execute(
+            base
+            + "LOWER(TRIM(COALESCE(title, '')))=? "
+            + "AND LOWER(TRIM(COALESCE(author_handle, '')))=? "
+            + "ORDER BY video_index ASC LIMIT 1",
+            (*prefix, normalized_title, normalized_author),
+        ).fetchone()
+        if row:
+            return row
+    return None
+
+
+def normalize_fyp_video_identity_text(value):
+    return (value or "").strip().lower()
+
+
+def update_fyp_video_interactions(
+    conn,
+    platform,
+    account_id,
+    session_id,
+    video_index,
+    liked=None,
+    followed=None,
+    commented=None,
+):
+    """Best-effort update of interaction flags for one FYP video view row."""
+    try:
+        platform = require_platform(platform)
+        session_id = bounded_fyp_video_text(session_id, "session_id")
+        video_index = int(video_index or 0)
+        if not session_id or video_index <= 0:
+            raise ValueError("session_id and positive video_index are required")
+
+        updates = []
+        values = []
+        for field, value in (
+            ("liked", liked),
+            ("followed", followed),
+            ("commented", commented),
+        ):
+            if value is not None:
+                updates.append(f"{field}=?")
+                values.append(int(bool(value)))
+        if not updates:
+            return True
+
+        updates.append("updated_at=?")
+        values.append(datetime.now().isoformat())
+        values.extend([platform, str(account_id), session_id, video_index])
+        cur = conn.execute(
+            "UPDATE fyp_video_views SET "
+            + ", ".join(updates)
+            + " WHERE platform=? AND account_id=? AND session_id=? AND video_index=?",
+            values,
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    except Exception as exc:
+        print(f"[warn] fyp video interaction update skipped: {redact_runtime_text(exc)}")
+        return False
+
+
+def bounded_fyp_video_text(value, field):
+    if value is None:
+        return None
+    text = redact_runtime_text(str(value))
+    text = "".join(ch if ch >= " " or ch in "\n\t" else " " for ch in text)
+    text = re.sub(r"\s+", " ", text).strip()
+    if not text:
+        return None
+    limit = FYP_VIDEO_TEXT_LIMITS.get(field)
+    if limit and len(text) > limit:
+        return text[:limit]
+    return text
+
+
+def normalized_optional_float(value):
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def log_action(conn, platform, account_id, action, status, detail=""):
     platform = require_platform(platform)
     detail = redact_runtime_text(str(detail or ""))
@@ -306,6 +613,9 @@ def runtime_redactions():
         lowered = key.lower()
         if value and (
             "password" in lowered
+            or "api_key" in lowered
+            or "apikey" in lowered
+            or "authorization" in lowered
             or "secret" in lowered
             or "token" in lowered
             or "credential" in lowered

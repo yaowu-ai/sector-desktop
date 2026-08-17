@@ -821,7 +821,7 @@ def write_builtin_proxy_auth_extension(user_data_dir: Path, proxy: BuiltinProxy)
     extension_dir.mkdir(parents=True, exist_ok=True)
     manifest = {
         "manifest_version": 2,
-        "name": "Account Matrix Proxy Auth",
+        "name": "星域 Proxy Auth",
         "version": "1.0.0",
         "permissions": [
             "proxy",

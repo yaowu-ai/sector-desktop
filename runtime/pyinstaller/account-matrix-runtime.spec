@@ -14,6 +14,7 @@ if PATCHRIGHT_DRIVER_DIR.exists():
 
 LOCAL_HIDDENIMPORTS = [
     "actions",
+    "ai_comment",
     "bitbrowser",
     "gmail_setup",
     "human_mouse",

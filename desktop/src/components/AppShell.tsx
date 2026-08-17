@@ -105,7 +105,7 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
     <Layout className="app-shell">
       <Sider width={192} className="app-sider">
         <div className="app-brand">
-          <Typography.Title level={4}>Account Matrix</Typography.Title>
+          <Typography.Title level={4}>星域</Typography.Title>
           <Typography.Text type="secondary">PC 端养号 V1</Typography.Text>
         </div>
         <Menu

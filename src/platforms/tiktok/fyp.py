@@ -2,7 +2,7 @@
 import random
 
 from core.runtime import load_comments, log_action
-from platform_config import warmup_config
+from platform_config import ai_comment_config, warmup_config
 from platforms.tiktok.actions import fyp_browse
 
 
@@ -10,14 +10,21 @@ def build_fyp_plan(account, config):
     platform = account.get("platform", "tiktok")
     da = warmup_config(config, platform)
     cmt_cfg = da.get("comment", {}) or {}
+    video_capture_cfg = normalize_video_capture_config(da.get("video_capture"))
+    ai_comment_cfg = ai_comment_config(config)
     comment_enabled = bool(cmt_cfg.get("enabled"))
     comment_range = cmt_cfg.get("comments_per_session", [1, 2])
     comments_pool = load_comments(config, platform) if comment_enabled else []
-    comments_target = random.randint(*comment_range) if comments_pool else 0
+    ai_comment_enabled = bool(ai_comment_cfg.get("enabled"))
+    comments_target = (
+        random.randint(*comment_range)
+        if comment_enabled and (comments_pool or ai_comment_enabled)
+        else 0
+    )
     comment_skip_detail = ""
     if not comment_enabled:
         comment_skip_detail = "评论开关关闭（comment.enabled=false）"
-    elif not comments_pool:
+    elif not comments_pool and not ai_comment_enabled:
         comment_skip_detail = "评论池为空（comments.txt 无可用评论）"
     elif comments_target <= 0:
         comment_skip_detail = f"本次评论目标数为 0（comments_per_session={comment_range}）"
@@ -30,6 +37,18 @@ def build_fyp_plan(account, config):
         "comment_skip_detail": comment_skip_detail,
         "comment_prob": float(cmt_cfg.get("probability", 0.25)),
         "comment_min_videos": int(cmt_cfg.get("min_video_comments", 1000)),
+        "video_capture": video_capture_cfg,
+        "ai_comment": ai_comment_cfg,
+    }
+
+
+def normalize_video_capture_config(config):
+    config = config or {}
+    return {
+        "enabled": bool(config.get("enabled", True)),
+        "max_title_length": int(config.get("max_title_length", 300)),
+        "max_description_length": int(config.get("max_description_length", 600)),
+        "capture_timeout_ms": int(config.get("capture_timeout_ms", 800)),
     }
 
 
@@ -53,6 +72,12 @@ def run_tiktok_fyp(page, account, plan, conn):
         comments_pool=plan["comments_pool"],
         comment_prob=plan["comment_prob"],
         comment_min_videos=plan["comment_min_videos"],
+        conn=conn,
+        platform=platform,
+        account_id=account_id,
+        capture_video_info=bool((plan.get("video_capture") or {}).get("enabled", True)),
+        video_capture_config=plan.get("video_capture") or {},
+        ai_comment_config=plan.get("ai_comment") or {},
     )
     videos = result["videos"]
     likes = result["likes"]
@@ -85,7 +110,7 @@ def run_tiktok_fyp(page, account, plan, conn):
             "skip",
             plan.get("comment_skip_detail") or "评论目标数为 0，未执行评论",
         )
-    elif not plan["comments_pool"]:
+    elif not plan["comments_pool"] and not bool((plan.get("ai_comment") or {}).get("enabled")):
         log_action(conn, platform, account_id, "comment", "skip", "评论池为空（comments.txt 无可用评论）")
     if comments > 0:
         log_action(conn, platform, account_id, "comment", "ok", f"count={comments}")

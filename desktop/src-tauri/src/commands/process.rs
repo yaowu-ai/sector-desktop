@@ -14,7 +14,7 @@ use tauri::State;
 use crate::commands::bitbrowser::{auto_configure_chromium_executable, check_bitbrowser_api};
 use crate::commands::config::{
     ensure_account_ids_belong_to_platform, ensure_platform_capability, load_config,
-    normalize_platform, read_login_password_for_runtime,
+    normalize_platform, read_ai_comment_api_key_for_runtime, read_login_password_for_runtime,
 };
 use crate::paths::{normalize, project_paths, project_root, python_command_parts, ProjectPaths};
 use crate::security::redact_line;
@@ -22,6 +22,7 @@ use crate::state::{AppState, AuthInterventionState, BrowserPreviewState, RunStat
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
+const AI_COMMENT_API_KEY_ENV: &str = "AM_AI_COMMENT_API_KEY";
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -666,6 +667,12 @@ fn spawn_account_process(
             return Err(error);
         }
     };
+    let (ai_env_vars, ai_redactions) = ai_comment_env_for_runtime();
+    for (key, value) in ai_env_vars {
+        env_vars.insert(key, value);
+    }
+    let mut redactions = redactions;
+    redactions.extend(ai_redactions);
     env_vars.insert(
         "AM_TASK_TYPE".to_string(),
         runtime_task_type(&task_type).to_string(),
@@ -781,6 +788,25 @@ fn login_env_for_account(
     Ok((env_vars, vec![password]))
 }
 
+fn ai_comment_env_for_runtime() -> (HashMap<String, String>, Vec<String>) {
+    let Ok(config) = load_config() else {
+        return (HashMap::new(), Vec::new());
+    };
+    if !config.ai_comment_enabled() {
+        return (HashMap::new(), Vec::new());
+    }
+    let provider = config.ai_comment_provider().to_string();
+    let Ok(Some(api_key)) = read_ai_comment_api_key_for_runtime(Some(&provider)) else {
+        return (HashMap::new(), Vec::new());
+    };
+    if api_key.trim().is_empty() {
+        return (HashMap::new(), Vec::new());
+    }
+    let mut env_vars = HashMap::new();
+    env_vars.insert(AI_COMMENT_API_KEY_ENV.to_string(), api_key.clone());
+    (env_vars, vec![api_key])
+}
+
 fn sensitive_env_redactions(env_vars: &HashMap<String, String>) -> Vec<String> {
     env_vars
         .iter()
@@ -788,9 +814,12 @@ fn sensitive_env_redactions(env_vars: &HashMap<String, String>) -> Vec<String> {
             let key = key.to_ascii_lowercase();
             !value.is_empty()
                 && (key.contains("password")
+                    || key.contains("api_key")
+                    || key.contains("apikey")
                     || key.contains("secret")
                     || key.contains("token")
-                    || key.contains("credential"))
+                    || key.contains("credential")
+                    || key.contains("authorization"))
         })
         .map(|(_, value)| value.clone())
         .collect()
@@ -1795,27 +1824,27 @@ mod tests {
         ProjectPaths {
             runtime_mode: runtime_mode.to_string(),
             project_root: "E:/repo/account-matrix".to_string(),
-            config_path: "C:/Users/me/AppData/Roaming/Account Matrix/config/accounts.yaml"
+            config_path: "C:/Users/me/AppData/Roaming/星域/config/accounts.yaml"
                 .to_string(),
-            comments_path: "C:/Users/me/AppData/Roaming/Account Matrix/config/comments.txt"
+            comments_path: "C:/Users/me/AppData/Roaming/星域/config/comments.txt"
                 .to_string(),
             brand_comments_path:
-                "C:/Users/me/AppData/Roaming/Account Matrix/config/comments_brand.txt".to_string(),
-            data_dir: "C:/Users/me/AppData/Local/Account Matrix/data".to_string(),
-            logs_dir: "C:/Users/me/AppData/Local/Account Matrix/logs".to_string(),
-            actions_db_path: "C:/Users/me/AppData/Local/Account Matrix/data/actions.db".to_string(),
-            sessions_log_path: "C:/Users/me/AppData/Local/Account Matrix/data/sessions.log"
+                "C:/Users/me/AppData/Roaming/星域/config/comments_brand.txt".to_string(),
+            data_dir: "C:/Users/me/AppData/Local/星域/data".to_string(),
+            logs_dir: "C:/Users/me/AppData/Local/星域/logs".to_string(),
+            actions_db_path: "C:/Users/me/AppData/Local/星域/data/actions.db".to_string(),
+            sessions_log_path: "C:/Users/me/AppData/Local/星域/data/sessions.log"
                 .to_string(),
-            lock_file_path: "C:/Users/me/AppData/Local/Account Matrix/data/run.lock".to_string(),
+            lock_file_path: "C:/Users/me/AppData/Local/星域/data/run.lock".to_string(),
             src_dir: "E:/repo/account-matrix/src".to_string(),
             settings_path:
-                "C:/Users/me/AppData/Roaming/Account Matrix/settings/local-settings.json"
+                "C:/Users/me/AppData/Roaming/星域/settings/local-settings.json"
                     .to_string(),
             runtime_path:
-                "C:/Program Files/Account Matrix/resources/runtime/account-matrix-runtime.exe"
+                "C:/Program Files/星域/resources/runtime/account-matrix-runtime.exe"
                     .to_string(),
             runtime_manifest_path:
-                "C:/Program Files/Account Matrix/resources/runtime/runtime-manifest.json"
+                "C:/Program Files/星域/resources/runtime/runtime-manifest.json"
                     .to_string(),
             runtime_version: Some("0.1.0".to_string()),
             python_executable: "py".to_string(),

@@ -92,6 +92,44 @@ pub struct ActionLogRecord {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct FypVideoViewFilter {
+    platform: Option<String>,
+    account_id: Option<String>,
+    start_ts: Option<String>,
+    end_ts: Option<String>,
+    has_title: Option<bool>,
+    liked: Option<bool>,
+    commented: Option<bool>,
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FypVideoViewRecord {
+    id: i64,
+    platform: String,
+    account_id: String,
+    session_id: String,
+    video_index: i64,
+    video_id: String,
+    video_url: String,
+    author_handle: String,
+    author_name: String,
+    title: String,
+    description: String,
+    watch_seconds: Option<f64>,
+    liked: bool,
+    followed: bool,
+    commented: bool,
+    capture_status: String,
+    capture_error: String,
+    raw_source: String,
+    collected_at: String,
+    updated_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SchedulerJobRunFilter {
     platform: Option<String>,
     account_id: Option<String>,
@@ -423,6 +461,143 @@ pub fn query_action_logs(filter: ActionLogFilter) -> Result<Vec<ActionLogRecord>
         result.push(row.map_err(|err| format!("failed to read action_log row: {}", err))?);
     }
     Ok(result)
+}
+
+#[tauri::command]
+pub fn query_fyp_video_views(
+    filter: FypVideoViewFilter,
+) -> Result<Vec<FypVideoViewRecord>, String> {
+    let paths = project_paths()?;
+    let db_path = std::path::PathBuf::from(&paths.actions_db_path);
+    if !db_path.exists() {
+        return Ok(vec![]);
+    }
+
+    let conn = Connection::open(&db_path)
+        .map_err(|err| format!("failed to open {}: {}", paths.actions_db_path, err))?;
+    if !table_exists(&conn, "fyp_video_views")? {
+        return Ok(vec![]);
+    }
+
+    query_fyp_video_view_rows(&conn, &filter)
+}
+
+fn query_fyp_video_view_rows(
+    conn: &Connection,
+    filter: &FypVideoViewFilter,
+) -> Result<Vec<FypVideoViewRecord>, String> {
+    let platform = normalized_platform_filter(filter.platform.as_deref())?;
+    let account_id = optional_trim(filter.account_id.as_deref());
+    let start_ts = optional_trim(filter.start_ts.as_deref());
+    let end_ts = optional_trim(filter.end_ts.as_deref());
+    let has_title = filter.has_title;
+    let liked = filter.liked.map(|value| if value { 1_i64 } else { 0_i64 });
+    let commented = filter.commented.map(|value| if value { 1_i64 } else { 0_i64 });
+    let limit = normalized_limit(filter.limit);
+    let query_limit = limit.saturating_mul(5).clamp(1, 5000) as i64;
+
+    let platform_expr = platform_select_expr(&conn, "fyp_video_views", "account_id")?;
+    let query = format!(
+        "SELECT id, {}, account_id, session_id, video_index, video_id, video_url,
+                author_handle, author_name, title, description, watch_seconds,
+                liked, followed, commented, capture_status, capture_error, raw_source,
+                collected_at, updated_at
+             FROM fyp_video_views
+             WHERE (?1 IS NULL OR {} = ?1)
+               AND (?2 IS NULL OR account_id = ?2)
+               AND (?3 IS NULL OR collected_at >= ?3)
+               AND (?4 IS NULL OR collected_at <= ?4)
+               AND (?5 IS NULL OR (?5 = 1 AND COALESCE(NULLIF(TRIM(title), ''), NULL) IS NOT NULL)
+                    OR (?5 = 0 AND COALESCE(NULLIF(TRIM(title), ''), NULL) IS NULL))
+               AND (?6 IS NULL OR liked = ?6)
+               AND (?7 IS NULL OR commented = ?7)
+             ORDER BY collected_at DESC, id DESC
+             LIMIT ?8",
+        platform_expr, platform_expr,
+    );
+    let mut stmt = conn
+        .prepare(&query)
+        .map_err(|err| format!("failed to prepare fyp_video_views query: {}", err))?;
+    let rows = stmt
+        .query_map(
+            params![
+                platform,
+                account_id,
+                start_ts,
+                end_ts,
+                has_title.map(|value| if value { 1_i64 } else { 0_i64 }),
+                liked,
+                commented,
+                query_limit
+            ],
+            |row| {
+                Ok(FypVideoViewRecord {
+                    id: row.get(0)?,
+                    platform: row.get(1)?,
+                    account_id: row.get(2)?,
+                    session_id: row.get(3)?,
+                    video_index: row.get(4)?,
+                    video_id: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
+                    video_url: row.get::<_, Option<String>>(6)?.unwrap_or_default(),
+                    author_handle: row.get::<_, Option<String>>(7)?.unwrap_or_default(),
+                    author_name: row.get::<_, Option<String>>(8)?.unwrap_or_default(),
+                    title: row.get::<_, Option<String>>(9)?.unwrap_or_default(),
+                    description: row.get::<_, Option<String>>(10)?.unwrap_or_default(),
+                    watch_seconds: row.get(11)?,
+                    liked: row.get::<_, i64>(12)? != 0,
+                    followed: row.get::<_, i64>(13)? != 0,
+                    commented: row.get::<_, i64>(14)? != 0,
+                    capture_status: row.get(15)?,
+                    capture_error: redact_line(
+                        &row.get::<_, Option<String>>(16)?.unwrap_or_default(),
+                        &[],
+                    ),
+                    raw_source: row.get::<_, Option<String>>(17)?.unwrap_or_default(),
+                    collected_at: row.get(18)?,
+                    updated_at: row.get(19)?,
+                })
+            },
+        )
+        .map_err(|err| format!("failed to query fyp_video_views: {}", err))?;
+
+    let mut result = Vec::new();
+    let mut seen = HashSet::new();
+    for row in rows {
+        let record = row.map_err(|err| format!("failed to read fyp_video_views row: {}", err))?;
+        if seen.insert(fyp_video_view_dedupe_key(&record)) {
+            result.push(record);
+            if result.len() >= limit {
+                break;
+            }
+        }
+    }
+    Ok(result)
+}
+
+fn fyp_video_view_dedupe_key(row: &FypVideoViewRecord) -> String {
+    let scope = format!("{}|{}|{}", row.platform, row.account_id, row.session_id);
+    let video_id = normalized_dedupe_text(&row.video_id);
+    if !video_id.is_empty() {
+        return format!("{}|video_id|{}", scope, video_id);
+    }
+    let video_url = normalized_dedupe_text(&row.video_url);
+    if !video_url.is_empty() {
+        return format!("{}|video_url|{}", scope, video_url);
+    }
+    let title = normalized_dedupe_text(&row.title);
+    if !title.is_empty() {
+        return format!(
+            "{}|title|{}|{}",
+            scope,
+            normalized_dedupe_text(&row.author_handle),
+            title
+        );
+    }
+    format!("{}|row|{}", scope, row.id)
+}
+
+fn normalized_dedupe_text(value: &str) -> String {
+    value.trim().to_lowercase()
 }
 
 #[tauri::command]
@@ -1335,5 +1510,159 @@ mod tests {
         assert_eq!(parse_detail_count("videos=5 count=2", "videos"), 5);
         assert_eq!(parse_detail_count("videos=bad count=2", "videos"), 0);
         assert_eq!(parse_detail_count("", "videos"), 0);
+    }
+
+    #[test]
+    fn sqlite_helpers_query_fyp_video_views_with_filters() {
+        let conn = Connection::open_in_memory().expect("in-memory sqlite should open");
+        conn.execute_batch(
+            "
+            CREATE TABLE fyp_video_views (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                platform TEXT NOT NULL,
+                account_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                video_index INTEGER NOT NULL,
+                video_id TEXT,
+                video_url TEXT,
+                author_handle TEXT,
+                author_name TEXT,
+                title TEXT,
+                description TEXT,
+                watch_seconds REAL,
+                liked INTEGER DEFAULT 0,
+                followed INTEGER DEFAULT 0,
+                commented INTEGER DEFAULT 0,
+                capture_status TEXT NOT NULL,
+                capture_error TEXT,
+                raw_source TEXT,
+                collected_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            INSERT INTO fyp_video_views (
+                platform, account_id, session_id, video_index, video_id, video_url,
+                author_handle, title, description, watch_seconds, liked, followed,
+                commented, capture_status, raw_source, collected_at, updated_at
+            ) VALUES
+            ('tiktok', 'acct_1', 's1', 1, '100', 'https://www.tiktok.com/@a/video/100',
+             'a', 'First title', 'First desc', 4.0, 1, 0, 0, 'ok', 'dom_caption',
+             '2026-08-09T08:00:00', '2026-08-09T08:00:01'),
+            ('tiktok', 'acct_1', 's1', 2, '101', 'https://www.tiktok.com/@a/video/101',
+             'a', '', 'No title desc', 6.0, 0, 0, 1, 'partial', 'meta_title',
+             '2026-08-09T08:01:00', '2026-08-09T08:01:01'),
+            ('instagram', 'ig_1', 's2', 1, '200', '',
+             'ig', 'Other platform', '', 3.0, 1, 0, 1, 'ok', 'dom_caption',
+             '2026-08-09T08:02:00', '2026-08-09T08:02:01');
+            ",
+        )
+        .expect("test schema should be created");
+
+        let rows = query_fyp_video_view_rows(
+            &conn,
+            &FypVideoViewFilter {
+                platform: Some("tiktok".to_string()),
+                account_id: Some("acct_1".to_string()),
+                start_ts: None,
+                end_ts: None,
+                has_title: Some(true),
+                liked: Some(true),
+                commented: None,
+                limit: Some(50),
+            },
+        )
+        .expect("fyp video rows should query");
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].platform, "tiktok");
+        assert_eq!(rows[0].account_id, "acct_1");
+        assert_eq!(rows[0].video_id, "100");
+        assert_eq!(rows[0].title, "First title");
+        assert!(rows[0].liked);
+        assert!(!rows[0].commented);
+
+        let no_title_rows = query_fyp_video_view_rows(
+            &conn,
+            &FypVideoViewFilter {
+                platform: Some("tiktok".to_string()),
+                account_id: Some("acct_1".to_string()),
+                start_ts: None,
+                end_ts: None,
+                has_title: Some(false),
+                liked: None,
+                commented: Some(true),
+                limit: Some(50),
+            },
+        )
+        .expect("fyp video rows should query");
+
+        assert_eq!(no_title_rows.len(), 1);
+        assert_eq!(no_title_rows[0].video_id, "101");
+        assert!(no_title_rows[0].commented);
+    }
+
+    #[test]
+    fn sqlite_helpers_dedupe_fyp_video_views_by_video_identity() {
+        let conn = Connection::open_in_memory().expect("in-memory sqlite should open");
+        conn.execute_batch(
+            "
+            CREATE TABLE fyp_video_views (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                platform TEXT NOT NULL,
+                account_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                video_index INTEGER NOT NULL,
+                video_id TEXT,
+                video_url TEXT,
+                author_handle TEXT,
+                author_name TEXT,
+                title TEXT,
+                description TEXT,
+                watch_seconds REAL,
+                liked INTEGER DEFAULT 0,
+                followed INTEGER DEFAULT 0,
+                commented INTEGER DEFAULT 0,
+                capture_status TEXT NOT NULL,
+                capture_error TEXT,
+                raw_source TEXT,
+                collected_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            INSERT INTO fyp_video_views (
+                platform, account_id, session_id, video_index, video_id, video_url,
+                author_handle, title, watch_seconds, liked, followed, commented,
+                capture_status, raw_source, collected_at, updated_at
+            ) VALUES
+            ('tiktok', 'acct_1', 's1', 1, '', '', '', '(2)Watch trending videos for you | TikTok',
+             4.0, 0, 0, 0, 'partial', 'meta_title', '2026-08-09T08:00:00', '2026-08-09T08:00:01'),
+            ('tiktok', 'acct_1', 's1', 2, '', '', '', '(2)Watch trending videos for you | TikTok',
+             6.0, 0, 0, 0, 'partial', 'meta_title', '2026-08-09T08:01:00', '2026-08-09T08:01:01'),
+            ('tiktok', 'acct_1', 's1', 3, '100', 'https://www.tiktok.com/@a/video/100',
+             'a', 'Stable id', 8.0, 0, 0, 0, 'ok', 'dom_caption',
+             '2026-08-09T08:02:00', '2026-08-09T08:02:01'),
+            ('tiktok', 'acct_1', 's1', 4, '100', 'https://www.tiktok.com/@a/video/100',
+             'a', 'Stable id', 8.0, 1, 0, 0, 'ok', 'dom_caption',
+             '2026-08-09T08:03:00', '2026-08-09T08:03:01');
+            ",
+        )
+        .expect("test schema should be created");
+
+        let rows = query_fyp_video_view_rows(
+            &conn,
+            &FypVideoViewFilter {
+                platform: Some("tiktok".to_string()),
+                account_id: Some("acct_1".to_string()),
+                start_ts: None,
+                end_ts: None,
+                has_title: Some(true),
+                liked: None,
+                commented: None,
+                limit: Some(50),
+            },
+        )
+        .expect("fyp video rows should query");
+
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].video_id, "100");
+        assert_eq!(rows[1].title, "(2)Watch trending videos for you | TikTok");
     }
 }

@@ -10,13 +10,16 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 use tauri::State;
 
-use crate::commands::config::{load_config, read_login_password_for_runtime};
+use crate::commands::config::{
+    load_config, read_ai_comment_api_key_for_runtime, read_login_password_for_runtime,
+};
 use crate::paths::{normalize, project_paths, project_root, python_command_parts, ProjectPaths};
 use crate::state::AppState;
 
 const SCHEDULER_HOST: &str = "127.0.0.1";
 const SCHEDULER_PORT: u16 = 9601;
 const SCHEDULER_LOGIN_CREDENTIALS_ENV: &str = "AM_SCHEDULER_LOGIN_CREDENTIALS";
+const AI_COMMENT_API_KEY_ENV: &str = "AM_AI_COMMENT_API_KEY";
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
@@ -172,6 +175,7 @@ pub fn start_scheduler(state: State<'_, AppState>) -> Result<SchedulerStartResul
     }
 
     let login_credentials = scheduler_login_credentials()?;
+    let ai_comment_api_key = scheduler_ai_comment_api_key();
     let (command, current_dir) = scheduler_command_for_paths(&paths)?;
     let mut command_builder = Command::new(&command[0]);
     command_builder
@@ -179,6 +183,7 @@ pub fn start_scheduler(state: State<'_, AppState>) -> Result<SchedulerStartResul
         .current_dir(&current_dir)
         .env("PYTHONUNBUFFERED", "1")
         .env(SCHEDULER_LOGIN_CREDENTIALS_ENV, login_credentials)
+        .envs(ai_comment_api_key)
         .env(
             "AM_AUTO_CLOSE_PROFILE",
             if paths.auto_close_profile { "1" } else { "0" },
@@ -207,6 +212,23 @@ pub fn start_scheduler(state: State<'_, AppState>) -> Result<SchedulerStartResul
         command,
         status: "starting".to_string(),
     })
+}
+
+fn scheduler_ai_comment_api_key() -> HashMap<String, String> {
+    let Ok(config) = load_config() else {
+        return HashMap::new();
+    };
+    if !config.ai_comment_enabled() {
+        return HashMap::new();
+    }
+    let provider = config.ai_comment_provider().to_string();
+    let Ok(Some(api_key)) = read_ai_comment_api_key_for_runtime(Some(&provider)) else {
+        return HashMap::new();
+    };
+    if api_key.trim().is_empty() {
+        return HashMap::new();
+    }
+    HashMap::from([(AI_COMMENT_API_KEY_ENV.to_string(), api_key)])
 }
 
 fn scheduler_login_credentials() -> Result<String, String> {
@@ -844,12 +866,12 @@ mod tests {
     #[test]
     fn compares_normalized_config_paths() {
         assert!(same_path(
-            "C:\\Account Matrix\\config\\accounts.yaml",
-            "C:/Account Matrix/config/accounts.yaml"
+            "C:\\星域\\config\\accounts.yaml",
+            "C:/星域/config/accounts.yaml"
         ));
         assert!(!same_path(
-            "C:/Account Matrix/config/accounts.yaml",
-            "D:/Account Matrix/config/accounts.yaml"
+            "C:/星域/config/accounts.yaml",
+            "D:/星域/config/accounts.yaml"
         ));
     }
 }

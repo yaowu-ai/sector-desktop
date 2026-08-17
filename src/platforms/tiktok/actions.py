@@ -1,8 +1,12 @@
 """TikTok actions library."""
 import random
 import time
+import uuid
 
+from ai_comment import generate_ai_comment, has_video_context, read_api_key_from_env
+from core.runtime import log_action, record_fyp_video_view, update_fyp_video_interactions
 from human_mouse import MouseState, human_click_locator
+from platforms.tiktok.video_info import capture_active_video_info
 
 LIKE_BUTTON_SELECTORS = (
     'button[aria-label*="Like" i]',
@@ -287,6 +291,12 @@ def fyp_browse(
     comment_prob=0.25,
     comment_min_videos=1000,
     progress_every=5,
+    conn=None,
+    platform="tiktok",
+    account_id=None,
+    capture_video_info=True,
+    video_capture_config=None,
+    ai_comment_config=None,
 ):
     """Browse the For You feed for approximately ``duration_minutes``."""
     page.goto("https://www.tiktok.com/foryou", timeout=60000)
@@ -305,19 +315,65 @@ def fyp_browse(
     comments_done = 0
     comment_attempts = 0
     comments_pool = comments_pool or []
+    video_capture_config = video_capture_config or {}
+    ai_comment_config = ai_comment_config or {}
+    ai_comment_enabled = bool(ai_comment_config.get("enabled"))
+    capture_enabled = bool(capture_video_info and conn is not None and account_id)
+    capture_session_id = uuid.uuid4().hex
+    capture_records = 0
+    capture_failures = 0
 
     while time.time() < end_time:
+        video_index = video_count + 1
+        stored_video_index = video_index
+        current_video_info = {}
         watch_time = random.choices(
             [2, 4, 6, 8, 12, 20],
             weights=[3, 4, 4, 3, 2, 1],
         )[0]
+
+        if capture_enabled:
+            try:
+                current_video_info = capture_active_video_info(
+                    page,
+                    max_title_length=int(video_capture_config.get("max_title_length", 300)),
+                    max_description_length=int(video_capture_config.get("max_description_length", 600)),
+                    capture_timeout_ms=int(video_capture_config.get("capture_timeout_ms", 800)),
+                )
+            except Exception as exc:
+                current_video_info = {
+                    "capture_status": "failed",
+                    "capture_error": str(exc),
+                    "raw_source": "failed",
+                }
+                capture_failures += 1
+            info = dict(current_video_info)
+            info.update(
+                {
+                    "session_id": capture_session_id,
+                    "video_index": video_index,
+                    "watch_seconds": watch_time,
+                }
+            )
+            recorded_video_index = record_fyp_video_view(conn, platform, account_id, info)
+            if recorded_video_index:
+                stored_video_index = recorded_video_index
+                capture_records += 1
+            else:
+                capture_failures += 1
+
         time.sleep(watch_time)
+
+        liked_current = False
+        followed_current = False
+        commented_current = False
 
         if random.random() < like_prob:
             like_attempts += 1
             liked, reason = try_like_with_detail(page, mouse_state)
             if liked:
                 likes_done += 1
+                liked_current = True
                 human_pause(0.3, 1.0)
             else:
                 like_failure_reasons[reason] = like_failure_reasons.get(reason, 0) + 1
@@ -326,18 +382,39 @@ def fyp_browse(
             follow_attempts += 1
             if try_follow(page, mouse_state):
                 follows_done += 1
+                followed_current = True
                 human_pause(0.5, 1.5)
 
         if (
             comments_done < comments_target
-            and comments_pool
+            and (comments_pool or ai_comment_enabled)
             and random.random() < comment_prob
         ):
-            text = random.choice(comments_pool)
             comment_attempts += 1
-            if try_comment(page, mouse_state, text, min_comments=comment_min_videos):
+            text, source_event = choose_comment_text(
+                comments_pool,
+                current_video_info,
+                ai_comment_config,
+                platform,
+            )
+            log_comment_source_event(conn, platform, account_id, source_event)
+            if text and try_comment(page, mouse_state, text, min_comments=comment_min_videos):
                 comments_done += 1
+                commented_current = True
                 human_pause(1.0, 2.5)
+
+        if capture_enabled and (liked_current or followed_current or commented_current):
+            if not update_fyp_video_interactions(
+                conn,
+                platform,
+                account_id,
+                capture_session_id,
+                stored_video_index,
+                liked=liked_current if liked_current else None,
+                followed=followed_current if followed_current else None,
+                commented=commented_current if commented_current else None,
+            ):
+                capture_failures += 1
 
         _scroll_to_next_video(page, viewport, mouse_state)
         human_pause(1, 3)
@@ -358,4 +435,91 @@ def fyp_browse(
         "comments": comments_done,
         "comment_attempts": comment_attempts,
         "comment_failures": max(0, comment_attempts - comments_done),
+        "video_capture": {
+            "enabled": capture_enabled,
+            "session_id": capture_session_id,
+            "records": capture_records,
+            "failures": capture_failures,
+        },
     }
+
+
+def choose_comment_text(comments_pool, video_info, ai_comment_config, platform="tiktok"):
+    ai_comment_config = ai_comment_config or {}
+    ai_enabled = bool(ai_comment_config.get("enabled"))
+    if not ai_enabled:
+        if comments_pool:
+            return random.choice(comments_pool), None
+        return "", None
+
+    context = ai_comment_context(video_info, platform)
+    if has_video_context(context):
+        result = generate_ai_comment(context, ai_comment_config, read_api_key_from_env)
+        if result.get("ok"):
+            return result["comment"], {
+                "status": "ok",
+                "detail": f"comment_source=ai latency_ms={int(result.get('latency_ms') or 0)}",
+            }
+        reason = result.get("reason") or "failed"
+        error = result.get("error") or ""
+        if reason == "unsafe_context":
+            return "", {
+                "status": "fail",
+                "detail": comment_source_detail("none", reason, error, fallback="none"),
+            }
+        if comments_pool:
+            return random.choice(comments_pool), {
+                "status": "fail",
+                "detail": comment_source_detail("pool", reason, error, fallback="pool"),
+            }
+        return "", {
+            "status": "fail",
+            "detail": comment_source_detail("none", reason, error, fallback="none"),
+        }
+
+    if comments_pool:
+        return random.choice(comments_pool), {
+            "status": "fail",
+            "detail": comment_source_detail("pool", "missing_context", fallback="pool"),
+        }
+    return "", {
+        "status": "fail",
+        "detail": comment_source_detail("none", "missing_context", fallback="none"),
+    }
+
+
+def ai_comment_context(video_info, platform):
+    video_info = video_info or {}
+    return {
+        "platform": platform,
+        "title": video_info.get("title") or "",
+        "description": video_info.get("description") or "",
+    }
+
+
+def comment_source_detail(source, reason, error="", fallback="pool"):
+    detail = f"comment_source={source} reason={safe_log_token(reason)} fallback={fallback}"
+    if error:
+        detail = f"{detail} error={safe_log_message(error)}"
+    return detail
+
+
+def safe_log_token(value):
+    return "_".join(str(value or "unknown").strip().split())[:80] or "unknown"
+
+
+def safe_log_message(value):
+    return " ".join(str(value or "").split())[:300]
+
+
+def log_comment_source_event(conn, platform, account_id, event):
+    if not event or conn is None or not account_id:
+        return
+    log_action(
+        conn,
+        platform,
+        account_id,
+        "comment_ai",
+        event.get("status") or "fail",
+        event.get("detail") or "",
+    )

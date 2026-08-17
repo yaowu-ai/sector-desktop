@@ -141,7 +141,7 @@ pub fn test_notification(payload: NotifySettingsPayload) -> Result<NotifyTestRes
         ("AM_NOTIFY_TYPE".to_string(), notify_type.to_string()),
         (
             "AM_NOTIFY_TITLE".to_string(),
-            "Account Matrix notification test".to_string(),
+            "星域 notification test".to_string(),
         ),
         (
             "AM_NOTIFY_MESSAGE".to_string(),

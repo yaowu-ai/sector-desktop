@@ -485,6 +485,7 @@ function classifySessionLogSeverity(value: string): SessionLogSeverity {
     /\|\s*ok\s*($|\|)/i.test(value) ||
     normalized.includes(' ok') ||
     normalized.includes('completed') ||
+    normalized.includes('batch end | 星域 bot') ||
     normalized.includes('batch end | account matrix bot')
   ) {
     return 'success'
