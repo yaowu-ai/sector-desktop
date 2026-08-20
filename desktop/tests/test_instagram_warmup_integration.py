@@ -16,6 +16,7 @@ if str(SRC) not in sys.path:
 
 from core import runtime
 from platforms.instagram_runner import bridge
+from platforms.instagram_runner import cli as instagram_cli
 from platforms.instagram_runner import runner as instagram_runner
 
 
@@ -190,6 +191,105 @@ class InstagramWarmupIntegrationTests(unittest.TestCase):
         self.assertEqual(fake_browser_session.calls[0]["profile_id"], "profile_1")
         self.assertEqual(fake_browser_session.calls[0]["bitbrowser"], fake_client)
         self.assertEqual(fake_browser_session.calls[0]["account_id"], "acct_1")
+
+    def test_schedule_runtime_loads_only_scheduled_instagram_accounts(self):
+        self.config_path.write_text(
+            """
+bitbrowser:
+  api_url: http://127.0.0.1:54346
+platforms:
+  instagram:
+    warmup:
+      duration: 7
+      sessions_per_day: 2-2
+accounts:
+  - id: insta_1
+    platform: instagram
+    enabled: true
+    scheduled: true
+    bitbrowser_profile_id: profile_1
+  - id: insta_2
+    platform: instagram
+    enabled: true
+    scheduled: false
+    bitbrowser_profile_id: profile_2
+  - id: tiktok_1
+    platform: tiktok
+    enabled: true
+    scheduled: true
+    bitbrowser_profile_id: profile_3
+""".strip()
+            + "\n",
+            encoding="utf-8",
+        )
+        runtime.configure_runtime(self.config_path)
+
+        with patch.object(instagram_cli, "provider_for_account", return_value=FakeProvider()):
+            _config, account_args, sessions_range, glob = instagram_cli.load_schedule_runtime(
+                types.SimpleNamespace(account=None, schedule=True, loop=False, once=False, dry_run=False)
+            )
+
+        self.assertEqual([account_id for _profile, account_id, _args in account_args], ["insta_1"])
+        self.assertEqual(account_args[0][0], "profile_1")
+        self.assertEqual(sessions_range, (2, 2))
+        self.assertEqual(glob.duration, 7)
+
+    def test_schedule_state_save_mirrors_instagram_events_to_desktop_history(self):
+        modules = bridge.load_ins_modules()
+        state_path = self.temp_dir / "data" / "ins" / "schedule_state.json"
+        modules.schedule_state.save(
+            {
+                "version": 1,
+                "day": "2026-08-20",
+                "events": [
+                    {
+                        "id": "insta_1@2026-08-20T09:00",
+                        "account_id": "insta_1",
+                        "at": "2026-08-20T09:00",
+                        "status": "pending",
+                    },
+                    {
+                        "id": "insta_1@2026-08-20T12:00",
+                        "account_id": "insta_1",
+                        "at": "2026-08-20T12:00",
+                        "status": "done",
+                        "detail": "likes=1 reels=2",
+                    },
+                ],
+            },
+            state_path,
+        )
+
+        conn = sqlite3.connect(runtime.LOG_DB)
+        try:
+            rows = conn.execute(
+                "SELECT job_id, platform, account_id, scheduled_run, status, detail "
+                "FROM scheduler_job_runs ORDER BY scheduled_run"
+            ).fetchall()
+        finally:
+            conn.close()
+
+        self.assertEqual(
+            rows,
+            [
+                (
+                    "ins_schedule::insta_1@2026-08-20T09:00",
+                    "instagram",
+                    "insta_1",
+                    "2026-08-20T09:00",
+                    "pending",
+                    None,
+                ),
+                (
+                    "ins_schedule::insta_1@2026-08-20T12:00",
+                    "instagram",
+                    "insta_1",
+                    "2026-08-20T12:00",
+                    "success",
+                    "likes=1 reels=2",
+                ),
+            ],
+        )
 
     def test_run_session_reports_risk_block_as_skip(self):
         provider = FakeProvider()

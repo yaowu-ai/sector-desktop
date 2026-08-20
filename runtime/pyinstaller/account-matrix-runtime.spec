@@ -6,6 +6,7 @@ import patchright
 
 ROOT = Path(SPECPATH).resolve().parents[1]
 SRC = ROOT / "src"
+INS_SRC = ROOT.parent / "account-matrix-ins" / "src"
 PATCHRIGHT_DIR = Path(patchright.__file__).resolve().parent
 PATCHRIGHT_DRIVER_DIR = PATCHRIGHT_DIR / "driver"
 PATCHRIGHT_DATAS = []
@@ -33,12 +34,13 @@ LOCAL_HIDDENIMPORTS = [
 
 a = Analysis(
     [str(SRC / "runtime_cli.py")],
-    pathex=[str(SRC)],
+    pathex=[str(SRC), str(INS_SRC)] if INS_SRC.exists() else [str(SRC)],
     binaries=[],
     datas=PATCHRIGHT_DATAS,
     hiddenimports=LOCAL_HIDDENIMPORTS
     + collect_submodules("core")
     + collect_submodules("platforms")
+    + (collect_submodules("ins") if INS_SRC.exists() else [])
     + collect_submodules("patchright")
     + [
         "apscheduler.schedulers.asyncio",

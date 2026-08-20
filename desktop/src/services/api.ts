@@ -409,20 +409,20 @@ export function runTikTokRegisterBatch(accountIds: string[]) {
   return invoke<ProcessStartResult>('run_tiktok_register_batch', { accountIds }).then(notifyProcessStarted)
 }
 
-export function startScheduler() {
-  return invoke<SchedulerStartResult>('start_scheduler')
+export function startScheduler(platform: Platform = 'tiktok') {
+  return invoke<SchedulerStartResult>('start_scheduler', { platform })
 }
 
-export function stopScheduler() {
-  return invoke<StopResult>('stop_scheduler')
+export function stopScheduler(platform: Platform = 'tiktok') {
+  return invoke<StopResult>('stop_scheduler', { platform })
 }
 
-export function getSchedulerProcessStatus() {
-  return invoke<SchedulerProcessStatus>('get_scheduler_process_status')
+export function getSchedulerProcessStatus(platform: Platform = 'tiktok') {
+  return invoke<SchedulerProcessStatus>('get_scheduler_process_status', { platform })
 }
 
-export function getSchedulerHealth() {
-  return invoke<SchedulerHealth>('get_scheduler_health')
+export function getSchedulerHealth(platform: Platform = 'tiktok') {
+  return invoke<SchedulerHealth>('get_scheduler_health', { platform })
 }
 
 export function clearRunLock() {

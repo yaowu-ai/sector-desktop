@@ -24,11 +24,18 @@ class InsModules:
     status: Any
     runtime_control: Any
     humanize: Any
+    schedule: Any
+    schedule_state: Any
     browser_actions: Any
     browser_session: Any
 
 
 def ensure_ins_source_on_path() -> None:
+    try:
+        import ins  # noqa: F401
+        return
+    except ImportError:
+        pass
     if not INS_SRC_DIR.exists():
         raise RuntimeError(
             "account-matrix-ins/src is missing; Instagram runner bridge cannot load"
@@ -91,6 +98,101 @@ def _patch_runtime_control_module(runtime_control) -> None:
     runtime_control.DEFAULT_STOP_PATH = runtime.STOP_AFTER_CURRENT_FILE
 
 
+def _patch_schedule_state_module(schedule_state) -> None:
+    schedule_state.DEFAULT_STATE_PATH = runtime.DATA_DIR / "ins" / "schedule_state.json"
+    schedule_state.DEFAULT_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    original_save = getattr(
+        schedule_state, "_account_matrix_original_save", schedule_state.save
+    )
+    schedule_state._account_matrix_original_save = original_save
+
+    def save(state, path=None):
+        original_save(state, path)
+        _mirror_schedule_events_to_runtime_db(state)
+
+    schedule_state.save = save
+
+
+def _mirror_schedule_events_to_runtime_db(state: Mapping[str, Any] | None) -> None:
+    if not isinstance(state, Mapping):
+        return
+    events = state.get("events")
+    if not isinstance(events, list):
+        return
+    try:
+        conn = runtime.init_db()
+    except Exception as exc:
+        print(f"[warn] Instagram schedule DB mirror skipped: {runtime.redact_runtime_text(exc)}")
+        return
+    try:
+        now = datetime.now().isoformat()
+        for event in events:
+            if not isinstance(event, Mapping):
+                continue
+            raw_id = str(event.get("id") or "").strip()
+            account_id = str(event.get("account_id") or "").strip()
+            scheduled_run = str(event.get("at") or "").strip()
+            if not raw_id or not account_id:
+                continue
+            job_id = f"ins_schedule::{raw_id}"
+            conn.execute(
+                "INSERT OR IGNORE INTO scheduler_job_runs "
+                "(job_id, platform, account_id, scheduled_run, status, created_at) "
+                "VALUES (?,?,?,?,?,?)",
+                (job_id, "instagram", account_id, scheduled_run, "pending", now),
+            )
+            status = str(event.get("status") or "pending")
+            detail = runtime.redact_runtime_text(str(event.get("detail") or ""))
+            if status == "pending":
+                conn.execute(
+                    "UPDATE scheduler_job_runs "
+                    "SET platform=?, account_id=?, scheduled_run=? "
+                    "WHERE job_id=? AND status='pending'",
+                    ("instagram", account_id, scheduled_run, job_id),
+                )
+            elif status == "running":
+                conn.execute(
+                    "UPDATE scheduler_job_runs "
+                    "SET platform=?, account_id=?, scheduled_run=?, status='running', "
+                    "started_at=COALESCE(started_at, ?), detail=NULL "
+                    "WHERE job_id=? AND status NOT IN ('success','failed','skipped')",
+                    (
+                        "instagram",
+                        account_id,
+                        scheduled_run,
+                        str(event.get("started_at") or now),
+                        job_id,
+                    ),
+                )
+            elif status in {"done", "error", "blocked", "skipped", "interrupted", "missed"}:
+                mapped_status = {
+                    "done": "success",
+                    "skipped": "skipped",
+                    "missed": "skipped",
+                }.get(status, "failed")
+                conn.execute(
+                    "UPDATE scheduler_job_runs "
+                    "SET platform=?, account_id=?, scheduled_run=?, status=?, "
+                    "started_at=COALESCE(started_at, ?), ended_at=COALESCE(ended_at, ?), detail=? "
+                    "WHERE job_id=? AND status NOT IN ('success','failed','skipped')",
+                    (
+                        "instagram",
+                        account_id,
+                        scheduled_run,
+                        mapped_status,
+                        str(event.get("started_at") or now),
+                        str(event.get("finished_at") or now),
+                        detail,
+                        job_id,
+                    ),
+                )
+        conn.commit()
+    except Exception as exc:
+        print(f"[warn] Instagram schedule DB mirror skipped: {runtime.redact_runtime_text(exc)}")
+    finally:
+        conn.close()
+
+
 def _patch_browser_actions_module(browser_actions, storage) -> None:
     browser_actions._COMMENT_TEMPLATES_PATH = storage.ROOT / "config" / "comments.txt"
 
@@ -110,11 +212,14 @@ def load_ins_modules() -> InsModules:
     import ins.status as status
     import ins.runtime_control as runtime_control
     import ins.humanize as humanize
+    import ins.schedule as schedule
+    import ins.schedule_state as schedule_state
     import ins.browser_actions as browser_actions
     import ins.browser_session as browser_session
 
     _patch_status_module(status)
     _patch_runtime_control_module(runtime_control)
+    _patch_schedule_state_module(schedule_state)
     _patch_browser_actions_module(browser_actions, storage)
     _patch_browser_session_module(browser_session)
 
@@ -123,6 +228,8 @@ def load_ins_modules() -> InsModules:
         status=status,
         runtime_control=runtime_control,
         humanize=humanize,
+        schedule=schedule,
+        schedule_state=schedule_state,
         browser_actions=browser_actions,
         browser_session=browser_session,
     )
@@ -156,7 +263,7 @@ def build_instagram_args(account: Mapping[str, Any], config: Mapping[str, Any] |
             continue
         for key, value in source.items():
             if key in defaults and value is not None:
-                defaults[key] = value
+                defaults[key] = _coerce_config_value(key, value)
 
     defaults["force_chaos"] = bool(
         warmup.get("force_chaos")
@@ -231,6 +338,29 @@ def _coerce_bool(value: Any, default: bool) -> bool:
     if text in {"0", "false", "no", "off"}:
         return False
     return default
+
+
+def _coerce_config_value(key: str, value: Any) -> Any:
+    if key in {"active_hours"} and isinstance(value, (list, tuple)):
+        ranges = []
+        for item in value:
+            if isinstance(item, (list, tuple)) and len(item) == 2:
+                ranges.append(f"{_format_range_part(item[0])}-{_format_range_part(item[1])}")
+        return ",".join(ranges) if ranges else value
+    if key in {"gap", "loop_interval", "sessions_per_day", "duration_jitter"}:
+        if isinstance(value, (list, tuple)) and len(value) == 2:
+            return f"{value[0]}-{value[1]}"
+    return value
+
+
+def _format_range_part(value: Any) -> str:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return str(value).strip()
+    if numeric.is_integer():
+        return str(int(numeric))
+    return str(numeric)
 
 
 def create_bitbrowser_client(config: Mapping[str, Any] | None):

@@ -14,7 +14,15 @@ import yaml
 
 RUNTIME_VERSION = "0.1.0"
 SCHEMA_VERSION = 1
-SUPPORTED_COMMANDS = ["run", "scheduler", "gmail", "diagnostic", "ai-comment", "version"]
+SUPPORTED_COMMANDS = [
+    "run",
+    "scheduler",
+    "instagram-scheduler",
+    "gmail",
+    "diagnostic",
+    "ai-comment",
+    "version",
+]
 
 
 def main(argv=None):
@@ -38,6 +46,17 @@ def build_parser():
     scheduler_parser.add_argument("--host", default="127.0.0.1", help="Scheduler host")
     scheduler_parser.add_argument("--port", type=int, default=9601, help="Scheduler port")
     scheduler_parser.set_defaults(func=cmd_scheduler)
+
+    instagram_scheduler_parser = subparsers.add_parser(
+        "instagram-scheduler", help="Start the Instagram warmup schedule loop"
+    )
+    add_config_and_data_args(instagram_scheduler_parser)
+    instagram_scheduler_parser.add_argument("--account", default=None)
+    instagram_scheduler_parser.add_argument("--schedule", action="store_true", default=True)
+    instagram_scheduler_parser.add_argument("--loop", action="store_true")
+    instagram_scheduler_parser.add_argument("--once", action="store_true")
+    instagram_scheduler_parser.add_argument("--dry-run", action="store_true")
+    instagram_scheduler_parser.set_defaults(func=cmd_instagram_scheduler)
 
     gmail_parser = subparsers.add_parser("gmail", help="Run Gmail setup flow")
     gmail_parser.add_argument("gmail_args", nargs=argparse.REMAINDER)
@@ -95,6 +114,28 @@ def cmd_scheduler(args):
         log_level="info",
     )
     return 0
+
+
+def cmd_instagram_scheduler(args):
+    cli_args = []
+    if args.config:
+        cli_args.extend(["--config", args.config])
+    if args.data_dir:
+        cli_args.extend(["--data-dir", args.data_dir])
+    if args.account:
+        cli_args.extend(["--account", args.account])
+    if args.loop:
+        cli_args.append("--loop")
+    elif args.once:
+        cli_args.append("--once")
+    else:
+        cli_args.append("--schedule")
+    if args.dry_run:
+        cli_args.append("--dry-run")
+
+    from platforms.instagram_runner.cli import main as instagram_main
+
+    return instagram_main(cli_args)
 
 
 def cmd_gmail(args):
