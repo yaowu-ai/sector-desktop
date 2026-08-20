@@ -3,6 +3,7 @@ import zhCN from 'antd/locale/zh_CN'
 import { useEffect, useMemo, useState } from 'react'
 
 import { PlatformProvider } from './PlatformContext'
+import { DesktopAuthGate, DesktopAuthProvider } from './DesktopAuthContext'
 import { AppShell } from '../components/AppShell'
 
 type ThemeMode = 'light' | 'dark'
@@ -39,9 +40,13 @@ export function App() {
       theme={themeConfig}
     >
       <AntdApp>
-        <PlatformProvider>
-          <AppShell themeMode={themeMode} onThemeModeChange={setThemeMode} />
-        </PlatformProvider>
+        <DesktopAuthProvider>
+          <DesktopAuthGate>
+            <PlatformProvider>
+              <AppShell themeMode={themeMode} onThemeModeChange={setThemeMode} />
+            </PlatformProvider>
+          </DesktopAuthGate>
+        </DesktopAuthProvider>
       </AntdApp>
     </ConfigProvider>
   )

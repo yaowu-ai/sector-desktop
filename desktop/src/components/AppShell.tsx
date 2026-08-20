@@ -1,11 +1,15 @@
 import { Alert, Button, Layout, Menu, Space, Switch, Tooltip, Typography, message } from 'antd'
-import { Moon, RefreshCw, Sun } from 'lucide-react'
+import type { MenuProps } from 'antd'
+import { LogOut, Moon, RefreshCw, Sun, UserRound } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import { appRoutes, routes } from '../app/routes'
+import { useDesktopAuth } from '../app/DesktopAuthContext'
+import { DESKTOP_USER_ROLES, filterRoutesByRole, normalizeDesktopUserRole } from '../app/routePermissions'
+import { appRoutes, routes, type AppRoute } from '../app/routes'
 import { PROCESS_STARTED_EVENT, checkBitbrowserApi, getCurrentRunStatus } from '../services/api'
+import { reportDesktopUsage, type DesktopSession } from '../services/desktopApi'
 import { runStatusLabel } from '../services/runStatus'
-import type { ApiStatus, ProcessStatus } from '../services/types'
+import type { ApiStatus, ProcessStartResult, ProcessStatus, RunStatus } from '../services/types'
 import { PlatformSelector } from './PlatformSelector'
 import { RouteScopeFrame } from './RouteScopeFrame'
 import { StatusTag, type StatusTone } from './StatusTag'
@@ -22,15 +26,26 @@ interface AppShellProps {
 
 export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
   const contentRef = useRef<HTMLElement>(null)
+  const desktopAuth = useDesktopAuth()
+  const startupReportedRef = useRef<string | null>(null)
+  const previousProcessStatusRef = useRef<ProcessStatus | null>(null)
+  const terminalUsageReportedRef = useRef<Set<string>>(new Set())
   const [activeKey, setActiveKey] = useState(getInitialRouteKey)
   const [bitbrowserStatus, setBitbrowserStatus] = useState<ApiStatus | null>(null)
   const [processStatus, setProcessStatus] = useState<ProcessStatus | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [shellError, setShellError] = useState<string | null>(null)
+  const userRole = normalizeDesktopUserRole(desktopAuth.session?.userRole)
+  const permittedRoutes = useMemo(() => filterRoutesByRole(routes, userRole), [userRole])
+  const permittedAppRoutes = useMemo(() => filterRoutesByRole(appRoutes, userRole), [userRole])
+  const defaultRouteKey = permittedRoutes[0]?.key ?? 'home'
+  const isTechnician = userRole === DESKTOP_USER_ROLES.technician
+  const siderMenuItems = useMemo(() => buildSiderMenuItems(permittedRoutes), [permittedRoutes])
+  const [openKeys, setOpenKeys] = useState<string[]>(() => getInitialOpenKeys())
 
   const activeRoute = useMemo(
-    () => appRoutes.find((route) => route.key === activeKey) ?? routes[0],
-    [activeKey],
+    () => permittedAppRoutes.find((route) => route.key === activeKey) ?? permittedRoutes[0] ?? routes[0],
+    [activeKey, permittedAppRoutes, permittedRoutes],
   )
 
   const refreshBitbrowser = useCallback(async () => {
@@ -39,11 +54,41 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
     return nextStatus
   }, [])
 
+  const reportTerminalUsageIfNeeded = useCallback(
+    (nextStatus: ProcessStatus) => {
+      const previous = previousProcessStatusRef.current
+      previousProcessStatusRef.current = nextStatus
+
+      if (!desktopAuth.session) return
+      if (!isTerminalUsageStatus(nextStatus.status)) return
+      if (previous?.status === nextStatus.status && previous?.endedAt === nextStatus.endedAt) return
+
+      const reportKey = buildProcessUsageKey(nextStatus)
+      if (terminalUsageReportedRef.current.has(reportKey)) return
+      terminalUsageReportedRef.current.add(reportKey)
+
+      const taskType = nextStatus.taskType || 'unknown'
+      const queuedCount = nextStatus.queuedAccounts.length
+      const completedCount = nextStatus.completedAccounts.length
+
+      void reportUsageMetric(desktopAuth.session, `desktop_task_${nextStatus.status}`, 1)
+      void reportUsageMetric(desktopAuth.session, `desktop_task_${nextStatus.status}.${taskType}`, 1)
+      if (queuedCount > 0) {
+        void reportUsageMetric(desktopAuth.session, 'desktop_task_account_queued', queuedCount)
+      }
+      if (completedCount > 0) {
+        void reportUsageMetric(desktopAuth.session, 'desktop_task_account_completed', completedCount)
+      }
+    },
+    [desktopAuth.session],
+  )
+
   const refreshTask = useCallback(async () => {
     const nextStatus = await getCurrentRunStatus()
     setProcessStatus(nextStatus)
+    reportTerminalUsageIfNeeded(nextStatus)
     return nextStatus
-  }, [])
+  }, [reportTerminalUsageIfNeeded])
 
   const refreshAll = useCallback(async () => {
     setRefreshing(true)
@@ -64,28 +109,55 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
   }, [activeKey])
 
   useEffect(() => {
+    if (permittedAppRoutes.some((route) => route.key === activeKey)) return
+    setActiveKey(defaultRouteKey)
+  }, [activeKey, defaultRouteKey, permittedAppRoutes])
+
+  useEffect(() => {
+    const groupKey = permittedRoutes.find((route) => route.key === activeKey)?.menuGroup?.key
+    if (!groupKey) return
+    setOpenKeys((current) => (current.includes(groupKey) ? current : [...current, groupKey]))
+  }, [activeKey, permittedRoutes])
+
+  useEffect(() => {
     contentRef.current?.scrollTo({ top: 0, left: 0 })
   }, [activeKey])
 
   useEffect(() => {
     const onHashChange = () => {
-      setActiveKey(getInitialRouteKey())
+      setActiveKey(getInitialRouteKey(permittedAppRoutes, defaultRouteKey))
     }
     window.addEventListener('hashchange', onHashChange)
     return () => window.removeEventListener('hashchange', onHashChange)
-  }, [])
+  }, [defaultRouteKey, permittedAppRoutes])
 
   useEffect(() => {
     void refreshAll()
   }, [])
 
   useEffect(() => {
-    const onProcessStarted = () => {
+    if (!desktopAuth.session) return
+    if (startupReportedRef.current === desktopAuth.session.accessToken) return
+
+    startupReportedRef.current = desktopAuth.session.accessToken
+    void reportUsageMetric(desktopAuth.session, 'desktop_app_launch', 1)
+    void reportUsageMetric(desktopAuth.session, 'desktop_active_device', 1)
+  }, [desktopAuth.session])
+
+  useEffect(() => {
+    const onProcessStarted = (event: Event) => {
+      const result = (event as CustomEvent<ProcessStartResult>).detail
+      if (desktopAuth.session) {
+        void reportUsageMetric(desktopAuth.session, 'desktop_task_started', 1)
+        if (result?.taskType) {
+          void reportUsageMetric(desktopAuth.session, `desktop_task_started.${result.taskType}`, 1)
+        }
+      }
       void refreshTask().catch(handleBackgroundError(setShellError))
     }
     window.addEventListener(PROCESS_STARTED_EVENT, onProcessStarted)
     return () => window.removeEventListener(PROCESS_STARTED_EVENT, onProcessStarted)
-  }, [refreshTask])
+  }, [desktopAuth.session, refreshTask])
 
   useEffect(() => {
     const id = window.setInterval(() => {
@@ -103,31 +175,58 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
 
   return (
     <Layout className="app-shell">
-      <Sider width={192} className="app-sider">
+      <Sider width={208} className="app-sider">
         <div className="app-brand">
           <Typography.Title level={4}>星域</Typography.Title>
-          <Typography.Text type="secondary">PC 端养号 V1</Typography.Text>
+          <Typography.Text type="secondary">自动化运营工具</Typography.Text>
         </div>
         <Menu
           mode="inline"
-          selectedKeys={routes.some((route) => route.key === activeKey) ? [activeKey] : []}
-          onClick={({ key }) => setActiveKey(key)}
-          items={routes.map((route) => {
-            const Icon = route.icon
-            return {
-              key: route.key,
-              icon: <Icon size={18} />,
-              label: route.label,
+          selectedKeys={permittedRoutes.some((route) => route.key === activeKey) ? [activeKey] : []}
+          openKeys={openKeys}
+          onOpenChange={setOpenKeys}
+          onClick={({ key }) => {
+            if (permittedRoutes.some((route) => route.key === key)) {
+              setActiveKey(key)
             }
-          })}
+          }}
+          items={siderMenuItems}
         />
+        <div className="app-sider-account">
+          <button className="app-sider-account-main" type="button" onClick={() => setActiveKey('profile')}>
+            <span className="app-sider-account-icon">
+              <UserRound size={16} />
+            </span>
+            <span className="app-sider-account-text">
+              <Typography.Text type="secondary">当前账号</Typography.Text>
+              <Typography.Text strong ellipsis>
+                {desktopAuth.session?.username ?? '产品账号'}
+              </Typography.Text>
+            </span>
+          </button>
+          <Tooltip title="退出登录">
+            <Button
+              className="app-sider-logout"
+              type="text"
+              icon={<LogOut size={16} />}
+              onClick={desktopAuth.logout}
+            />
+          </Tooltip>
+        </div>
       </Sider>
       <Layout>
         <Header className="app-header">
           <Space size={16} wrap>
-            <PlatformSelector onOpenSettings={() => setActiveKey('platforms')} />
+            <PlatformSelector
+              canOpenSettings={isTechnician}
+              onOpenSettings={() => {
+                if (permittedAppRoutes.some((route) => route.key === 'platforms')) {
+                  setActiveKey('platforms')
+                }
+              }}
+            />
             <Space size={12} wrap>
-              <Tooltip title={bitbrowserStatus?.error ?? bitbrowserStatus?.apiUrl ?? '尚未检测'}>
+              <Tooltip title={bitbrowserTooltip(bitbrowserStatus)}>
                 <span>
                   <StatusTag status={bitbrowserTone(bitbrowserStatus)} label={bitbrowserLabel(bitbrowserStatus)} />
                 </span>
@@ -161,6 +260,16 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
               onClose={() => setShellError(null)}
             />
           ) : null}
+          {desktopAuth.entitlementWarning ? (
+            <Alert
+              className="shell-alert"
+              type="warning"
+              showIcon
+              closable
+              message="授权状态暂时无法刷新"
+              description="当前网络或授权服务暂时不可用，已保留当前登录状态，系统会自动重试。"
+            />
+          ) : null}
           <RouteScopeFrame
             routeKey={activeRoute.key}
             routeLabel={activeRoute.label}
@@ -175,12 +284,57 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
   )
 }
 
-function getInitialRouteKey() {
+function getInitialRouteKey(permittedAppRoutes = appRoutes, defaultRouteKey = routes[0].key) {
   const hashKey = window.location.hash.replace(/^#/, '')
   if (hashKey === 'targets') {
-    return 'target-engagement'
+    return permittedAppRoutes.some((route) => route.key === 'target-engagement') ? 'target-engagement' : defaultRouteKey
   }
-  return appRoutes.some((route) => route.key === hashKey) ? hashKey : routes[0].key
+  return permittedAppRoutes.some((route) => route.key === hashKey) ? hashKey : defaultRouteKey
+}
+
+function getInitialOpenKeys() {
+  const activeKey = getInitialRouteKey()
+  const groupKey = routes.find((route) => route.key === activeKey)?.menuGroup?.key
+  return groupKey ? [groupKey] : []
+}
+
+function buildSiderMenuItems(permittedRoutes: AppRoute[]): MenuProps['items'] {
+  const items: NonNullable<MenuProps['items']> = []
+  const groupIndex = new Map<string, number>()
+
+  for (const route of permittedRoutes) {
+    const Icon = route.icon
+    const item = {
+      key: route.key,
+      icon: <Icon size={route.menuGroup ? 16 : 18} />,
+      label: route.label,
+    }
+
+    if (!route.menuGroup) {
+      items.push(item)
+      continue
+    }
+
+    const existingIndex = groupIndex.get(route.menuGroup.key)
+    if (existingIndex !== undefined) {
+      const group = items[existingIndex]
+      if (group && 'children' in group && Array.isArray(group.children)) {
+        group.children.push(item)
+      }
+      continue
+    }
+
+    const GroupIcon = route.menuGroup.icon
+    groupIndex.set(route.menuGroup.key, items.length)
+    items.push({
+      key: route.menuGroup.key,
+      icon: <GroupIcon size={18} />,
+      label: route.menuGroup.label,
+      children: [item],
+    })
+  }
+
+  return items
 }
 
 function bitbrowserTone(status: ApiStatus | null): StatusTone {
@@ -191,6 +345,34 @@ function bitbrowserTone(status: ApiStatus | null): StatusTone {
 function bitbrowserLabel(status: ApiStatus | null) {
   if (!status) return 'BitBrowser API 待检测'
   return status.available ? 'BitBrowser API 在线' : 'BitBrowser API 不可用'
+}
+
+function bitbrowserTooltip(status: ApiStatus | null) {
+  if (!status) return '尚未检测'
+  if (status.available) return status.apiUrl
+  return formatBitbrowserError(status.error) || `无法连接 BitBrowser API：${status.apiUrl}`
+}
+
+function formatBitbrowserError(error?: string) {
+  if (!error) return ''
+
+  const normalized = error.trim()
+  const matched = normalized.match(/failed to connect\s+([^:]+:\d+):\s*(.+)/i)
+  if (matched) {
+    return `无法连接 BitBrowser API（${matched[1]}）：${formatConnectionReason(matched[2])}`
+  }
+
+  if (/connection timed out/i.test(normalized)) return '连接 BitBrowser API 超时'
+  if (/connection refused/i.test(normalized)) return 'BitBrowser API 拒绝连接'
+  if (/failed to connect/i.test(normalized)) return '无法连接 BitBrowser API'
+  return normalized
+}
+
+function formatConnectionReason(reason: string) {
+  const normalized = reason.trim()
+  if (/connection timed out/i.test(normalized)) return '连接超时'
+  if (/connection refused/i.test(normalized)) return '连接被拒绝'
+  return normalized
 }
 
 function processTone(status: ProcessStatus | null): StatusTone {
@@ -210,5 +392,31 @@ function processLabel(status: ProcessStatus | null) {
 function handleBackgroundError(setShellError: (value: string) => void) {
   return (error: unknown) => {
     setShellError(error instanceof Error ? error.message : String(error))
+  }
+}
+
+function isTerminalUsageStatus(status: RunStatus) {
+  return status === 'completed' || status === 'partial_failed' || status === 'failed'
+}
+
+function buildProcessUsageKey(status: ProcessStatus) {
+  return [
+    status.processId ?? 'no-process',
+    status.taskType ?? 'unknown',
+    status.status,
+    status.startedAt ?? 'no-start',
+    status.endedAt ?? 'no-end',
+  ].join(':')
+}
+
+async function reportUsageMetric(session: DesktopSession, metricKey: string, metricValue: number) {
+  try {
+    await reportDesktopUsage(session, {
+      metricKey,
+      metricValue,
+      metricDate: new Date().toISOString().split('T')[0],
+    })
+  } catch (error) {
+    console.warn('[desktop usage] report failed', metricKey, error)
   }
 }

@@ -6,7 +6,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "node scripts/build.mjs",
+    "build:test": "node scripts/build.mjs test",
+    "build:prod": "node scripts/build.mjs production",
     "preview": "vite preview",
     "tauri": "tauri",
     "test:m14:frontend": "node tests/m14_frontend_checks.cjs",

@@ -213,6 +213,78 @@ pub struct FypCommentPayload {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct InstagramWarmupSettingsPayload {
+    pub platform: Option<String>,
+    #[serde(flatten)]
+    pub settings: InstagramWarmupSettings,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(rename_all = "camelCase", default)]
+pub struct InstagramWarmupSettings {
+    duration: i64,
+    like_prob: f64,
+    save_prob: f64,
+    comment_prob: f64,
+    active_hours: String,
+    sessions_per_day: String,
+    rest_day_prob: f64,
+    min_session_gap_minutes: i64,
+    one_per_window: bool,
+    duration_jitter: String,
+    max_likes_per_day: i64,
+    max_saves_per_day: i64,
+    max_follows_per_day: i64,
+    max_likes_per_session: i64,
+    max_comments_per_day: i64,
+    max_comments_per_session: i64,
+    block_cooldown_hours: i64,
+    round_skip_prob: f64,
+    require_proxy: bool,
+    no_like: bool,
+    no_save: bool,
+    no_comment: bool,
+    no_follow: bool,
+    no_stories: bool,
+    no_reels: bool,
+    no_explore: bool,
+}
+
+impl Default for InstagramWarmupSettings {
+    fn default() -> Self {
+        Self {
+            duration: 15,
+            like_prob: 0.06,
+            save_prob: 0.02,
+            comment_prob: 0.5,
+            active_hours: "7-9,12-14,18-23".to_string(),
+            sessions_per_day: "1-3".to_string(),
+            rest_day_prob: 0.15,
+            min_session_gap_minutes: 90,
+            one_per_window: false,
+            duration_jitter: "0.5-1.5".to_string(),
+            max_likes_per_day: 20,
+            max_saves_per_day: 10,
+            max_follows_per_day: 3,
+            max_likes_per_session: 0,
+            max_comments_per_day: 5,
+            max_comments_per_session: 1,
+            block_cooldown_hours: 24,
+            round_skip_prob: 0.15,
+            require_proxy: true,
+            no_like: false,
+            no_save: false,
+            no_comment: false,
+            no_follow: false,
+            no_stories: false,
+            no_reels: false,
+            no_explore: false,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TargetEngagementPayload {
     pub platform: Option<String>,
     pub enabled: bool,
@@ -397,6 +469,7 @@ pub struct ConfigSnapshot {
     config: Value,
     accounts: Vec<Account>,
     fyp_settings: Option<FypSettings>,
+    instagram_warmup: Option<InstagramWarmupSettings>,
     target_engagement: Option<TargetEngagementSettings>,
     scheduler_settings: SchedulerSettings,
     ai_comment: AiCommentSettings,
@@ -1140,6 +1213,44 @@ pub fn save_fyp_settings(payload: FypSettingsPayload) -> Result<SaveResult, Stri
 }
 
 #[tauri::command]
+pub fn save_instagram_warmup_settings(
+    payload: InstagramWarmupSettingsPayload,
+) -> Result<SaveResult, String> {
+    let platform = normalize_platform(payload.platform.as_deref().unwrap_or("instagram"), "platform")?;
+    ensure_platform_capability(&platform, "warmupTask")?;
+
+    let paths = project_paths()?;
+    let raw_yaml = fs::read_to_string(&paths.config_path)
+        .map_err(|err| format!("failed to read {}: {}", paths.config_path, err))?;
+    let mut config_value: Value = serde_yaml::from_str(&raw_yaml)
+        .map_err(|err| format!("failed to parse {}: {}", paths.config_path, err))?;
+
+    set_platform_section(
+        &mut config_value,
+        &platform,
+        "warmup",
+        instagram_warmup_payload_to_yaml_mapping(&payload)?,
+    )?;
+
+    let next_yaml = serde_yaml::to_string(&config_value)
+        .map_err(|err| format!("failed to serialize accounts.yaml: {}", err))?;
+    let validation = validate_raw_yaml(&next_yaml);
+    if !validation.valid {
+        return Err(format_validation_errors(&validation));
+    }
+
+    let backup = backup_config_file()?;
+    fs::write(&paths.config_path, next_yaml)
+        .map_err(|err| format!("failed to write {}: {}", paths.config_path, err))?;
+
+    Ok(SaveResult {
+        saved_path: paths.config_path,
+        backup_path: backup.backup_path,
+        validation,
+    })
+}
+
+#[tauri::command]
 pub fn save_target_engagement_settings(
     payload: TargetEngagementPayload,
 ) -> Result<SaveResult, String> {
@@ -1502,6 +1613,7 @@ fn config_snapshot(paths: ProjectPaths, raw_yaml: String) -> Result<ConfigSnapsh
         paths,
         accounts,
         fyp_settings: map_fyp_settings(resolve_tiktok_warmup(&config)),
+        instagram_warmup: map_instagram_warmup_settings(platform_section(&config_value, "instagram", "warmup")),
         target_engagement: map_target_engagement(resolve_tiktok_target_engagement(&config)),
         scheduler_settings: map_scheduler_settings(resolve_tiktok_scheduler(&config)),
         ai_comment: map_ai_comment_settings(config.ai_comment.as_ref()),
@@ -2469,10 +2581,28 @@ fn build_migration_preview(
         pending: platform_section(config, "tiktok", "comments").is_none(),
     });
     operations.push(MigrationOperation {
+        key: "instagram_warmup".to_string(),
+        label: "补齐 Instagram 养号配置".to_string(),
+        detail: "缺少 platforms.instagram.warmup 时会写入 Instagram 默认养号参数".to_string(),
+        pending: platform_section(config, "instagram", "warmup").is_none(),
+    });
+    operations.push(MigrationOperation {
+        key: "instagram_comments".to_string(),
+        label: "复用 Instagram 评论池".to_string(),
+        detail: "Instagram 默认复用 comments.txt / comments_brand.txt 评论素材".to_string(),
+        pending: platform_section(config, "instagram", "comments").is_none(),
+    });
+    operations.push(MigrationOperation {
         key: "sqlite_platform".to_string(),
         label: "迁移旧统计记录".to_string(),
         detail: "actions.db 中旧 action_log / target_* 记录会补 platform=tiktok".to_string(),
         pending: sqlite_migration_pending(&paths.actions_db_path)?,
+    });
+    operations.push(MigrationOperation {
+        key: "instagram_runtime_tables".to_string(),
+        label: "初始化 Instagram 运行数据表".to_string(),
+        detail: "actions.db 会创建 ins_warm_log / risk_cooldown 和索引，用于重启后继续读取冷却、日志和统计".to_string(),
+        pending: sqlite_instagram_runtime_schema_pending(&paths.actions_db_path)?,
     });
 
     let mut warnings = Vec::new();
@@ -2560,7 +2690,39 @@ fn apply_config_value_migration(config: &mut Value, paths: &ProjectPaths) -> Res
         set_platform_section(config, "tiktok", "comments", comments)?;
     }
 
+    if platform_section(config, "instagram", "warmup").is_none() {
+        set_platform_section(config, "instagram", "warmup", default_instagram_warmup_mapping()?)?;
+    }
+
+    if platform_section(config, "instagram", "comments").is_none() {
+        let mut comments = Mapping::new();
+        comments.insert(
+            Value::String("general_file".to_string()),
+            Value::String(
+                file_name(&paths.comments_path)
+                    .unwrap_or("comments.txt")
+                    .to_string(),
+            ),
+        );
+        comments.insert(
+            Value::String("target_file".to_string()),
+            Value::String(
+                file_name(&paths.brand_comments_path)
+                    .unwrap_or("comments_brand.txt")
+                    .to_string(),
+            ),
+        );
+        set_platform_section(config, "instagram", "comments", comments)?;
+    }
+
     Ok(())
+}
+
+fn default_instagram_warmup_mapping() -> Result<Mapping, String> {
+    instagram_warmup_payload_to_yaml_mapping(&InstagramWarmupSettingsPayload {
+        platform: Some("instagram".to_string()),
+        settings: InstagramWarmupSettings::default(),
+    })
 }
 
 fn legacy_daily_actions(config: &Value) -> Option<&Value> {
@@ -2650,6 +2812,21 @@ fn sqlite_migration_pending(actions_db_path: &str) -> Result<bool, String> {
     Ok(false)
 }
 
+fn sqlite_instagram_runtime_schema_pending(actions_db_path: &str) -> Result<bool, String> {
+    let db_path = PathBuf::from(actions_db_path);
+    if !db_path.exists() {
+        return Ok(false);
+    }
+    let conn = Connection::open(&db_path)
+        .map_err(|err| format!("failed to open {}: {}", actions_db_path, err))?;
+    if !sqlite_table_exists(&conn, "ins_warm_log")?
+        || !sqlite_table_exists(&conn, "risk_cooldown")?
+    {
+        return Ok(true);
+    }
+    Ok(!sqlite_column_exists(&conn, "ins_warm_log", "profile_id")?)
+}
+
 fn migrate_actions_db(actions_db_path: &str) -> Result<(), String> {
     let db_path = PathBuf::from(actions_db_path);
     if !db_path.exists() {
@@ -2676,6 +2853,42 @@ fn migrate_actions_db(actions_db_path: &str) -> Result<(), String> {
             [],
         )
         .map_err(|err| format!("failed to backfill {}.platform: {}", table, err))?;
+    }
+    migrate_instagram_runtime_schema(&conn)?;
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_ins_warm_log_profile_ts
+         ON ins_warm_log(profile_id, ts);
+         CREATE INDEX IF NOT EXISTS idx_ins_warm_log_action_profile_ts
+         ON ins_warm_log(action, profile_id, ts);",
+    )
+    .map_err(|err| format!("failed to create Instagram runtime indexes: {}", err))?;
+    Ok(())
+}
+
+fn migrate_instagram_runtime_schema(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS ins_warm_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            profile_id TEXT NOT NULL DEFAULT '',
+            ts TEXT NOT NULL DEFAULT (datetime('now')),
+            action TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'ok',
+            detail TEXT DEFAULT ''
+        );
+        CREATE TABLE IF NOT EXISTS risk_cooldown (
+            profile_id TEXT PRIMARY KEY,
+            until_ts TEXT NOT NULL,
+            reason TEXT DEFAULT ''
+        );",
+    )
+    .map_err(|err| format!("failed to create Instagram runtime tables: {}", err))?;
+    if !sqlite_column_exists(conn, "ins_warm_log", "profile_id")? {
+        conn.execute(
+            "ALTER TABLE ins_warm_log ADD COLUMN profile_id TEXT NOT NULL DEFAULT ''",
+            [],
+        )
+        .map_err(|err| format!("failed to add ins_warm_log.profile_id: {}", err))?;
     }
     Ok(())
 }
@@ -2729,6 +2942,7 @@ fn validate_raw_yaml(raw_yaml: &str) -> ValidationResult {
             if let Ok(config_value) = serde_yaml::from_str::<Value>(raw_yaml) {
                 validate_no_plaintext_login_passwords(&config_value, &mut validation.errors);
                 validate_no_plaintext_ai_comment_api_key(&config_value, &mut validation.errors);
+                validate_instagram_warmup_config(&config_value, &mut validation.errors);
                 validation.valid = validation.errors.is_empty();
             }
             validation
@@ -2798,6 +3012,99 @@ fn validate_no_plaintext_ai_comment_api_key(config: &Value, errors: &mut Vec<Val
                 "AI comment API Key must not be stored in accounts.yaml; save it to local credentials instead",
             ));
         }
+    }
+}
+
+fn validate_instagram_warmup_config(config: &Value, errors: &mut Vec<ValidationIssue>) {
+    let Some(warmup) = platform_section(config, "instagram", "warmup") else {
+        return;
+    };
+    let Some(mapping) = warmup.as_mapping() else {
+        errors.push(issue(
+            "platforms.instagram.warmup",
+            "Instagram warmup settings must be a mapping",
+        ));
+        return;
+    };
+
+    validate_raw_integer_min(
+        mapping,
+        "platforms.instagram.warmup.duration",
+        "duration",
+        1,
+        errors,
+    );
+    for (snake_key, camel_key) in [
+        ("like_prob", "likeProb"),
+        ("save_prob", "saveProb"),
+        ("comment_prob", "commentProb"),
+        ("rest_day_prob", "restDayProb"),
+        ("round_skip_prob", "roundSkipProb"),
+    ] {
+        validate_raw_probability(
+            mapping,
+            "platforms.instagram.warmup",
+            snake_key,
+            camel_key,
+            errors,
+        );
+    }
+    for (snake_key, camel_key) in [
+        ("active_hours", "activeHours"),
+        ("sessions_per_day", "sessionsPerDay"),
+        ("duration_jitter", "durationJitter"),
+    ] {
+        validate_raw_non_empty_string(
+            mapping,
+            "platforms.instagram.warmup",
+            snake_key,
+            camel_key,
+            errors,
+        );
+    }
+    for (snake_key, camel_key) in [
+        ("min_session_gap_minutes", "minSessionGapMinutes"),
+        ("max_likes_per_day", "maxLikesPerDay"),
+        ("max_saves_per_day", "maxSavesPerDay"),
+        ("max_follows_per_day", "maxFollowsPerDay"),
+        ("max_likes_per_session", "maxLikesPerSession"),
+        ("max_comments_per_day", "maxCommentsPerDay"),
+        ("max_comments_per_session", "maxCommentsPerSession"),
+        ("block_cooldown_hours", "blockCooldownHours"),
+    ] {
+        validate_raw_integer_min(
+            mapping,
+            &format!("platforms.instagram.warmup.{}", snake_key),
+            snake_key,
+            0,
+            errors,
+        );
+        validate_raw_integer_min(
+            mapping,
+            &format!("platforms.instagram.warmup.{}", camel_key),
+            camel_key,
+            0,
+            errors,
+        );
+    }
+    for (snake_key, camel_key) in [
+        ("one_per_window", "onePerWindow"),
+        ("require_proxy", "requireProxy"),
+        ("no_like", "noLike"),
+        ("no_save", "noSave"),
+        ("no_comment", "noComment"),
+        ("no_follow", "noFollow"),
+        ("no_stories", "noStories"),
+        ("no_reels", "noReels"),
+        ("no_explore", "noExplore"),
+    ] {
+        validate_raw_bool(
+            mapping,
+            "platforms.instagram.warmup",
+            snake_key,
+            camel_key,
+            errors,
+        );
     }
 }
 
@@ -3070,8 +3377,10 @@ fn validate_platforms(
             continue;
         }
 
-        if let Some(warmup) = config.warmup.as_ref() {
-            validate_daily_actions(&format!("{}.warmup", base), warmup, errors);
+        if platform != "instagram" {
+            if let Some(warmup) = config.warmup.as_ref() {
+                validate_daily_actions(&format!("{}.warmup", base), warmup, errors);
+            }
         }
 
         validate_target_accounts(
@@ -3351,6 +3660,121 @@ fn validate_optional_probability(
     if let Some(value) = value {
         if !(0.0..=1.0).contains(&value) {
             errors.push(issue(path, "probability must be between 0 and 1"));
+        }
+    }
+}
+
+fn validate_raw_probability(
+    mapping: &Mapping,
+    base_path: &str,
+    snake_key: &str,
+    camel_key: &str,
+    errors: &mut Vec<ValidationIssue>,
+) {
+    validate_raw_number(mapping, base_path, snake_key, Some((0.0, 1.0)), errors);
+    validate_raw_number(mapping, base_path, camel_key, Some((0.0, 1.0)), errors);
+}
+
+fn validate_raw_integer_min(
+    mapping: &Mapping,
+    path: &str,
+    key: &str,
+    min: i64,
+    errors: &mut Vec<ValidationIssue>,
+) {
+    let Some(value) = mapping.get(&Value::String(key.to_string())) else {
+        return;
+    };
+    let number = value
+        .as_i64()
+        .or_else(|| value.as_f64().and_then(|number| {
+            if number.fract() == 0.0 {
+                Some(number as i64)
+            } else {
+                None
+            }
+        }));
+    match number {
+        Some(number) if number >= min => {}
+        Some(_) => errors.push(issue(
+            path,
+            format!("value must be greater than or equal to {}", min),
+        )),
+        None => errors.push(issue(path, "value must be an integer")),
+    }
+}
+
+fn validate_raw_number(
+    mapping: &Mapping,
+    base_path: &str,
+    key: &str,
+    range: Option<(f64, f64)>,
+    errors: &mut Vec<ValidationIssue>,
+) {
+    let Some(value) = mapping.get(&Value::String(key.to_string())) else {
+        return;
+    };
+    let Some(number) = value
+        .as_f64()
+        .or_else(|| value.as_i64().map(|number| number as f64))
+    else {
+        errors.push(issue(
+            format!("{}.{}", base_path, key),
+            "value must be a number",
+        ));
+        return;
+    };
+    if let Some((min, max)) = range {
+        if number < min || number > max {
+            errors.push(issue(
+                format!("{}.{}", base_path, key),
+                format!("value must be between {} and {}", min, max),
+            ));
+        }
+    }
+}
+
+fn validate_raw_non_empty_string(
+    mapping: &Mapping,
+    base_path: &str,
+    snake_key: &str,
+    camel_key: &str,
+    errors: &mut Vec<ValidationIssue>,
+) {
+    for key in [snake_key, camel_key] {
+        let Some(value) = mapping.get(&Value::String(key.to_string())) else {
+            continue;
+        };
+        match value.as_str().map(str::trim) {
+            Some(value) if !value.is_empty() => {}
+            Some(_) => errors.push(issue(
+                format!("{}.{}", base_path, key),
+                "value must not be empty",
+            )),
+            None => errors.push(issue(
+                format!("{}.{}", base_path, key),
+                "value must be a string",
+            )),
+        }
+    }
+}
+
+fn validate_raw_bool(
+    mapping: &Mapping,
+    base_path: &str,
+    snake_key: &str,
+    camel_key: &str,
+    errors: &mut Vec<ValidationIssue>,
+) {
+    for key in [snake_key, camel_key] {
+        let Some(value) = mapping.get(&Value::String(key.to_string())) else {
+            continue;
+        };
+        if value.as_bool().is_none() {
+            errors.push(issue(
+                format!("{}.{}", base_path, key),
+                "value must be a boolean",
+            ));
         }
     }
 }
@@ -3690,6 +4114,89 @@ fn fyp_payload_to_yaml_mapping(payload: &FypSettingsPayload) -> Result<Mapping, 
         Value::Mapping(comment_mapping),
     );
     Ok(daily_actions_mapping)
+}
+
+fn instagram_warmup_payload_to_yaml_mapping(
+    payload: &InstagramWarmupSettingsPayload,
+) -> Result<Mapping, String> {
+    let settings = &payload.settings;
+    let mut mapping = Mapping::new();
+    insert_yaml_value(&mut mapping, "duration", settings.duration)?;
+    insert_yaml_value(&mut mapping, "like_prob", settings.like_prob)?;
+    insert_yaml_value(&mut mapping, "save_prob", settings.save_prob)?;
+    insert_yaml_value(&mut mapping, "comment_prob", settings.comment_prob)?;
+    insert_yaml_value(&mut mapping, "active_hours", settings.active_hours.clone())?;
+    insert_yaml_value(&mut mapping, "sessions_per_day", settings.sessions_per_day.clone())?;
+    insert_yaml_value(&mut mapping, "rest_day_prob", settings.rest_day_prob)?;
+    insert_yaml_value(
+        &mut mapping,
+        "min_session_gap_minutes",
+        settings.min_session_gap_minutes,
+    )?;
+    insert_yaml_value(&mut mapping, "one_per_window", settings.one_per_window)?;
+    insert_yaml_value(&mut mapping, "duration_jitter", settings.duration_jitter.clone())?;
+    insert_yaml_value(&mut mapping, "max_likes_per_day", settings.max_likes_per_day)?;
+    insert_yaml_value(&mut mapping, "max_saves_per_day", settings.max_saves_per_day)?;
+    insert_yaml_value(&mut mapping, "max_follows_per_day", settings.max_follows_per_day)?;
+    insert_yaml_value(&mut mapping, "max_likes_per_session", settings.max_likes_per_session)?;
+    insert_yaml_value(&mut mapping, "max_comments_per_day", settings.max_comments_per_day)?;
+    insert_yaml_value(
+        &mut mapping,
+        "max_comments_per_session",
+        settings.max_comments_per_session,
+    )?;
+    insert_yaml_value(&mut mapping, "block_cooldown_hours", settings.block_cooldown_hours)?;
+    insert_yaml_value(&mut mapping, "round_skip_prob", settings.round_skip_prob)?;
+    insert_yaml_value(&mut mapping, "require_proxy", settings.require_proxy)?;
+    insert_yaml_value(&mut mapping, "no_like", settings.no_like)?;
+    insert_yaml_value(&mut mapping, "no_save", settings.no_save)?;
+    insert_yaml_value(&mut mapping, "no_comment", settings.no_comment)?;
+    insert_yaml_value(&mut mapping, "no_follow", settings.no_follow)?;
+    insert_yaml_value(&mut mapping, "no_stories", settings.no_stories)?;
+    insert_yaml_value(&mut mapping, "no_reels", settings.no_reels)?;
+    insert_yaml_value(&mut mapping, "no_explore", settings.no_explore)?;
+    Ok(mapping)
+}
+
+fn insert_yaml_value<T: Serialize>(mapping: &mut Mapping, key: &str, value: T) -> Result<(), String> {
+    mapping.insert(
+        Value::String(key.to_string()),
+        serde_yaml::to_value(value).map_err(|err| format!("failed to serialize {}: {}", key, err))?,
+    );
+    Ok(())
+}
+
+fn yaml_mapping_value<'a>(mapping: &'a Mapping, snake_key: &str, camel_key: &str) -> Option<&'a Value> {
+    mapping
+        .get(&Value::String(snake_key.to_string()))
+        .or_else(|| mapping.get(&Value::String(camel_key.to_string())))
+}
+
+fn yaml_mapping_i64(mapping: &Mapping, snake_key: &str, camel_key: &str, fallback: i64) -> i64 {
+    yaml_mapping_value(mapping, snake_key, camel_key)
+        .and_then(|value| value.as_i64().or_else(|| value.as_f64().map(|number| number as i64)))
+        .unwrap_or(fallback)
+}
+
+fn yaml_mapping_f64(mapping: &Mapping, snake_key: &str, camel_key: &str, fallback: f64) -> f64 {
+    yaml_mapping_value(mapping, snake_key, camel_key)
+        .and_then(|value| value.as_f64().or_else(|| value.as_i64().map(|number| number as f64)))
+        .unwrap_or(fallback)
+}
+
+fn yaml_mapping_bool(mapping: &Mapping, snake_key: &str, camel_key: &str, fallback: bool) -> bool {
+    yaml_mapping_value(mapping, snake_key, camel_key)
+        .and_then(Value::as_bool)
+        .unwrap_or(fallback)
+}
+
+fn yaml_mapping_string(mapping: &Mapping, snake_key: &str, camel_key: &str, fallback: &str) -> String {
+    yaml_mapping_value(mapping, snake_key, camel_key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(fallback)
+        .to_string()
 }
 
 fn ai_comment_payload_to_yaml_value(payload: &AiCommentSettingsPayload) -> Result<Value, String> {
@@ -4078,6 +4585,69 @@ fn map_fyp_settings(daily: Option<&DailyActionsYaml>) -> Option<FypSettings> {
     })
 }
 
+fn map_instagram_warmup_settings(warmup: Option<&Value>) -> Option<InstagramWarmupSettings> {
+    let mapping = warmup?.as_mapping()?;
+    let default = InstagramWarmupSettings::default();
+    Some(InstagramWarmupSettings {
+        duration: yaml_mapping_i64(mapping, "duration", "duration", default.duration),
+        like_prob: yaml_mapping_f64(mapping, "like_prob", "likeProb", default.like_prob),
+        save_prob: yaml_mapping_f64(mapping, "save_prob", "saveProb", default.save_prob),
+        comment_prob: yaml_mapping_f64(mapping, "comment_prob", "commentProb", default.comment_prob),
+        active_hours: yaml_mapping_string(mapping, "active_hours", "activeHours", &default.active_hours),
+        sessions_per_day: yaml_mapping_string(mapping, "sessions_per_day", "sessionsPerDay", &default.sessions_per_day),
+        rest_day_prob: yaml_mapping_f64(mapping, "rest_day_prob", "restDayProb", default.rest_day_prob),
+        min_session_gap_minutes: yaml_mapping_i64(
+            mapping,
+            "min_session_gap_minutes",
+            "minSessionGapMinutes",
+            default.min_session_gap_minutes,
+        ),
+        one_per_window: yaml_mapping_bool(mapping, "one_per_window", "onePerWindow", default.one_per_window),
+        duration_jitter: yaml_mapping_string(mapping, "duration_jitter", "durationJitter", &default.duration_jitter),
+        max_likes_per_day: yaml_mapping_i64(mapping, "max_likes_per_day", "maxLikesPerDay", default.max_likes_per_day),
+        max_saves_per_day: yaml_mapping_i64(mapping, "max_saves_per_day", "maxSavesPerDay", default.max_saves_per_day),
+        max_follows_per_day: yaml_mapping_i64(
+            mapping,
+            "max_follows_per_day",
+            "maxFollowsPerDay",
+            default.max_follows_per_day,
+        ),
+        max_likes_per_session: yaml_mapping_i64(
+            mapping,
+            "max_likes_per_session",
+            "maxLikesPerSession",
+            default.max_likes_per_session,
+        ),
+        max_comments_per_day: yaml_mapping_i64(
+            mapping,
+            "max_comments_per_day",
+            "maxCommentsPerDay",
+            default.max_comments_per_day,
+        ),
+        max_comments_per_session: yaml_mapping_i64(
+            mapping,
+            "max_comments_per_session",
+            "maxCommentsPerSession",
+            default.max_comments_per_session,
+        ),
+        block_cooldown_hours: yaml_mapping_i64(
+            mapping,
+            "block_cooldown_hours",
+            "blockCooldownHours",
+            default.block_cooldown_hours,
+        ),
+        round_skip_prob: yaml_mapping_f64(mapping, "round_skip_prob", "roundSkipProb", default.round_skip_prob),
+        require_proxy: yaml_mapping_bool(mapping, "require_proxy", "requireProxy", default.require_proxy),
+        no_like: yaml_mapping_bool(mapping, "no_like", "noLike", default.no_like),
+        no_save: yaml_mapping_bool(mapping, "no_save", "noSave", default.no_save),
+        no_comment: yaml_mapping_bool(mapping, "no_comment", "noComment", default.no_comment),
+        no_follow: yaml_mapping_bool(mapping, "no_follow", "noFollow", default.no_follow),
+        no_stories: yaml_mapping_bool(mapping, "no_stories", "noStories", default.no_stories),
+        no_reels: yaml_mapping_bool(mapping, "no_reels", "noReels", default.no_reels),
+        no_explore: yaml_mapping_bool(mapping, "no_explore", "noExplore", default.no_explore),
+    })
+}
+
 fn map_ai_comment_settings(ai_comment: Option<&AiCommentYaml>) -> AiCommentSettings {
     AiCommentSettings {
         enabled: ai_comment
@@ -4304,6 +4874,8 @@ accounts:
         assert!(pending.contains(&"tiktok_warmup"));
         assert!(pending.contains(&"tiktok_target_engagement"));
         assert!(pending.contains(&"tiktok_comments"));
+        assert!(pending.contains(&"instagram_warmup"));
+        assert!(pending.contains(&"instagram_comments"));
 
         apply_config_value_migration(&mut config_value, &paths)
             .expect("config value migration should apply");
@@ -4325,10 +4897,118 @@ accounts:
                 .and_then(Value::as_str),
             Some("comments.txt")
         );
+        assert_eq!(
+            platform_section(&config_value, "instagram", "warmup")
+                .and_then(|warmup| warmup.get("like_prob"))
+                .and_then(Value::as_f64),
+            Some(0.06)
+        );
+        assert_eq!(
+            platform_section(&config_value, "instagram", "comments")
+                .and_then(|comments| comments.get("general_file"))
+                .and_then(Value::as_str),
+            Some("comments.txt")
+        );
+        assert_eq!(
+            platform_section(&config_value, "instagram", "comments")
+                .and_then(|comments| comments.get("target_file"))
+                .and_then(Value::as_str),
+            Some("comments_brand.txt")
+        );
 
         let next_yaml =
             serde_yaml::to_string(&config_value).expect("migrated yaml should serialize");
         assert!(validate_raw_yaml(&next_yaml).valid);
+    }
+
+    #[test]
+    fn validation_rejects_invalid_instagram_warmup_schema() {
+        let raw_yaml = format!(
+            "{}platforms:\n  instagram:\n    warmup:\n      duration: 0\n      like_prob: 2\n      require_proxy: sometimes\n      active_hours: ''\n      max_likes_per_day: 1.5\n",
+            minimal_yaml(valid_account_yaml())
+        );
+
+        let validation = validate_raw_yaml(&raw_yaml);
+        let paths = issue_paths(&validation);
+
+        assert!(!validation.valid);
+        assert!(paths.contains(&"platforms.instagram.warmup.duration".to_string()));
+        assert!(paths.contains(&"platforms.instagram.warmup.like_prob".to_string()));
+        assert!(paths.contains(&"platforms.instagram.warmup.require_proxy".to_string()));
+        assert!(paths.contains(&"platforms.instagram.warmup.active_hours".to_string()));
+        assert!(paths.contains(&"platforms.instagram.warmup.max_likes_per_day".to_string()));
+    }
+
+    #[test]
+    fn instagram_warmup_payload_uses_platform_snake_case_schema() {
+        let mut config_value: Value =
+            serde_yaml::from_str("accounts: []\n").expect("test yaml should parse");
+        let mut settings = InstagramWarmupSettings::default();
+        settings.duration = 8;
+        settings.like_prob = 0.11;
+        settings.max_likes_per_day = 12;
+        settings.require_proxy = false;
+
+        let mapping = instagram_warmup_payload_to_yaml_mapping(&InstagramWarmupSettingsPayload {
+            platform: Some("instagram".to_string()),
+            settings,
+        })
+        .expect("instagram warmup should serialize");
+
+        assert!(mapping.contains_key(&Value::String("like_prob".to_string())));
+        assert!(mapping.contains_key(&Value::String("max_likes_per_day".to_string())));
+        assert!(!mapping.contains_key(&Value::String("likeProb".to_string())));
+        assert!(!mapping.contains_key(&Value::String("maxLikesPerDay".to_string())));
+
+        set_platform_section(&mut config_value, "instagram", "warmup", mapping)
+            .expect("platform warmup section should be set");
+        let snapshot_settings = map_instagram_warmup_settings(platform_section(
+            &config_value,
+            "instagram",
+            "warmup",
+        ))
+        .expect("warmup should map back to desktop settings");
+
+        assert_eq!(snapshot_settings.duration, 8);
+        assert_eq!(snapshot_settings.like_prob, 0.11);
+        assert_eq!(snapshot_settings.max_likes_per_day, 12);
+        assert!(!snapshot_settings.require_proxy);
+    }
+
+    #[test]
+    fn actions_db_migration_initializes_instagram_runtime_schema() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock should be after epoch")
+            .as_nanos();
+        let db_path = std::env::temp_dir().join(format!(
+            "account-matrix-instagram-runtime-{}-{}.db",
+            std::process::id(),
+            unique
+        ));
+        let db_path_string = db_path.to_string_lossy().to_string();
+
+        Connection::open(&db_path).expect("test db should be created");
+        assert!(
+            sqlite_instagram_runtime_schema_pending(&db_path_string)
+                .expect("pending check should work")
+        );
+
+        migrate_actions_db(&db_path_string).expect("db migration should apply");
+        let conn = Connection::open(&db_path).expect("migrated db should open");
+
+        assert!(sqlite_table_exists(&conn, "ins_warm_log").expect("table check should work"));
+        assert!(sqlite_table_exists(&conn, "risk_cooldown").expect("table check should work"));
+        assert!(
+            sqlite_column_exists(&conn, "ins_warm_log", "profile_id")
+                .expect("column check should work")
+        );
+        assert!(
+            !sqlite_instagram_runtime_schema_pending(&db_path_string)
+                .expect("pending check should work")
+        );
+
+        let _ = fs::remove_file(db_path);
     }
 
     #[test]
@@ -4400,13 +5080,14 @@ accounts:
     }
 
     #[test]
-    fn backend_platform_capability_validation_rejects_reserved_execution() {
+    fn backend_platform_capability_validation_supports_instagram_warmup() {
         assert!(ensure_platform_capability("tiktok", "warmupTask").is_ok());
         assert!(ensure_platform_capability("instagram", "accountManagement").is_ok());
+        assert!(ensure_platform_capability("instagram", "warmupTask").is_ok());
 
-        let reserved = ensure_platform_capability("instagram", "warmupTask")
-            .expect_err("instagram warmup should be reserved");
-        assert!(reserved.contains("platform 'instagram' capability 'warmupTask' is 'reserved'"));
+        let reserved = ensure_platform_capability("instagram", "targetEngagement")
+            .expect_err("instagram target engagement should remain reserved");
+        assert!(reserved.contains("platform 'instagram' capability 'targetEngagement' is 'reserved'"));
 
         let invalid = ensure_platform_capability("unknown", "warmupTask")
             .expect_err("unknown platform should fail");
@@ -4663,6 +5344,7 @@ fn platform_capability_status(platform: &str, capability: &str) -> Option<&'stat
 
         ("instagram", "accountManagement")
         | ("instagram", "browserProfile")
+        | ("instagram", "warmupTask")
         | ("instagram", "scheduler")
         | ("instagram", "comments")
         | ("instagram", "records")
@@ -4683,8 +5365,7 @@ fn platform_capability_status(platform: &str, capability: &str) -> Option<&'stat
         | ("douyin", "stats")
         | ("douyin", "diagnostics") => Some("supported"),
 
-        ("instagram", "warmupTask")
-        | ("instagram", "targetEngagement")
+        ("instagram", "targetEngagement")
         | ("instagram", "gmailSetup")
         | ("whatsapp", "warmupTask")
         | ("douyin", "warmupTask")

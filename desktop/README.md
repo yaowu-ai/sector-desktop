@@ -67,6 +67,13 @@ pnpm dev
 desktop\src-tauri\target\release\bundle\nsis\Account Matrix_0.1.0_x64-setup.exe
 ```
 
+如果要分别打 test / production 安装包：
+
+```powershell
+.\desktop-build.ps1 -BuildMode test
+.\desktop-build.ps1 -BuildMode production
+```
+
 发布前至少运行：
 
 ```powershell

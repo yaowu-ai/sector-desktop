@@ -8,9 +8,10 @@ import { StatusTag, type StatusTone } from './StatusTag'
 
 interface PlatformSelectorProps {
   onOpenSettings: () => void
+  canOpenSettings?: boolean
 }
 
-export function PlatformSelector({ onOpenSettings }: PlatformSelectorProps) {
+export function PlatformSelector({ onOpenSettings, canOpenSettings = true }: PlatformSelectorProps) {
   const { currentPlatform, currentPlatformDefinition, setCurrentPlatform } = usePlatformContext()
 
   return (
@@ -46,9 +47,11 @@ export function PlatformSelector({ onOpenSettings }: PlatformSelectorProps) {
           />
         </span>
       </Tooltip>
-      <Button icon={<Settings2 size={16} />} onClick={onOpenSettings}>
-        更多平台
-      </Button>
+      {canOpenSettings ? (
+        <Button icon={<Settings2 size={16} />} onClick={onOpenSettings}>
+          更多平台
+        </Button>
+      ) : null}
     </Space>
   )
 }

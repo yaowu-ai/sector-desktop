@@ -32,6 +32,12 @@ const RESERVED_CAPABILITIES: Record<PlatformCapability, CapabilityStatus> = {
   diagnostics: 'supported',
 }
 
+const INSTAGRAM_CAPABILITIES: Record<PlatformCapability, CapabilityStatus> = {
+  ...SUPPORTED_CAPABILITIES,
+  targetEngagement: 'reserved',
+  gmailSetup: 'reserved',
+}
+
 const NOT_SUPPORTED_CAPABILITIES: Record<PlatformCapability, CapabilityStatus> = {
   accountManagement: 'not_supported',
   browserProfile: 'not_supported',
@@ -75,6 +81,37 @@ const TIKTOK_DEFAULT_CONFIG: PlatformDefinition['defaultConfig'] = {
   },
   scheduler: {
     firesPerDay: 3,
+  },
+}
+
+const INSTAGRAM_DEFAULT_CONFIG: PlatformDefinition['defaultConfig'] = {
+  instagramWarmup: {
+    duration: 15,
+    likeProb: 0.06,
+    saveProb: 0.02,
+    commentProb: 0.5,
+    activeHours: '7-9,12-14,18-23',
+    sessionsPerDay: '1-3',
+    restDayProb: 0.15,
+    minSessionGapMinutes: 90,
+    onePerWindow: false,
+    durationJitter: '0.5-1.5',
+    maxLikesPerDay: 20,
+    maxSavesPerDay: 10,
+    maxFollowsPerDay: 3,
+    maxLikesPerSession: 0,
+    maxCommentsPerDay: 5,
+    maxCommentsPerSession: 1,
+    blockCooldownHours: 24,
+    roundSkipProb: 0.15,
+    requireProxy: true,
+    noLike: false,
+    noSave: false,
+    noComment: false,
+    noFollow: false,
+    noStories: false,
+    noReels: false,
+    noExplore: false,
   },
 }
 
@@ -150,13 +187,14 @@ export const PLATFORM_REGISTRY: Record<Platform, PlatformDefinition> = {
     id: 'instagram',
     name: 'Instagram',
     localeName: 'Instagram',
-    status: 'reserved',
+    status: 'supported',
     enabled: true,
-    automaticExecutionSupported: false,
+    automaticExecutionSupported: true,
     accountPrefix: 'instagram_',
-    summary: '已预留账号、浏览器环境、任务、调度和统计入口，V1 不启动 Instagram 自动执行。',
-    capabilities: RESERVED_CAPABILITIES,
-    defaultConfig: {},
+    summary: 'Instagram 养号已接入桌面端，任务页可直接启动 Python runner。',
+    capabilities: INSTAGRAM_CAPABILITIES,
+    defaultConfig: INSTAGRAM_DEFAULT_CONFIG,
+    defaultTaskConfig: INSTAGRAM_DEFAULT_CONFIG.instagramWarmup,
   },
   whatsapp: {
     id: 'whatsapp',

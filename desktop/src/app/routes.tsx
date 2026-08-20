@@ -1,29 +1,41 @@
 import type { LucideIcon } from 'lucide-react'
 import {
   Activity,
+  BadgeCheck,
   BarChart3,
   CalendarClock,
   Chrome,
   ClipboardList,
+  CreditCard,
   FileText,
   Gauge,
+  Headphones,
   Home,
+  Info,
   Mail,
   MessageSquareText,
+  Bell,
   Settings,
   ShieldCheck,
   Target,
   UserCog,
+  UserRound,
 } from 'lucide-react'
 
 import { AccountPage } from '../pages/AccountPage'
+import { AboutPage } from '../pages/AboutPage'
 import { BrowserProfilePage } from '../pages/BrowserProfilePage'
 import { CommentPoolPage } from '../pages/CommentPoolPage'
+import { ContactSupportPage } from '../pages/ContactSupportPage'
 import { DiagnosticPage } from '../pages/DiagnosticPage'
 import { ExecutionRecordPage } from '../pages/ExecutionRecordPage'
 import { GmailSetupPage } from '../pages/GmailSetupPage'
 import { HomePage } from '../pages/HomePage'
+import { LicenseDevicePage } from '../pages/LicenseDevicePage'
+import { NotificationsPage } from '../pages/NotificationsPage'
 import { PlatformPage } from '../pages/PlatformPage'
+import { PlanCenterPage } from '../pages/PlanCenterPage'
+import { ProfilePage } from '../pages/ProfilePage'
 import { SchedulerPage } from '../pages/SchedulerPage'
 import { SessionLogPage } from '../pages/SessionLogPage'
 import { SettingsPage } from '../pages/SettingsPage'
@@ -33,6 +45,12 @@ import { TaskPage } from '../pages/TaskPage'
 import type { PageScope } from './pageScope'
 import type { PlatformCapability } from '../platforms/types'
 
+export interface AppMenuGroup {
+  key: string
+  label: string
+  icon: LucideIcon
+}
+
 export interface AppRoute {
   key: string
   label: string
@@ -40,6 +58,13 @@ export interface AppRoute {
   element: JSX.Element
   scope: PageScope
   capability?: PlatformCapability
+  menuGroup?: AppMenuGroup
+}
+
+export const personalCenterMenuGroup: AppMenuGroup = {
+  key: 'personal-center',
+  label: '个人中心',
+  icon: UserRound,
 }
 
 export const platformSettingsRoute: AppRoute = {
@@ -132,6 +157,47 @@ export const routes: AppRoute[] = [
     scope: 'current_platform',
     capability: 'gmailSetup',
   },
+  {
+    key: 'profile',
+    label: '账号信息',
+    icon: UserRound,
+    element: <ProfilePage />,
+    scope: 'system',
+    menuGroup: personalCenterMenuGroup,
+  },
+  {
+    key: 'plans',
+    label: '套餐中心',
+    icon: CreditCard,
+    element: <PlanCenterPage />,
+    scope: 'system',
+    menuGroup: personalCenterMenuGroup,
+  },
+  {
+    key: 'license-devices',
+    label: '授权与设备',
+    icon: BadgeCheck,
+    element: <LicenseDevicePage />,
+    scope: 'system',
+    menuGroup: personalCenterMenuGroup,
+  },
+  {
+    key: 'contact',
+    label: '联系客服',
+    icon: Headphones,
+    element: <ContactSupportPage />,
+    scope: 'system',
+    menuGroup: personalCenterMenuGroup,
+  },
+  {
+    key: 'notifications',
+    label: '消息通知',
+    icon: Bell,
+    element: <NotificationsPage />,
+    scope: 'system',
+    menuGroup: personalCenterMenuGroup,
+  },
+  { key: 'about', label: '关于软件', icon: Info, element: <AboutPage />, scope: 'system' },
   { key: 'diagnostic', label: '诊断工具', icon: Gauge, element: <DiagnosticPage />, scope: 'system' },
   { key: 'settings', label: '系统设置', icon: Settings, element: <SettingsPage />, scope: 'system' },
 ]

@@ -6,7 +6,7 @@ import sqlite3
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import yaml
@@ -193,10 +193,45 @@ def initialize_db_schema(conn):
         CREATE INDEX IF NOT EXISTS idx_fyp_video_views_video_id
         ON fyp_video_views(platform, video_id)
     """)
+    ensure_ins_runtime_schema(conn)
     ensure_platform_column(conn, "action_log")
     ensure_platform_column(conn, "target_engagements")
     ensure_platform_column(conn, "target_follows")
     conn.commit()
+
+
+def ensure_ins_runtime_schema(conn):
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS ins_warm_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            profile_id TEXT NOT NULL DEFAULT '',
+            ts TEXT NOT NULL DEFAULT (datetime('now')),
+            action TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'ok',
+            detail TEXT DEFAULT ''
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS risk_cooldown (
+            profile_id TEXT PRIMARY KEY,
+            until_ts TEXT NOT NULL,
+            reason TEXT DEFAULT ''
+        )
+    """)
+    columns = table_columns(conn, "ins_warm_log")
+    if "profile_id" not in columns:
+        conn.execute(
+            "ALTER TABLE ins_warm_log ADD COLUMN profile_id TEXT NOT NULL DEFAULT ''"
+        )
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_ins_warm_log_profile_ts
+        ON ins_warm_log(profile_id, ts)
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_ins_warm_log_action_profile_ts
+        ON ins_warm_log(action, profile_id, ts)
+    """)
 
 
 def table_columns(conn, table_name):
@@ -597,6 +632,102 @@ def log_action(conn, platform, account_id, action, status, detail=""):
         (platform, account_id, action, status, detail, datetime.now().isoformat()),
     )
     conn.commit()
+
+
+def log_ins_action(conn, session_id, action, status="ok", detail="", profile_id=""):
+    conn.execute(
+        "INSERT INTO ins_warm_log (session_id, profile_id, action, status, detail) "
+        "VALUES (?,?,?,?,?)",
+        (
+            str(session_id),
+            str(profile_id or ""),
+            str(action),
+            str(status or "ok"),
+            redact_runtime_text(str(detail or "")),
+        ),
+    )
+    conn.commit()
+
+
+def count_recent_ins_actions(conn, profile_id, action, hours=24):
+    threshold = (
+        datetime.now(timezone.utc).replace(tzinfo=None)
+        - timedelta(hours=hours)
+    ).strftime("%Y-%m-%d %H:%M:%S")
+    row = conn.execute(
+        "SELECT COUNT(*) FROM ins_warm_log "
+        "WHERE profile_id=? AND action=? AND status='ok' AND ts >= ?",
+        (str(profile_id), str(action), threshold),
+    ).fetchone()
+    return int(row[0]) if row else 0
+
+
+def recent_ins_comment_texts(conn, profile_id, limit=10):
+    rows = conn.execute(
+        "SELECT detail FROM ins_warm_log "
+        "WHERE profile_id=? AND action='comment' AND status='ok' "
+        "ORDER BY id DESC LIMIT ?",
+        (str(profile_id), int(limit)),
+    ).fetchall()
+    return {row[0] for row in rows if row and row[0]}
+
+
+def compute_ins_remaining_budget(conn, profile_id, args):
+    out = {}
+    for action, cap in (
+        ("like", getattr(args, "max_likes_per_day", 0)),
+        ("save", getattr(args, "max_saves_per_day", 0)),
+        ("follow", getattr(args, "max_follows_per_day", 0)),
+        ("comment", getattr(args, "max_comments_per_day", 0)),
+    ):
+        try:
+            cap_value = int(cap or 0)
+        except (TypeError, ValueError):
+            cap_value = 0
+        if cap_value > 0:
+            used = count_recent_ins_actions(conn, profile_id, action)
+            out[action] = max(0, cap_value - used)
+        else:
+            out[action] = None
+    return out
+
+
+def get_ins_cooldown_until(conn, profile_id):
+    row = conn.execute(
+        "SELECT until_ts FROM risk_cooldown WHERE profile_id=?",
+        (str(profile_id),),
+    ).fetchone()
+    if not row:
+        return None
+    try:
+        until = datetime.fromisoformat(str(row[0]))
+    except ValueError:
+        return None
+    return until if until > datetime.now() else None
+
+
+def set_ins_cooldown(conn, profile_id, hours, reason=""):
+    until = datetime.now() + timedelta(hours=float(hours))
+    conn.execute(
+        "INSERT OR REPLACE INTO risk_cooldown (profile_id, until_ts, reason) "
+        "VALUES (?,?,?)",
+        (str(profile_id), until.isoformat(timespec="seconds"), str(reason or "")),
+    )
+    conn.commit()
+
+
+def record_ins_block_cooldown(conn, args, profile_id, reason):
+    hours = getattr(args, "block_cooldown_hours", 0)
+    try:
+        hours_value = float(hours or 0)
+    except (TypeError, ValueError):
+        hours_value = 0
+    if hours_value > 0:
+        set_ins_cooldown(conn, profile_id, hours_value, reason)
+        session_log(
+            f"[COOLDOWN] 账号 {profile_id} 进入冷却 {hours_value:g}h: {reason}",
+            "instagram",
+        )
 
 
 def session_log(line, platform="tiktok"):

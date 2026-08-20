@@ -34,6 +34,7 @@ import type {
   FypVideoViewFilter,
   FypVideoViewRecord,
   GmailSetupRequest,
+  InstagramWarmupSettings,
   HomeSummary,
   LogChunk,
   LoginCredentialStatus,
@@ -171,6 +172,13 @@ export function previewAiComment(payload: AiCommentPreviewPayload) {
 
 export function saveFypSettings(payload: FypSettings, platform: Platform = 'tiktok') {
   return invoke<SaveResult>('save_fyp_settings', { payload: { ...payload, platform } })
+}
+
+export function saveInstagramWarmupSettings(
+  payload: InstagramWarmupSettings,
+  platform: Platform = 'instagram',
+) {
+  return invoke<SaveResult>('save_instagram_warmup_settings', { payload: { ...payload, platform } })
 }
 
 export function saveTargetEngagementSettings(payload: TargetEngagementSettings, platform: Platform = 'tiktok') {

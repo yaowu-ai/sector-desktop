@@ -34,6 +34,34 @@ export interface PlatformDefaultConfig {
       probability: number
     }
   }
+  instagramWarmup?: {
+    duration: number
+    likeProb: number
+    saveProb: number
+    commentProb: number
+    activeHours: string
+    sessionsPerDay: string
+    restDayProb: number
+    minSessionGapMinutes: number
+    onePerWindow: boolean
+    durationJitter: string
+    maxLikesPerDay: number
+    maxSavesPerDay: number
+    maxFollowsPerDay: number
+    maxLikesPerSession: number
+    maxCommentsPerDay: number
+    maxCommentsPerSession: number
+    blockCooldownHours: number
+    roundSkipProb: number
+    requireProxy: boolean
+    noLike: boolean
+    noSave: boolean
+    noComment: boolean
+    noFollow: boolean
+    noStories: boolean
+    noReels: boolean
+    noExplore: boolean
+  }
   targetEngagement?: {
     enabled: boolean
     handles: string[]
@@ -66,6 +94,6 @@ export interface PlatformDefinition {
   summary: string
   capabilities: Record<PlatformCapability, CapabilityStatus>
   defaultConfig: PlatformDefaultConfig
-  defaultTaskConfig?: PlatformDefaultConfig['warmup']
+  defaultTaskConfig?: PlatformDefaultConfig['warmup'] | PlatformDefaultConfig['instagramWarmup']
   defaultTargetConfig?: PlatformDefaultConfig['targetEngagement']
 }

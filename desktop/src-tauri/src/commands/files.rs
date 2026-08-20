@@ -149,12 +149,13 @@ fn platform_comment_paths(
     let config_value = fs::read_to_string(&paths.config_path)
         .ok()
         .and_then(|raw| serde_yaml::from_str::<Value>(&raw).ok());
-    let default_general_file = if platform == "tiktok" {
+    let uses_shared_comment_pool = matches!(platform, "tiktok" | "instagram");
+    let default_general_file = if uses_shared_comment_pool {
         file_name(&paths.comments_path)?.to_string()
     } else {
         format!("comments_{}.txt", platform)
     };
-    let default_brand_file = if platform == "tiktok" {
+    let default_brand_file = if uses_shared_comment_pool {
         file_name(&paths.brand_comments_path)?.to_string()
     } else {
         format!("comments_{}_brand.txt", platform)

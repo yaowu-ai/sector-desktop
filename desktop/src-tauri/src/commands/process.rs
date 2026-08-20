@@ -537,7 +537,7 @@ fn run_platform_task_inner(
     for account_id in &account_ids {
         validate_account_id(account_id)?;
     }
-    if !matches!(task_type.as_str(), "fyp" | "target_engagement") {
+    if !matches!(task_type.as_str(), "fyp" | "warmup" | "target_engagement") {
         return Err(format!(
             "taskType '{}' is not supported by run_platform_task in V1; platform='{}', accountIds='{}'",
             task_type,
@@ -1411,7 +1411,7 @@ fn ensure_account_can_execute_for_platform(
             capability,
         ));
     }
-    if platform != "tiktok" {
+    if platform != "tiktok" && !(platform == "instagram" && capability == "warmupTask") {
         return Err(format!(
             "platform '{}' capability '{}' for account '{}' is not adapted for automatic execution in V1",
             platform,
@@ -1587,7 +1587,7 @@ fn ensure_platform_can_execute(
     capability: &str,
     account_ids: &[String],
 ) -> Result<(), String> {
-    if platform == "tiktok" {
+    if platform == "tiktok" || (platform == "instagram" && capability == "warmupTask") {
         Ok(())
     } else {
         Err(format!(
@@ -1610,7 +1610,8 @@ fn account_ids_label(account_ids: &[String]) -> String {
 fn normalize_task_type(task_type: &str) -> Result<String, String> {
     let task_type = task_type.trim();
     match task_type {
-        "fyp" | "warmup" => Ok("fyp".to_string()),
+        "fyp" => Ok("fyp".to_string()),
+        "warmup" => Ok("warmup".to_string()),
         "target" | "target_engagement" => Ok("target_engagement".to_string()),
         "scheduler" | "gmail" | "diagnostic" => Ok(task_type.to_string()),
         _ => Err(format!("unsupported taskType '{}'", task_type)),
@@ -1910,6 +1911,19 @@ mod tests {
         assert_eq!(
             runtime_task_type("tiktok_target_engagement"),
             "target_engagement"
+        );
+        assert_eq!(runtime_task_type("instagram_fyp"), "fyp");
+        assert_eq!(runtime_task_type("instagram_warmup"), "fyp");
+    }
+
+    #[test]
+    fn instagram_warmup_task_maps_to_supported_capability() {
+        let normalized = normalize_task_type("warmup").expect("warmup should normalize");
+
+        assert_eq!(normalized, "warmup");
+        assert_eq!(
+            capability_for_task(&normalized).expect("fyp should map to capability"),
+            "warmupTask"
         );
     }
 

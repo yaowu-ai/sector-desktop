@@ -20,6 +20,9 @@ runtime/dist-smoke-data/
 build-x64/
 desktop/node_modules/
 desktop/dist/
+desktop/.env
+desktop/.env.local
+desktop/.env.*.local
 desktop/src-tauri/target/
 desktop/.m20-tmp/
 desktop/.m9-appdata/

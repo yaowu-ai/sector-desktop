@@ -268,6 +268,35 @@ export interface FypSettings {
   }
 }
 
+export interface InstagramWarmupSettings {
+  duration: number
+  likeProb: number
+  saveProb: number
+  commentProb: number
+  activeHours: string
+  sessionsPerDay: string
+  restDayProb: number
+  minSessionGapMinutes: number
+  onePerWindow: boolean
+  durationJitter: string
+  maxLikesPerDay: number
+  maxSavesPerDay: number
+  maxFollowsPerDay: number
+  maxLikesPerSession: number
+  maxCommentsPerDay: number
+  maxCommentsPerSession: number
+  blockCooldownHours: number
+  roundSkipProb: number
+  requireProxy: boolean
+  noLike: boolean
+  noSave: boolean
+  noComment: boolean
+  noFollow: boolean
+  noStories: boolean
+  noReels: boolean
+  noExplore: boolean
+}
+
 export interface TargetEngagementSettings {
   enabled: boolean
   handles: string[]
@@ -572,7 +601,7 @@ export interface HomeSummary {
 
 export interface TaskRun {
   id: string
-  taskType: 'fyp' | 'target_engagement' | 'tiktok_register' | 'scheduler' | 'gmail' | 'diagnostic'
+  taskType: 'fyp' | 'warmup' | 'target_engagement' | 'tiktok_register' | 'scheduler' | 'gmail' | 'diagnostic'
   status: RunStatus
   accountIds: string[]
   startedAt?: string
@@ -820,6 +849,7 @@ export interface ConfigSnapshot {
   rawYaml: string
   accounts: Account[]
   fypSettings?: FypSettings
+  instagramWarmup?: InstagramWarmupSettings
   targetEngagement?: TargetEngagementSettings
   schedulerSettings?: SchedulerSettings
   aiComment: AiCommentSettings

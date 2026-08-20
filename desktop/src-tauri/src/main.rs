@@ -45,6 +45,7 @@ fn main() {
             commands::config::test_ai_comment_connection,
             commands::config::preview_ai_comment,
             commands::config::save_fyp_settings,
+            commands::config::save_instagram_warmup_settings,
             commands::config::save_target_engagement_settings,
             commands::config::save_scheduler_settings,
             commands::config::save_notify_settings,

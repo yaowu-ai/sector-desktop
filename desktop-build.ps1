@@ -1,5 +1,7 @@
 param(
-  [string]$Python = "py -3.13"
+  [string]$Python = "py -3.13",
+  [ValidateSet("test", "prod", "production")]
+  [string]$BuildMode = "production"
 )
 
 $ErrorActionPreference = "Stop"
@@ -19,6 +21,7 @@ if ($LASTEXITCODE -ne 0) {
   throw "runtime build failed with exit code $LASTEXITCODE"
 }
 Set-Location $desktop
+$env:DESKTOP_BUILD_MODE = if ($BuildMode -eq "prod") { "production" } else { $BuildMode }
 corepack pnpm tauri build --bundles nsis
 if ($LASTEXITCODE -ne 0) {
   throw "desktop package build failed with exit code $LASTEXITCODE"

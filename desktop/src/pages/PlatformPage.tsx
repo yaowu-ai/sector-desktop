@@ -98,8 +98,8 @@ export function PlatformPage() {
         className="shell-alert"
         type="info"
         showIcon
-        message="V1 只允许 TikTok 启动真实自动化任务"
-        description="Instagram、WhatsApp 和抖音已预留账号、浏览器环境、任务、调度和统计入口，但自动执行按钮保持禁用。"
+        message="TikTok 和 Instagram 已允许启动真实自动化任务"
+        description="Instagram 养号已接入桌面端统一 runner；WhatsApp 和抖音仍保留账号、浏览器环境、任务、调度和统计入口。"
       />
 
       <Row gutter={[16, 16]}>
@@ -146,7 +146,7 @@ export function PlatformPage() {
             scroll={{ x: 1120 }}
             expandable={{
               expandedRowRender: (platform) => <PlatformAccessDetails platform={platform} />,
-              defaultExpandedRowKeys: ['tiktok'],
+              defaultExpandedRowKeys: ['tiktok', 'instagram'],
             }}
           />
         </Col>
@@ -272,6 +272,15 @@ function platformAccessDetails(platform: PlatformDefinition) {
       runnerChips: ['src/douyin-fetcher'],
       api: '后续接入时需补齐平台 adapter、执行器入口和日志统计口径。',
       apiChips: ['platform adapter', 'runner', 'stats schema'],
+    }
+  }
+  if (platform.id === 'instagram') {
+    return {
+      browser: '使用 BitBrowser Local API 和账号绑定 profile_id。',
+      runner: '已接入 Instagram runner，可从任务页启动真实养号任务。',
+      runnerChips: ['src/platforms/instagram_runner', 'account-matrix-ins/src/ins'],
+      api: '运行前需要本机 Python、BitBrowser API、Instagram 已登录 profile 和评论池。',
+      apiChips: ['Python', 'BitBrowser API', 'platforms.instagram.warmup', 'config/comments.txt'],
     }
   }
   return {

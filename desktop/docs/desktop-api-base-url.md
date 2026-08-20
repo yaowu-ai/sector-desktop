@@ -6,13 +6,19 @@
 
 ## 配置方式
 
-桌面端通过环境变量或本地配置文件读取 `h-sector` 的部署地址：
+桌面端通过 Vite 环境变量读取 `h-sector` 的部署地址和 License 验签公钥。只有 `VITE_` 前缀的变量会暴露给桌面端前端代码。
 
 | 环境 | 变量名 | 示例值 |
  | --- | --- | --- |
- | 开发 | `DESKTOP_API_BASE_URL` | `http://localhost:3000/api/desktop` |
- | 测试 | `DESKTOP_API_BASE_URL` | `https://test.example.com/api/desktop` |
- | 生产 | `DESKTOP_API_BASE_URL` | `https://app.example.com/api/desktop` |
+ | 开发 | `VITE_DESKTOP_API_BASE_URL` | `http://localhost:3000/api/desktop` |
+ | 测试 | `VITE_DESKTOP_API_BASE_URL` | `https://test.example.com/api/desktop` |
+ | 生产 | `VITE_DESKTOP_API_BASE_URL` | `https://app.example.com/api/desktop` |
+
+License 公钥配置：
+
+| 环境 | 变量名 | 说明 |
+ | --- | --- | --- |
+| 开发 / 测试 / 生产 | `VITE_LICENSE_PUBLIC_KEY` | Ed25519 公钥 PEM，换行可用 `\n` 写入 env，用于校验 `/license/current` 返回的 `signedPayload + signature` |
 
 ## 可用接口（阶段 2 占位）
 
@@ -35,7 +41,8 @@
 
 ## 迁移步骤
 
-1. 在桌面端配置中新增 `DESKTOP_API_BASE_URL`。
+1. 在桌面端配置中新增 `VITE_DESKTOP_API_BASE_URL`。
 2. 将登录流程从 Tauri 本地调用切到 `POST /api/desktop/auth/login`。
 3. 在设置页展示套餐、订阅、License 的占位状态。
-4. 后续迭代接入真实数据后移除占位标记。
+4. 在桌面端配置中新增 `VITE_LICENSE_PUBLIC_KEY`，用于本地校验服务端签发的 License。
+5. 后续迭代接入真实数据后移除占位标记。
