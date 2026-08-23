@@ -1,5 +1,5 @@
-import { Alert, Button, Card, Col, Descriptions, Row, Space, Typography } from 'antd'
-import { BadgeCheck, CalendarClock, Fingerprint, KeyRound, Monitor, RefreshCw, ShieldCheck } from 'lucide-react'
+import { Alert, Button, Card, Col, Descriptions, Modal, Row, Space, Typography, message } from 'antd'
+import { BadgeCheck, CalendarClock, KeyRound, LogOut, Monitor, RefreshCw } from 'lucide-react'
 import type { ReactNode } from 'react'
 
 import { useDesktopAuth } from '../app/DesktopAuthContext'
@@ -10,16 +10,43 @@ import type { DesktopLicenseCurrentResponse } from '../services/desktopApi'
 export function LicenseDevicePage() {
   const auth = useDesktopAuth()
   const claims = auth.license?.claims
+  const [modal, contextHolder] = Modal.useModal()
+
+  const confirmUnbindCurrentDevice = () => {
+    modal.confirm({
+      title: '解除绑定本设备？',
+      content: '解除后将释放当前设备名额，并退出桌面端登录。重新使用本机时需要再次登录并占用设备名额。',
+      okText: '解除绑定并退出',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: async () => {
+        await auth.unbindCurrentDevice()
+        message.success('当前设备已解除绑定')
+      },
+    })
+  }
 
   return (
     <div>
+      {contextHolder}
       <PageHeader
         title="授权与设备"
-        description="查看当前账号的 License、签名校验和本机设备绑定状态。"
+        description="查看当前账号授权和本机设备绑定状态。"
         extra={
-          <Button icon={<RefreshCw size={16} />} onClick={() => void auth.refreshEntitlement()} loading={auth.loading}>
-            重新检查
-          </Button>
+          <Space>
+            <Button icon={<RefreshCw size={16} />} onClick={() => void auth.refreshEntitlement()} loading={auth.loading}>
+              重新检查
+            </Button>
+            <Button
+              danger
+              icon={<LogOut size={16} />}
+              onClick={confirmUnbindCurrentDevice}
+              loading={auth.loading}
+              disabled={auth.device?.status !== 'active'}
+            >
+              解除绑定本设备
+            </Button>
+          </Space>
         }
       />
 
@@ -53,8 +80,8 @@ export function LicenseDevicePage() {
         <Col xs={24} md={8}>
           <StatusCard
             icon={<BadgeCheck size={24} />}
-            title="签名校验"
-            value={auth.license?.algorithm === 'Ed25519' && auth.license?.signature ? '已校验' : '无签名'}
+            title="授权校验"
+            value={auth.license?.algorithm === 'Ed25519' && auth.license?.signature ? '正常' : '需检查'}
             tone={auth.license?.algorithm === 'Ed25519' && auth.license?.signature ? 'ok' : 'warning'}
           />
         </Col>
@@ -62,10 +89,6 @@ export function LicenseDevicePage() {
         <Col xs={24} xl={12}>
           <Card title="License 信息">
             <Descriptions column={1} bordered size="small">
-              <Descriptions.Item label={<InfoLabel icon={<KeyRound size={15} />} text="License ID" />}>
-                {auth.license?.licenseId || '-'}
-              </Descriptions.Item>
-              <Descriptions.Item label="License Key">{readClaimString(claims, 'licenseKey') || '-'}</Descriptions.Item>
               <Descriptions.Item label="License 状态">
                 <StatusTag status={licenseTone(auth.license?.status)} label={formatLicenseStatus(auth.license?.status)} />
               </Descriptions.Item>
@@ -75,8 +98,6 @@ export function LicenseDevicePage() {
               <Descriptions.Item label={<InfoLabel icon={<CalendarClock size={15} />} text="到期时间" />}>
                 {formatDateTime(readClaimString(claims, 'expiresAt'))}
               </Descriptions.Item>
-              <Descriptions.Item label="签名算法">{auth.license?.algorithm || '-'}</Descriptions.Item>
-              <Descriptions.Item label="签名状态">{auth.license?.signature ? '已下发' : '-'}</Descriptions.Item>
             </Descriptions>
           </Card>
         </Col>
@@ -90,25 +111,8 @@ export function LicenseDevicePage() {
               <Descriptions.Item label="设备状态">
                 <StatusTag status={auth.device?.status === 'active' ? 'ok' : 'warning'} label={auth.device?.status === 'active' ? '已激活' : '未激活'} />
               </Descriptions.Item>
-              <Descriptions.Item label={<InfoLabel icon={<Fingerprint size={15} />} text="设备指纹" />}>
-                {auth.device?.deviceFingerprint || readClaimString(claims, 'deviceFingerprint') || '-'}
-              </Descriptions.Item>
-            </Descriptions>
-          </Card>
-        </Col>
-
-        <Col xs={24}>
-          <Card title="授权载荷">
-            <Descriptions column={{ xs: 1, md: 2 }} bordered size="small">
-              <Descriptions.Item label="用户 ID">{readClaimString(claims, 'userId') || auth.session?.userId || '-'}</Descriptions.Item>
-              <Descriptions.Item label="用户角色">{formatUserRole(readClaimNumber(claims, 'userRole') || auth.session?.userRole)}</Descriptions.Item>
-              <Descriptions.Item label="订阅 ID">{readClaimString(claims, 'subscriptionId') || auth.subscription?.subscriptionId || '-'}</Descriptions.Item>
-              <Descriptions.Item label="套餐 ID">{readClaimString(claims, 'planId') || auth.subscription?.planId || '-'}</Descriptions.Item>
-              <Descriptions.Item label="套餐编码">{readClaimString(claims, 'planCode') || '-'}</Descriptions.Item>
-              <Descriptions.Item label="签发方">{readClaimString(claims, 'issuer') || '-'}</Descriptions.Item>
-              <Descriptions.Item label="使用方">{readClaimString(claims, 'audience') || '-'}</Descriptions.Item>
-              <Descriptions.Item label={<InfoLabel icon={<ShieldCheck size={15} />} text="载荷版本" />}>
-                {String(readClaimNumber(claims, 'version') || '-')}
+              <Descriptions.Item label={<InfoLabel icon={<CalendarClock size={15} />} text="更新时间" />}>
+                {auth.device?.updateTime || '-'}
               </Descriptions.Item>
             </Descriptions>
           </Card>
@@ -157,18 +161,9 @@ function formatLicenseStatus(status?: DesktopLicenseCurrentResponse['status']) {
   return '未知'
 }
 
-function formatUserRole(role?: number) {
-  return role === 1 ? '技术人员' : '普通用户'
-}
-
 function readClaimString(claims: Record<string, unknown> | null | undefined, key: string) {
   const value = claims?.[key]
   return typeof value === 'string' ? value : ''
-}
-
-function readClaimNumber(claims: Record<string, unknown> | null | undefined, key: string) {
-  const value = claims?.[key]
-  return typeof value === 'number' ? value : undefined
 }
 
 function formatDateTime(value?: string | null) {

@@ -198,8 +198,8 @@ export function SchedulerPage() {
           nextRunHistory,
         ] = await Promise.all([
           loadConfig(),
-          getSchedulerProcessStatus(currentPlatform),
-          getSchedulerHealth(currentPlatform),
+          getSchedulerProcessStatus(),
+          getSchedulerHealth(),
           checkBitbrowserApi(),
           querySchedulerJobRuns({
             platform: currentPlatform,
@@ -245,8 +245,8 @@ export function SchedulerPage() {
   const start = async () => {
     setStarting(true);
     try {
-      const result = await startScheduler(currentPlatform);
-      message.success(`${getPlatformLabel(currentPlatform)} 调度服务已启动，PID ${result.processId}`);
+      const result = await startScheduler();
+      message.success(`调度服务已启动，PID ${result.processId}`);
       await refresh();
     } catch (error) {
       message.error(formatError(error));
@@ -258,9 +258,8 @@ export function SchedulerPage() {
   const confirmStop = () => {
     confirmDanger({
       title: "停止调度服务",
-      content: `停止 ${getPlatformLabel(
-        currentPlatform,
-      )} 调度服务只会停止后续排期，不等于立刻停止已经触发的账号任务。`,
+      content:
+        "停止 scheduler.py 只会停止后续排期，不等于立刻停止已经触发的账号任务。",
       onOk: () => {
         void stop();
       },
@@ -291,7 +290,7 @@ export function SchedulerPage() {
   const stop = async () => {
     setStopping(true);
     try {
-      const result = await stopScheduler(currentPlatform);
+      const result = await stopScheduler();
       message.success(result.message);
       await refresh();
     } catch (error) {

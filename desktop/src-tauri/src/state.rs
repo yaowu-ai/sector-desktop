@@ -6,14 +6,8 @@ use crate::paths::AppInitializationStatus;
 #[derive(Default)]
 pub struct AppState {
     pub current_run: Arc<Mutex<RunState>>,
-    pub scheduler_process: Mutex<Option<SchedulerProcessState>>,
+    pub scheduler_process: Mutex<Option<u32>>,
     pub initialization_status: Mutex<Option<AppInitializationStatus>>,
-}
-
-#[derive(Clone)]
-pub struct SchedulerProcessState {
-    pub platform: String,
-    pub process_id: u32,
 }
 
 pub struct RunState {

@@ -1,9 +1,10 @@
-import { Alert, Button, Layout, Menu, Space, Switch, Tooltip, Typography, message } from 'antd'
+import { Alert, Badge, Button, Layout, Menu, Space, Switch, Tooltip, Typography, message } from 'antd'
 import type { MenuProps } from 'antd'
 import { LogOut, Moon, RefreshCw, Sun, UserRound } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { useDesktopAuth } from '../app/DesktopAuthContext'
+import { useDesktopNotifications } from '../app/DesktopNotificationsContext'
 import { DESKTOP_USER_ROLES, filterRoutesByRole, normalizeDesktopUserRole } from '../app/routePermissions'
 import { appRoutes, routes, type AppRoute } from '../app/routes'
 import { PROCESS_STARTED_EVENT, checkBitbrowserApi, getCurrentRunStatus } from '../services/api'
@@ -27,6 +28,7 @@ interface AppShellProps {
 export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
   const contentRef = useRef<HTMLElement>(null)
   const desktopAuth = useDesktopAuth()
+  const desktopNotifications = useDesktopNotifications()
   const startupReportedRef = useRef<string | null>(null)
   const previousProcessStatusRef = useRef<ProcessStatus | null>(null)
   const terminalUsageReportedRef = useRef<Set<string>>(new Set())
@@ -40,7 +42,10 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
   const permittedAppRoutes = useMemo(() => filterRoutesByRole(appRoutes, userRole), [userRole])
   const defaultRouteKey = permittedRoutes[0]?.key ?? 'home'
   const isTechnician = userRole === DESKTOP_USER_ROLES.technician
-  const siderMenuItems = useMemo(() => buildSiderMenuItems(permittedRoutes), [permittedRoutes])
+  const siderMenuItems = useMemo(
+    () => buildSiderMenuItems(permittedRoutes, desktopNotifications.unreadCount),
+    [desktopNotifications.unreadCount, permittedRoutes],
+  )
   const [openKeys, setOpenKeys] = useState<string[]>(() => getInitialOpenKeys())
 
   const activeRoute = useMemo(
@@ -298,7 +303,7 @@ function getInitialOpenKeys() {
   return groupKey ? [groupKey] : []
 }
 
-function buildSiderMenuItems(permittedRoutes: AppRoute[]): MenuProps['items'] {
+function buildSiderMenuItems(permittedRoutes: AppRoute[], notificationUnreadCount: number): MenuProps['items'] {
   const items: NonNullable<MenuProps['items']> = []
   const groupIndex = new Map<string, number>()
 
@@ -307,7 +312,7 @@ function buildSiderMenuItems(permittedRoutes: AppRoute[]): MenuProps['items'] {
     const item = {
       key: route.key,
       icon: <Icon size={route.menuGroup ? 16 : 18} />,
-      label: route.label,
+      label: buildMenuLabel(route, notificationUnreadCount),
     }
 
     if (!route.menuGroup) {
@@ -335,6 +340,16 @@ function buildSiderMenuItems(permittedRoutes: AppRoute[]): MenuProps['items'] {
   }
 
   return items
+}
+
+function buildMenuLabel(route: AppRoute, notificationUnreadCount: number) {
+  if (route.key !== 'notifications' || notificationUnreadCount <= 0) return route.label
+  return (
+    <span className="app-menu-notification-label">
+      <span>{route.label}</span>
+      <Badge count={notificationUnreadCount} overflowCount={99} size="small" />
+    </span>
+  )
 }
 
 function bitbrowserTone(status: ApiStatus | null): StatusTone {

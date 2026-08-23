@@ -1,13 +1,12 @@
 import { Alert, Button, Card, Col, Descriptions, Form, Input, Row, Space, Tag, Typography, message } from 'antd'
-import { Copy, Loader2, MessageSquareText, Send } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Loader2, MessageSquareText, Send } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 
 import { useDesktopAuth } from '../app/DesktopAuthContext'
 import { PageHeader } from '../components/PageHeader'
 import {
   buildDesktopFeedbackWsUrl,
   submitDesktopFeedback,
-  type DesktopFeedbackMessage,
   type DesktopFeedbackRealtimeEvent,
   type DesktopFeedbackThread,
 } from '../services/desktopApi'
@@ -20,7 +19,6 @@ export function ContactSupportPage() {
   const [submitting, setSubmitting] = useState(false)
   const [wsConnected, setWsConnected] = useState(false)
   const [thread, setThread] = useState<DesktopFeedbackThread | null>(null)
-  const [chatMessages, setChatMessages] = useState<DesktopFeedbackMessage[]>([])
   const [lastSubmittedAt, setLastSubmittedAt] = useState<string | null>(null)
   const socketRef = useRef<WebSocket | null>(null)
   const pendingRequestsRef = useRef(new Map<string, { resolve: () => void; reject: (error: Error) => void }>())
@@ -56,10 +54,6 @@ export function ContactSupportPage() {
       }
       if (data.type === 'feedback.thread.created' || data.type === 'feedback.message.created') {
         setThread(data.thread)
-        setChatMessages((current) => {
-          if (current.some((item) => item.id === data.message.id)) return current
-          return [...current, data.message].sort((a, b) => new Date(a.createTime).getTime() - new Date(b.createTime).getTime())
-        })
         return
       }
       if (data.type === 'feedback.thread.status.updated') {
@@ -74,25 +68,6 @@ export function ContactSupportPage() {
       socket.close()
     }
   }, [auth.apiBaseUrl, auth.session])
-
-  const copyAccountInfo = async () => {
-    const session = auth.session
-    const text = [
-      `账号：${session?.phone || session?.username || '-'}`,
-      `用户ID：${session?.userId || '-'}`,
-      `角色：${session?.userRole === 1 ? '技术人员' : '普通用户'}`,
-      `订阅：${auth.subscription?.status ?? '-'}`,
-      `License：${auth.license?.status ?? '-'}`,
-      `设备：${auth.device?.deviceFingerprint ?? '-'}`,
-    ].join('\n')
-
-    try {
-      await navigator.clipboard.writeText(text)
-      message.success('账号信息已复制')
-    } catch {
-      message.warning('当前环境不支持自动复制')
-    }
-  }
 
   const submitFeedback = async (values: { category: string; content: string }) => {
     if (!auth.session) return
@@ -114,17 +89,9 @@ export function ContactSupportPage() {
     }
   }
 
-  const conversationMessages = useMemo(
-    () =>
-      [...chatMessages].sort(
-        (a, b) => new Date(a.createTime).getTime() - new Date(b.createTime).getTime(),
-      ),
-    [chatMessages],
-  )
-
   return (
     <div>
-      <PageHeader title="联系客服" description="提交问题前可先复制账号与设备信息，便于定位授权、登录或运行异常。" />
+      <PageHeader title="联系客服" description="提交问题反馈，便于定位授权、登录或运行异常。" />
 
       <Row gutter={[16, 16]} className="contact-support-grid">
         <Col xs={24} lg={9}>
@@ -151,9 +118,6 @@ export function ContactSupportPage() {
               <Space>
                 {thread ? <Tag color={getFeedbackStatusColor(thread.status)}>{formatFeedbackStatus(thread.status)}</Tag> : null}
                 <Tag color={wsConnected ? 'green' : 'default'}>{wsConnected ? '实时同步中' : '普通提交模式'}</Tag>
-                <Button icon={<Copy size={16} />} onClick={copyAccountInfo}>
-                  复制账号信息
-                </Button>
               </Space>
             }
           >
@@ -176,86 +140,13 @@ export function ContactSupportPage() {
                   提交反馈
                 </Button>
                 <Typography.Text type="secondary">
-                  {lastSubmittedAt ? `上次提交：${formatDateTime(lastSubmittedAt)}` : '反馈会提交到后台，管理员回复后会在这里同步显示。'}
+                  {lastSubmittedAt ? `上次提交：${formatDateTime(lastSubmittedAt)}` : '反馈会提交到后台，请等待管理员处理。'}
                 </Typography.Text>
               </Space>
             </Form>
           </Card>
         </Col>
-
-        <Col xs={24}>
-          <Card title="反馈会话">
-            {conversationMessages.length === 0 ? (
-              <Alert
-                type="info"
-                showIcon
-                message={thread ? '反馈已提交，暂未收到管理员回复。' : '暂无反馈会话'}
-                description={thread ? `当前处理状态：${formatFeedbackStatus(thread.status)}` : '提交问题反馈后，这里会显示你和后台管理员的沟通记录。'}
-              />
-            ) : (
-              <div className="feedback-conversation">
-                {conversationMessages.map((item) => (
-                  <FeedbackBubble key={item.id} message={item} />
-                ))}
-              </div>
-            )}
-          </Card>
-        </Col>
-
-        <Col xs={24}>
-          <Card title="定位信息">
-            <Descriptions column={{ xs: 1, md: 3 }} bordered size="small">
-              <Descriptions.Item label="产品账号">{auth.session?.phone || auth.session?.username || '-'}</Descriptions.Item>
-              <Descriptions.Item label="用户 ID">{auth.session?.userId || '-'}</Descriptions.Item>
-              <Descriptions.Item label="License 状态">{auth.license?.status || '-'}</Descriptions.Item>
-              <Descriptions.Item label="订阅状态">{auth.subscription?.status || '-'}</Descriptions.Item>
-              <Descriptions.Item label="设备状态">{auth.device?.status || '-'}</Descriptions.Item>
-              <Descriptions.Item label="设备指纹">{auth.device?.deviceFingerprint || '-'}</Descriptions.Item>
-            </Descriptions>
-          </Card>
-        </Col>
       </Row>
-    </div>
-  )
-}
-
-function FeedbackBubble({ message: feedbackMessage }: { message: DesktopFeedbackMessage }) {
-  const isUser = feedbackMessage.senderType === 'user'
-  const senderName = isUser ? '我' : feedbackMessage.senderType === 'admin' ? '客服' : '系统'
-  const className = [
-    'feedback-bubble-row',
-    isUser ? 'feedback-bubble-row-user' : '',
-  ]
-    .filter(Boolean)
-    .join(' ')
-
-  return (
-    <div className={className}>
-      <div
-        className={[
-          'feedback-bubble',
-          isUser ? 'feedback-bubble-user' : '',
-          feedbackMessage.senderType === 'admin' ? 'feedback-bubble-admin' : '',
-          feedbackMessage.senderType === 'system' ? 'feedback-bubble-system' : '',
-        ]
-          .filter(Boolean)
-          .join(' ')}
-      >
-        <div className="feedback-bubble-meta">
-          <span>{senderName}</span>
-          <span>{formatDateTime(feedbackMessage.createTime)}</span>
-        </div>
-        <Typography.Paragraph className="feedback-bubble-content">{feedbackMessage.content || '无文本内容'}</Typography.Paragraph>
-        {feedbackMessage.imageUrls.length > 0 ? (
-          <div className="feedback-image-list">
-            {feedbackMessage.imageUrls.map((url) => (
-              <a key={url} href={url} target="_blank" rel="noreferrer">
-                <img src={url} alt="反馈图片" />
-              </a>
-            ))}
-          </div>
-        ) : null}
-      </div>
     </div>
   )
 }

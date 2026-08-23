@@ -1,4 +1,4 @@
-use chrono::Local;
+﻿use chrono::Local;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -6,7 +6,6 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
-use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 use tauri::State;
@@ -15,12 +14,10 @@ use crate::commands::config::{
     load_config, read_ai_comment_api_key_for_runtime, read_login_password_for_runtime,
 };
 use crate::paths::{normalize, project_paths, project_root, python_command_parts, ProjectPaths};
-use crate::state::{AppState, SchedulerProcessState};
+use crate::state::AppState;
 
 const SCHEDULER_HOST: &str = "127.0.0.1";
 const SCHEDULER_PORT: u16 = 9601;
-const TIKTOK_PLATFORM: &str = "tiktok";
-const INSTAGRAM_PLATFORM: &str = "instagram";
 const SCHEDULER_LOGIN_CREDENTIALS_ENV: &str = "AM_SCHEDULER_LOGIN_CREDENTIALS";
 const AI_COMMENT_API_KEY_ENV: &str = "AM_AI_COMMENT_API_KEY";
 #[cfg(windows)]
@@ -125,104 +122,61 @@ struct RawHealth {
     lock_held_externally: Option<bool>,
 }
 
-#[derive(Debug, Deserialize)]
-struct InstagramScheduleState {
-    day: Option<String>,
-    events: Vec<InstagramScheduleEvent>,
-}
-
-#[derive(Debug, Deserialize)]
-struct InstagramScheduleEvent {
-    id: String,
-    account_id: Option<String>,
-    at: Option<String>,
-    status: Option<String>,
-}
-
 #[tauri::command]
-pub fn start_scheduler(
-    platform: Option<String>,
-    state: State<'_, AppState>,
-) -> Result<SchedulerStartResult, String> {
-    let platform = scheduler_platform(platform);
-    ensure_scheduler_supported(&platform)?;
+pub fn start_scheduler(state: State<'_, AppState>) -> Result<SchedulerStartResult, String> {
     {
         let mut scheduler = state
             .scheduler_process
             .lock()
             .map_err(|_| "failed to lock scheduler state".to_string())?;
-        if let Some(current) = scheduler.clone() {
-            if process_is_alive(current.process_id) {
-                if current.platform == platform {
-                    return Ok(SchedulerStartResult {
-                        process_id: current.process_id,
-                        command: scheduler_command(&platform)?,
-                        status: "running".to_string(),
-                    });
-                }
-                return Err(format!(
-                    "{} scheduler is already running (PID {}); stop it before starting {} scheduler",
-                    current.platform, current.process_id, platform
-                ));
+        if let Some(process_id) = *scheduler {
+            if process_is_alive(process_id) {
+                return Ok(SchedulerStartResult {
+                    process_id,
+                    command: scheduler_command()?,
+                    status: "running".to_string(),
+                });
             }
             *scheduler = None;
         }
     }
 
     let paths = project_paths()?;
-    if platform == TIKTOK_PLATFORM {
-        if let Ok(raw) = read_health_endpoint() {
-            let process_id = raw.process_id.or_else(scheduler_port_process_id);
-            if raw
-                .config_path
-                .as_deref()
-                .map(|path| same_path(path, &paths.config_path))
-                .unwrap_or(false)
-            {
-                if let Some(process_id) = process_id.filter(|pid| process_is_alive(*pid)) {
-                    let mut scheduler = state
-                        .scheduler_process
-                        .lock()
-                        .map_err(|_| "failed to lock scheduler state".to_string())?;
-                    *scheduler = Some(SchedulerProcessState {
-                        platform: platform.clone(),
-                        process_id,
-                    });
-                    return Ok(SchedulerStartResult {
-                        process_id,
-                        command: scheduler_command_for_paths(&paths, &platform)?.0,
-                        status: "running".to_string(),
-                    });
-                }
+    if let Ok(raw) = read_health_endpoint() {
+        let process_id = raw.process_id.or_else(scheduler_port_process_id);
+        if raw
+            .config_path
+            .as_deref()
+            .map(|path| same_path(path, &paths.config_path))
+            .unwrap_or(false)
+        {
+            if let Some(process_id) = process_id.filter(|pid| process_is_alive(*pid)) {
+                let mut scheduler = state
+                    .scheduler_process
+                    .lock()
+                    .map_err(|_| "failed to lock scheduler state".to_string())?;
+                *scheduler = Some(process_id);
+                return Ok(SchedulerStartResult {
+                    process_id,
+                    command: scheduler_command_for_paths(&paths)?.0,
+                    status: "running".to_string(),
+                });
             }
-
-            return Err(format!(
-                "scheduler port {} is already occupied by an existing scheduler{}; stop it before starting the current configuration {}",
-                SCHEDULER_PORT,
-                process_id
-                    .map(|pid| format!(" (PID {})", pid))
-                    .unwrap_or_default(),
-                paths.config_path
-            ));
         }
-    } else if read_health_endpoint().is_ok() {
-        return Err(
-            "TikTok scheduler is already running; stop it before starting Instagram scheduler"
-                .to_string(),
-        );
+
+        return Err(format!(
+            "scheduler port {} is already occupied by an existing scheduler{}; stop it before starting the current configuration {}",
+            SCHEDULER_PORT,
+            process_id
+                .map(|pid| format!(" (PID {})", pid))
+                .unwrap_or_default(),
+            paths.config_path
+        ));
     }
 
-    if platform == INSTAGRAM_PLATFORM {
-        ensure_instagram_scheduler_accounts()?;
-    }
-
-    let login_credentials = if platform == TIKTOK_PLATFORM {
-        scheduler_login_credentials()?
-    } else {
-        "{}".to_string()
-    };
+    let login_credentials = scheduler_login_credentials()?;
     let ai_comment_api_key = scheduler_ai_comment_api_key();
-    let (command, current_dir) = scheduler_command_for_paths(&paths, &platform)?;
+    let (command, current_dir) = scheduler_command_for_paths(&paths)?;
     let mut command_builder = Command::new(&command[0]);
     command_builder
         .args(&command[1..])
@@ -239,8 +193,7 @@ pub fn start_scheduler(
     hide_console_window(&mut command_builder);
     let child = command_builder.spawn().map_err(|err| {
         format!(
-            "failed to start {} scheduler {:?} in {}: {}",
-            platform,
+            "failed to start scheduler {:?} in {}: {}",
             command,
             normalize(&current_dir),
             err
@@ -252,68 +205,13 @@ pub fn start_scheduler(
         .scheduler_process
         .lock()
         .map_err(|_| "failed to lock scheduler state".to_string())?;
-    *scheduler = Some(SchedulerProcessState {
-        platform,
-        process_id,
-    });
+    *scheduler = Some(process_id);
 
     Ok(SchedulerStartResult {
         process_id,
         command,
         status: "starting".to_string(),
     })
-}
-
-fn ensure_instagram_scheduler_accounts() -> Result<(), String> {
-    let config = load_config()?;
-    let accounts = config
-        .accounts()
-        .iter()
-        .filter(|account| {
-            account.enabled() && account.scheduled() && account.platform() == INSTAGRAM_PLATFORM
-        })
-        .collect::<Vec<_>>();
-    if accounts.is_empty() {
-        return Err("no enabled scheduled Instagram accounts are configured".to_string());
-    }
-    for account in accounts {
-        if account.browser_provider() != "bitbrowser" {
-            return Err(format!(
-                "account '{}' Instagram scheduler requires BitBrowser",
-                account.id()
-            ));
-        }
-        if account
-            .bitbrowser_profile_id()
-            .map(str::trim)
-            .filter(|profile| !profile.is_empty())
-            .is_none()
-        {
-            return Err(format!(
-                "account '{}' requires a BitBrowser profile id",
-                account.id()
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn scheduler_platform(platform: Option<String>) -> String {
-    platform
-        .unwrap_or_else(|| TIKTOK_PLATFORM.to_string())
-        .trim()
-        .to_ascii_lowercase()
-}
-
-fn ensure_scheduler_supported(platform: &str) -> Result<(), String> {
-    if matches!(platform, TIKTOK_PLATFORM | INSTAGRAM_PLATFORM) {
-        Ok(())
-    } else {
-        Err(format!(
-            "platform '{}' does not have an executable scheduler yet",
-            platform
-        ))
-    }
 }
 
 fn scheduler_ai_comment_api_key() -> HashMap<String, String> {
@@ -388,23 +286,16 @@ fn hidden_command(program: &str) -> Command {
 }
 
 #[tauri::command]
-pub fn stop_scheduler(
-    platform: Option<String>,
-    state: State<'_, AppState>,
-) -> Result<SchedulerStopResult, String> {
-    let platform = scheduler_platform(platform);
+pub fn stop_scheduler(state: State<'_, AppState>) -> Result<SchedulerStopResult, String> {
     let mut process_id = {
         let scheduler = state
             .scheduler_process
             .lock()
             .map_err(|_| "failed to lock scheduler state".to_string())?;
-        scheduler
-            .as_ref()
-            .filter(|current| current.platform == platform)
-            .map(|current| current.process_id)
+        *scheduler
     };
 
-    if process_id.is_none() && platform == TIKTOK_PLATFORM && read_health_endpoint().is_ok() {
+    if process_id.is_none() && read_health_endpoint().is_ok() {
         process_id = scheduler_port_process_id();
     }
 
@@ -412,7 +303,8 @@ pub fn stop_scheduler(
         return Ok(SchedulerStopResult {
             status: "stopped".to_string(),
             process_id: None,
-            message: format!("{} scheduler is not running", platform),
+            message: "scheduler endpoint is not running or its process could not be identified"
+                .to_string(),
         });
     };
 
@@ -424,53 +316,37 @@ pub fn stop_scheduler(
         .scheduler_process
         .lock()
         .map_err(|_| "failed to lock scheduler state".to_string())?;
-    if scheduler
-        .as_ref()
-        .map(|current| current.platform == platform)
-        .unwrap_or(false)
-    {
-        *scheduler = None;
-    }
+    *scheduler = None;
 
     Ok(SchedulerStopResult {
         status: "stopped".to_string(),
         process_id: Some(process_id),
-        message: format!(
-            "{} scheduler stopped; already triggered account runs may continue separately",
-            platform
-        ),
+        message: "scheduler stopped; already triggered account runs may continue separately"
+            .to_string(),
     })
 }
 
 #[tauri::command]
 pub fn get_scheduler_process_status(
-    platform: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<SchedulerProcessStatus, String> {
-    let platform = scheduler_platform(platform);
-    if !matches!(platform.as_str(), TIKTOK_PLATFORM | INSTAGRAM_PLATFORM) {
-        return Ok(stopped_scheduler_process_status(&platform, None));
-    }
-
-    let current = {
+    let process_id = {
         let scheduler = state
             .scheduler_process
             .lock()
             .map_err(|_| "failed to lock scheduler state".to_string())?;
-        scheduler.clone()
+        *scheduler
     };
 
-    match current {
-        Some(current) if current.platform == platform && process_is_alive(current.process_id) => {
-            Ok(SchedulerProcessStatus {
-                status: "running".to_string(),
-                process_id: Some(current.process_id),
-                command: scheduler_command(&platform)?,
-                health_url: scheduler_health_url(&platform)?,
-                error: None,
-            })
-        }
-        Some(current) if current.platform == platform => {
+    match process_id {
+        Some(process_id) if process_is_alive(process_id) => Ok(SchedulerProcessStatus {
+            status: "running".to_string(),
+            process_id: Some(process_id),
+            command: scheduler_command()?,
+            health_url: health_url(),
+            error: None,
+        }),
+        Some(process_id) => {
             let mut scheduler = state
                 .scheduler_process
                 .lock()
@@ -478,31 +354,13 @@ pub fn get_scheduler_process_status(
             *scheduler = None;
             Ok(SchedulerProcessStatus {
                 status: "stopped".to_string(),
-                process_id: Some(current.process_id),
-                command: scheduler_command(&platform)?,
-                health_url: scheduler_health_url(&platform)?,
+                process_id: Some(process_id),
+                command: scheduler_command()?,
+                health_url: health_url(),
                 error: Some("tracked scheduler process is no longer alive".to_string()),
             })
         }
-        Some(current) if process_is_alive(current.process_id) => Ok(SchedulerProcessStatus {
-            status: "stopped".to_string(),
-            process_id: None,
-            command: scheduler_command(&platform)?,
-            health_url: scheduler_health_url(&platform)?,
-            error: Some(format!(
-                "{} scheduler is running (PID {})",
-                current.platform, current.process_id
-            )),
-        }),
-        Some(_) => {
-            let mut scheduler = state
-                .scheduler_process
-                .lock()
-                .map_err(|_| "failed to lock scheduler state".to_string())?;
-            *scheduler = None;
-            Ok(stopped_scheduler_process_status(&platform, None))
-        }
-        None if platform == TIKTOK_PLATFORM => match read_health_endpoint() {
+        None => match read_health_endpoint() {
             Ok(raw) => {
                 let paths = project_paths()?;
                 let discovered_pid = raw.process_id.or_else(scheduler_port_process_id);
@@ -517,15 +375,12 @@ pub fn get_scheduler_process_status(
                             .scheduler_process
                             .lock()
                             .map_err(|_| "failed to lock scheduler state".to_string())?;
-                        *scheduler = Some(SchedulerProcessState {
-                            platform: platform.clone(),
-                            process_id,
-                        });
+                        *scheduler = Some(process_id);
                         return Ok(SchedulerProcessStatus {
                             status: "running".to_string(),
                             process_id: Some(process_id),
-                            command: scheduler_command_for_paths(&paths, &platform)?.0,
-                            health_url: scheduler_health_url(&platform)?,
+                            command: scheduler_command_for_paths(&paths)?.0,
+                            health_url: health_url(),
                             error: None,
                         });
                     }
@@ -533,8 +388,8 @@ pub fn get_scheduler_process_status(
                 Ok(SchedulerProcessStatus {
                     status: "error".to_string(),
                     process_id: discovered_pid,
-                    command: scheduler_command_for_paths(&paths, &platform)?.0,
-                    health_url: scheduler_health_url(&platform)?,
+                    command: scheduler_command_for_paths(&paths)?.0,
+                    health_url: health_url(),
                     error: Some(
                         "an untracked scheduler is using port 9601 with a different or unknown config path"
                             .to_string(),
@@ -544,46 +399,21 @@ pub fn get_scheduler_process_status(
             Err(_) => Ok(SchedulerProcessStatus {
                 status: "stopped".to_string(),
                 process_id: None,
-                command: scheduler_command(&platform)?,
-                health_url: scheduler_health_url(&platform)?,
+                command: scheduler_command()?,
+                health_url: health_url(),
                 error: None,
             }),
         },
-        None => Ok(stopped_scheduler_process_status(&platform, None)),
     }
 }
 
 #[tauri::command]
-pub fn get_scheduler_health(
-    platform: Option<String>,
-    state: State<'_, AppState>,
-) -> Result<SchedulerHealth, String> {
-    let platform = scheduler_platform(platform);
-    let process = get_scheduler_process_status(Some(platform.clone()), state)?;
+pub fn get_scheduler_health(state: State<'_, AppState>) -> Result<SchedulerHealth, String> {
+    let process = get_scheduler_process_status(state)?;
     let config = load_config()?;
-    let fires_per_day = scheduler_fires_per_day(&config, &platform);
+    let fires_per_day = config.scheduler_fires_per_day().unwrap_or(3).max(0);
     let run_lock = read_run_lock_status()?;
-    let ip_group_conflicts = detect_ip_group_conflicts(&platform)?;
-
-    if platform == INSTAGRAM_PLATFORM {
-        return instagram_scheduler_health(process, fires_per_day, run_lock, ip_group_conflicts);
-    }
-
-    if platform != TIKTOK_PLATFORM {
-        return Ok(SchedulerHealth {
-            status: "stopped".to_string(),
-            process_id: None,
-            jobs: vec![],
-            next_run: None,
-            next_account_id: None,
-            lock_held_externally: None,
-            today_schedule_count: 0,
-            fires_per_day,
-            run_lock,
-            ip_group_conflicts,
-            error: None,
-        });
-    }
+    let ip_group_conflicts = detect_ip_group_conflicts()?;
 
     match read_health_endpoint() {
         Ok(raw) => {
@@ -700,96 +530,6 @@ pub fn get_scheduler_health(
     }
 }
 
-fn scheduler_fires_per_day(config: &crate::commands::config::ConfigSnapshot, platform: &str) -> i64 {
-    if platform == TIKTOK_PLATFORM {
-        return config.scheduler_fires_per_day().unwrap_or(3).max(0);
-    }
-    0
-}
-
-fn instagram_scheduler_health(
-    process: SchedulerProcessStatus,
-    fires_per_day: i64,
-    run_lock: RunLockStatus,
-    ip_group_conflicts: Vec<IpGroupConflict>,
-) -> Result<SchedulerHealth, String> {
-    let state_path = instagram_schedule_state_path()?;
-    let state = read_instagram_schedule_state(&state_path).ok();
-    let mut jobs = state
-        .as_ref()
-        .map(instagram_schedule_jobs)
-        .unwrap_or_default();
-    jobs.sort_by(|left, right| {
-        left.next_run
-            .cmp(&right.next_run)
-            .then_with(|| left.id.cmp(&right.id))
-    });
-    let next_job = jobs
-        .iter()
-        .find(|job| job.account_id.is_some() && job.next_run.is_some());
-    let today = Local::now().format("%Y-%m-%d").to_string();
-    let today_schedule_count = state
-        .as_ref()
-        .filter(|state| state.day.as_deref() == Some(today.as_str()))
-        .map(|state| state.events.len())
-        .unwrap_or(0);
-
-    Ok(SchedulerHealth {
-        status: process.status.clone(),
-        process_id: process.process_id,
-        next_run: next_job.and_then(|job| job.next_run.clone()),
-        next_account_id: next_job.and_then(|job| job.account_id.clone()),
-        jobs,
-        lock_held_externally: Some(run_lock.active),
-        today_schedule_count,
-        fires_per_day,
-        run_lock,
-        ip_group_conflicts,
-        error: process.error,
-    })
-}
-
-fn read_instagram_schedule_state(path: &Path) -> Result<InstagramScheduleState, String> {
-    if !path.exists() {
-        return Err("Instagram schedule state does not exist yet".to_string());
-    }
-    let raw = fs::read_to_string(path)
-        .map_err(|err| format!("failed to read {}: {}", normalize(path), err))?;
-    serde_json::from_str::<InstagramScheduleState>(&raw)
-        .map_err(|err| format!("failed to parse {}: {}", normalize(path), err))
-}
-
-fn instagram_schedule_jobs(state: &InstagramScheduleState) -> Vec<SchedulerJob> {
-    state
-        .events
-        .iter()
-        .filter(|event| {
-            matches!(
-                event.status.as_deref().unwrap_or("pending"),
-                "pending" | "running"
-            )
-        })
-        .map(|event| SchedulerJob {
-            id: format!("ins_schedule::{}", event.id),
-            account_id: event.account_id.clone(),
-            next_run: event.at.clone(),
-            status: Some(instagram_schedule_status(event.status.as_deref())),
-        })
-        .collect()
-}
-
-fn instagram_schedule_status(status: Option<&str>) -> String {
-    match status.unwrap_or("pending") {
-        "running" => "running",
-        "pending" => "scheduled",
-        "done" => "done",
-        "skipped" | "missed" => "skipped",
-        "error" | "blocked" | "interrupted" => "error",
-        other => other,
-    }
-    .to_string()
-}
-
 #[tauri::command]
 pub fn clear_run_lock() -> Result<ClearRunLockResult, String> {
     let paths = project_paths()?;
@@ -822,17 +562,15 @@ pub fn clear_run_lock() -> Result<ClearRunLockResult, String> {
     })
 }
 
-fn scheduler_command(platform: &str) -> Result<Vec<String>, String> {
-    Ok(scheduler_command_for_paths(&project_paths()?, platform)?.0)
+fn scheduler_command() -> Result<Vec<String>, String> {
+    Ok(scheduler_command_for_paths(&project_paths()?)?.0)
 }
 
 fn scheduler_command_for_paths(
     paths: &ProjectPaths,
-    platform: &str,
-) -> Result<(Vec<String>, PathBuf), String> {
-    ensure_scheduler_supported(platform)?;
+) -> Result<(Vec<String>, std::path::PathBuf), String> {
     if paths.runtime_mode == "bundled" {
-        let runtime_path = PathBuf::from(&paths.runtime_path);
+        let runtime_path = std::path::PathBuf::from(&paths.runtime_path);
         if !runtime_path.is_file() {
             return Err(format!(
                 "bundled runtime is not readable: {}",
@@ -846,82 +584,36 @@ fn scheduler_command_for_paths(
                 paths.runtime_manifest_path
             ));
         }
-        let mut command = vec![
+        let command = vec![
             paths.runtime_path.clone(),
+            "scheduler".to_string(),
+            "--config".to_string(),
+            paths.config_path.clone(),
+            "--data-dir".to_string(),
+            paths.data_dir.clone(),
+            "--host".to_string(),
+            SCHEDULER_HOST.to_string(),
+            "--port".to_string(),
+            SCHEDULER_PORT.to_string(),
         ];
-        if platform == INSTAGRAM_PLATFORM {
-            command.push("instagram-scheduler".to_string());
-            command.push("--config".to_string());
-            command.push(paths.config_path.clone());
-            command.push("--data-dir".to_string());
-            command.push(paths.data_dir.clone());
-            command.push("--schedule".to_string());
-        } else {
-            command.push("scheduler".to_string());
-            command.push("--config".to_string());
-            command.push(paths.config_path.clone());
-            command.push("--data-dir".to_string());
-            command.push(paths.data_dir.clone());
-            command.push("--host".to_string());
-            command.push(SCHEDULER_HOST.to_string());
-            command.push("--port".to_string());
-            command.push(SCHEDULER_PORT.to_string());
-        }
         let current_dir = runtime_path
             .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from("."));
+            .map(std::path::Path::to_path_buf)
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
         return Ok((command, current_dir));
     }
 
     let mut command = python_command_parts()?;
-    if platform == INSTAGRAM_PLATFORM {
-        command.push("-m".to_string());
-        command.push("platforms.instagram_runner".to_string());
-        command.push("--config".to_string());
-        command.push(paths.config_path.clone());
-        command.push("--data-dir".to_string());
-        command.push(paths.data_dir.clone());
-        command.push("--schedule".to_string());
-    } else {
-        command.push("src/scheduler.py".to_string());
-        command.push("--config".to_string());
-        command.push(paths.config_path.clone());
-        command.push("--data-dir".to_string());
-        command.push(paths.data_dir.clone());
-    }
+    command.push("src/scheduler.py".to_string());
+    command.push("--config".to_string());
+    command.push(paths.config_path.clone());
+    command.push("--data-dir".to_string());
+    command.push(paths.data_dir.clone());
     Ok((command, project_root()?))
 }
 
 fn health_url() -> String {
     format!("http://{}:{}/health", SCHEDULER_HOST, SCHEDULER_PORT)
-}
-
-fn scheduler_health_url(platform: &str) -> Result<String, String> {
-    if platform == INSTAGRAM_PLATFORM {
-        let path = instagram_schedule_state_path()?;
-        return Ok(normalize(&path));
-    }
-    Ok(health_url())
-}
-
-fn instagram_schedule_state_path() -> Result<PathBuf, String> {
-    Ok(PathBuf::from(project_paths()?.data_dir)
-        .join("ins")
-        .join("schedule_state.json"))
-}
-
-fn stopped_scheduler_process_status(
-    platform: &str,
-    error: Option<String>,
-) -> SchedulerProcessStatus {
-    SchedulerProcessStatus {
-        status: "stopped".to_string(),
-        process_id: None,
-        command: scheduler_command(platform).unwrap_or_default(),
-        health_url: scheduler_health_url(platform).unwrap_or_default(),
-        error,
-    }
 }
 
 fn read_health_endpoint() -> Result<RawHealth, String> {
@@ -1039,14 +731,12 @@ fn read_run_lock_status() -> Result<RunLockStatus, String> {
     })
 }
 
-fn detect_ip_group_conflicts(platform: &str) -> Result<Vec<IpGroupConflict>, String> {
+fn detect_ip_group_conflicts() -> Result<Vec<IpGroupConflict>, String> {
     let config = load_config()?;
     let accounts = config
         .accounts()
         .iter()
-        .filter(|account| {
-            account.enabled() && account.scheduled() && account.platform() == platform
-        })
+        .filter(|account| account.enabled() && account.scheduled())
         .collect::<Vec<_>>();
     let mut conflicts = Vec::new();
 

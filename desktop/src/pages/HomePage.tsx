@@ -31,7 +31,6 @@ import {
 import {
   getPlatformLabel,
   isExecutablePlatform,
-  PLATFORMS,
 } from "../services/platforms";
 import type {
   AccountSummary,
@@ -68,21 +67,6 @@ export function HomePage() {
       ).length,
     [filteredAccounts],
   );
-  const platformSummaries = useMemo(
-    () =>
-      PLATFORMS.map((platform) => {
-        const platformAccounts = filteredAccounts.filter(
-          (account) => account.platform === platform.id,
-        );
-        return {
-          ...platform,
-          total: platformAccounts.length,
-          enabled: platformAccounts.filter((account) => account.enabled).length,
-        };
-      }),
-    [filteredAccounts],
-  );
-
   const refresh = async () => {
     setLoading(true);
     try {
@@ -214,47 +198,6 @@ export function HomePage() {
                 </Descriptions>
               </Card>
 
-              <Card title="平台账号概览">
-                <Row gutter={[12, 12]}>
-                  {platformSummaries.map((platform) => (
-                    <Col xs={24} sm={12} xl={6} key={platform.id}>
-                      <div className="platform-summary-tile">
-                        <Space
-                          direction="vertical"
-                          size={6}
-                          className="full-width"
-                        >
-                          <Space
-                            align="center"
-                            className="platform-summary-head"
-                          >
-                            <Typography.Text strong>
-                              {platform.localeName}
-                            </Typography.Text>
-                            <Tag
-                              color={
-                                platform.automaticExecutionSupported
-                                  ? "green"
-                                  : "gold"
-                              }
-                            >
-                              {platform.automaticExecutionSupported
-                                ? "可执行"
-                                : "预留"}
-                            </Tag>
-                          </Space>
-                          <Typography.Text type="secondary">
-                            启用 {platform.enabled} / 总计 {platform.total}
-                          </Typography.Text>
-                          <Typography.Text type="secondary" ellipsis>
-                            {platform.accountPrefix}*
-                          </Typography.Text>
-                        </Space>
-                      </div>
-                    </Col>
-                  ))}
-                </Row>
-              </Card>
             </Space>
           </Col>
         </Row>

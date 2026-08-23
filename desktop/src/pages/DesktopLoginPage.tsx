@@ -54,9 +54,9 @@ export function DesktopLoginPage({ apiBaseUrl, error, onLogin }: DesktopLoginPag
             <Form.Item
               name="username"
               label="产品账号"
-              rules={[{ required: true, message: '请输入手机号、邮箱或用户名' }]}
+              rules={[{ required: true, message: '请输入手机号或用户名' }]}
             >
-              <Input prefix={<UserRound size={16} />} placeholder="手机号、邮箱或用户名" autoComplete="username" />
+              <Input prefix={<UserRound size={16} />} placeholder="手机号或用户名" autoComplete="username" />
             </Form.Item>
             <Form.Item
               name="password"

@@ -8,14 +8,14 @@ import {
   type ReactNode,
 } from 'react'
 
-import { getPlatformDefinition, isPlatform } from '../platforms/registry'
+import { getPlatformDefinition, PLATFORMS } from '../platforms/registry'
 import type { Platform, PlatformDefinition } from '../platforms/types'
 
 export const PLATFORM_STORAGE_KEY = 'account-matrix-current-platform'
 export const DEFAULT_PLATFORM: Platform = 'tiktok'
 
 export function resolveInitialPlatform(saved: string | null): Platform {
-  return saved && isPlatform(saved) ? saved : DEFAULT_PLATFORM
+  return saved && PLATFORMS.some((platform) => platform.id === saved) ? (saved as Platform) : DEFAULT_PLATFORM
 }
 
 interface PlatformContextState {

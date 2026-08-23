@@ -13,6 +13,7 @@ import {
   activateDesktopDevice,
   buildDesktopSession,
   clearDesktopSession,
+  deactivateDesktopDevice,
   desktopLogin,
   getDesktopApiBaseUrl,
   loadCurrentSubscription,
@@ -43,6 +44,7 @@ interface DesktopAuthContextValue {
     password: string;
   }) => Promise<{ authorized: boolean }>;
   refreshEntitlement: () => Promise<void>;
+  unbindCurrentDevice: () => Promise<void>;
   logout: () => void;
 }
 
@@ -117,6 +119,24 @@ export function DesktopAuthProvider({
     setError(null);
     setEntitlementWarning(null);
   }, [clearRuntimeState]);
+
+  const unbindCurrentDevice = useCallback(async () => {
+    if (!session) return;
+
+    setLoading(true);
+    setError(null);
+    setEntitlementWarning(null);
+    try {
+      await deactivateDesktopDevice(session, apiBaseUrl);
+      logout();
+    } catch (error) {
+      const message = formatError(error);
+      setError(message);
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  }, [apiBaseUrl, logout, session]);
 
   const refreshEntitlement = useCallback(async () => {
     if (!session) return;
@@ -248,6 +268,7 @@ export function DesktopAuthProvider({
       entitlementWarning,
       login,
       refreshEntitlement,
+      unbindCurrentDevice,
       logout,
     }),
     [
@@ -262,6 +283,7 @@ export function DesktopAuthProvider({
       refreshEntitlement,
       session,
       subscription,
+      unbindCurrentDevice,
     ],
   );
 

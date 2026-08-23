@@ -34,7 +34,6 @@ import type {
   FypVideoViewFilter,
   FypVideoViewRecord,
   GmailSetupRequest,
-  InstagramWarmupSettings,
   HomeSummary,
   LogChunk,
   LoginCredentialStatus,
@@ -172,13 +171,6 @@ export function previewAiComment(payload: AiCommentPreviewPayload) {
 
 export function saveFypSettings(payload: FypSettings, platform: Platform = 'tiktok') {
   return invoke<SaveResult>('save_fyp_settings', { payload: { ...payload, platform } })
-}
-
-export function saveInstagramWarmupSettings(
-  payload: InstagramWarmupSettings,
-  platform: Platform = 'instagram',
-) {
-  return invoke<SaveResult>('save_instagram_warmup_settings', { payload: { ...payload, platform } })
 }
 
 export function saveTargetEngagementSettings(payload: TargetEngagementSettings, platform: Platform = 'tiktok') {
@@ -409,20 +401,20 @@ export function runTikTokRegisterBatch(accountIds: string[]) {
   return invoke<ProcessStartResult>('run_tiktok_register_batch', { accountIds }).then(notifyProcessStarted)
 }
 
-export function startScheduler(platform: Platform = 'tiktok') {
-  return invoke<SchedulerStartResult>('start_scheduler', { platform })
+export function startScheduler() {
+  return invoke<SchedulerStartResult>('start_scheduler')
 }
 
-export function stopScheduler(platform: Platform = 'tiktok') {
-  return invoke<StopResult>('stop_scheduler', { platform })
+export function stopScheduler() {
+  return invoke<StopResult>('stop_scheduler')
 }
 
-export function getSchedulerProcessStatus(platform: Platform = 'tiktok') {
-  return invoke<SchedulerProcessStatus>('get_scheduler_process_status', { platform })
+export function getSchedulerProcessStatus() {
+  return invoke<SchedulerProcessStatus>('get_scheduler_process_status')
 }
 
-export function getSchedulerHealth(platform: Platform = 'tiktok') {
-  return invoke<SchedulerHealth>('get_scheduler_health', { platform })
+export function getSchedulerHealth() {
+  return invoke<SchedulerHealth>('get_scheduler_health')
 }
 
 export function clearRunLock() {

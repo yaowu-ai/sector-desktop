@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { PlatformProvider } from './PlatformContext'
 import { DesktopAuthGate, DesktopAuthProvider } from './DesktopAuthContext'
+import { DesktopNotificationsProvider } from './DesktopNotificationsContext'
 import { AppShell } from '../components/AppShell'
 
 type ThemeMode = 'light' | 'dark'
@@ -43,7 +44,9 @@ export function App() {
         <DesktopAuthProvider>
           <DesktopAuthGate>
             <PlatformProvider>
-              <AppShell themeMode={themeMode} onThemeModeChange={setThemeMode} />
+              <DesktopNotificationsProvider>
+                <AppShell themeMode={themeMode} onThemeModeChange={setThemeMode} />
+              </DesktopNotificationsProvider>
             </PlatformProvider>
           </DesktopAuthGate>
         </DesktopAuthProvider>

@@ -22,7 +22,6 @@ export interface DesktopSession {
   userId: string
   userName: string
   phone: string
-  email: string
   userRole: 1 | 2
 }
 
@@ -33,7 +32,6 @@ export interface DesktopAuthResponse {
     userId: string
     userName: string
     phone: string
-    email: string
     userRole: 1 | 2
   }
 }
@@ -43,12 +41,22 @@ export interface DesktopDeviceResponse {
   deviceFingerprint: string
   deviceName: string
   status: 'active' | 'inactive'
+  updateTime: string
 }
 
 export interface DesktopPlanItem {
   planId: string
   planName: string
   planCode: string
+  priceCents: string
+  limits: {
+    maxEnabledAccounts: number
+    maxDevices: number
+    dailyTaskRuns: number
+    scheduler: boolean
+    targetEngagement: boolean
+    exportCsv: boolean
+  } | null
   status: 'active' | 'disabled'
 }
 
@@ -82,12 +90,36 @@ export interface DesktopUsageReportResponse {
   status: 'ok'
 }
 
+export type DesktopBroadcastNotificationType = 'system' | 'maintenance' | 'risk' | 'feature'
+export type DesktopBroadcastNotificationPriority = 'normal' | 'important' | 'urgent'
+export type DesktopBroadcastNotificationStatus = 'draft' | 'published' | 'revoked'
+export type DesktopNotificationCategory = 'system' | 'support'
+export type DesktopNotificationSource = 'broadcast' | 'feedback'
+
+export interface DesktopNotification {
+  id: string
+  source: DesktopNotificationSource
+  sourceId: string
+  category: DesktopNotificationCategory
+  title: string
+  content: string
+  time: string
+  read: boolean
+  readAt: string | null
+  priority?: DesktopBroadcastNotificationPriority
+  broadcastType?: DesktopBroadcastNotificationType
+  threadId?: string
+}
+
+export interface DesktopBroadcastNotificationsResponse {
+  notifications: DesktopNotification[]
+}
+
 export interface DesktopFeedbackThread {
   id: string
   userId: string
   userName: string
   userPhone: string
-  userEmail: string
   status: 'pending' | 'processing' | 'resolved' | 'closed'
   originalContent: string
   originalImages: string[]
@@ -120,6 +152,7 @@ export type DesktopFeedbackRealtimeEvent =
   | { type: 'feedback.thread.created'; thread: DesktopFeedbackThread; message: DesktopFeedbackMessage }
   | { type: 'feedback.message.created'; thread: DesktopFeedbackThread; message: DesktopFeedbackMessage }
   | { type: 'feedback.thread.status.updated'; thread: DesktopFeedbackThread }
+  | { type: 'notifications.changed'; scope: 'all' | 'user'; userId?: string }
   | { type: 'feedback.error'; requestId?: string; message: string }
 
 export function getDesktopApiBaseUrl() {
@@ -143,20 +176,28 @@ export function loadDesktopSession(): DesktopSession | null {
   if (!raw) return null
 
   try {
-    const session = JSON.parse(raw) as DesktopSession
+    const parsed = JSON.parse(raw) as DesktopSession & {
+      email?: unknown
+      mail?: unknown
+      userEmail?: unknown
+    }
+    const { email: _email, mail: _mail, userEmail: _userEmail, ...session } = parsed
     if (!session.accessToken || !session.expiresAt || !session.username) return null
     if (session.expiresAt <= Date.now()) {
       clearDesktopSession()
       return null
     }
-    return {
+    const normalized: DesktopSession = {
       ...session,
       userId: session.userId || '',
       userName: session.userName || session.username,
       phone: session.phone || '',
-      email: session.email || '',
       userRole: normalizeUserRole(session.userRole),
     }
+    if (typeof _email !== 'undefined' || typeof _mail !== 'undefined' || typeof _userEmail !== 'undefined') {
+      saveDesktopSession(normalized)
+    }
+    return normalized
   } catch {
     clearDesktopSession()
     return null
@@ -177,7 +218,6 @@ export function buildDesktopSession(username: string, response: DesktopAuthRespo
     userId: response.user?.userId || '',
     userName: response.user?.userName || username,
     phone: response.user?.phone || '',
-    email: response.user?.email || '',
     userRole: normalizeUserRole(response.user?.userRole),
     accessToken: response.accessToken,
     expiresAt: Date.now() + response.expiresIn * 1000,
@@ -233,6 +273,20 @@ export function activateDesktopDevice(session: DesktopSession, apiBaseUrl = getD
       body: {
         deviceFingerprint: getDeviceFingerprint(),
         deviceName: getDeviceName(),
+      },
+    },
+  )
+}
+
+export function deactivateDesktopDevice(session: DesktopSession, apiBaseUrl = getDesktopApiBaseUrl()) {
+  return desktopApiRequest<DesktopDeviceResponse>(
+    apiBaseUrl,
+    '/devices/deactivate',
+    {
+      method: 'POST',
+      token: session.accessToken,
+      body: {
+        deviceFingerprint: getDeviceFingerprint(),
       },
     },
   )
@@ -336,6 +390,29 @@ export function reportDesktopUsage(
   )
 }
 
+export function loadDesktopNotifications(session: DesktopSession, apiBaseUrl = getDesktopApiBaseUrl()) {
+  return desktopApiRequest<DesktopBroadcastNotificationsResponse>(
+    apiBaseUrl,
+    '/notifications',
+    {
+      method: 'GET',
+      token: session.accessToken,
+    },
+  )
+}
+
+export function markDesktopNotificationRead(session: DesktopSession, id: string, apiBaseUrl = getDesktopApiBaseUrl()) {
+  return desktopApiRequest<{ id: string; read: true }>(
+    apiBaseUrl,
+    '/notifications/read',
+    {
+      method: 'POST',
+      token: session.accessToken,
+      body: { id },
+    },
+  )
+}
+
 export function submitDesktopFeedback(
   session: DesktopSession,
   payload: { content: string; imageUrls?: string[] },
@@ -426,6 +503,7 @@ function formatDesktopApiError(error: unknown) {
     'Active license required': '当前账号没有有效 License',
     'Device fingerprint is already bound to another user': '当前设备已绑定到其他账号',
     'Device not found': '未找到当前设备',
+    'Device quota exceeded': '设备名额已满，请先释放旧设备后再登录',
     'Invalid desktop session': '桌面端登录状态无效，请重新登录',
     'Password verification failed': '密码校验失败，请稍后再试',
     Unauthorized: '请先登录',
@@ -438,6 +516,7 @@ function formatDesktopApiError(error: unknown) {
   if (/active subscription required/i.test(normalized)) return translations['Active subscription required']
   if (/active device required/i.test(normalized)) return translations['Active device required']
   if (/active license required/i.test(normalized)) return translations['Active license required']
+  if (/设备名额已满|device quota exceeded/i.test(normalized)) return '设备名额已满，请先在管理后台释放旧设备后再登录'
 
   return normalized
 }

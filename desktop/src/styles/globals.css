@@ -79,6 +79,18 @@ body {
   width: calc(100% - 16px);
 }
 
+.app-menu-notification-label {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.app-menu-notification-label .ant-badge {
+  flex: 0 0 auto;
+}
+
 .app-sider-account {
   flex: 0 0 auto;
   min-height: 72px;
@@ -211,6 +223,23 @@ body {
 .plan-option-head {
   width: 100%;
   justify-content: space-between;
+}
+
+.plan-option-limits {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.plan-option-limit {
+  min-height: 56px;
+  padding: 10px;
+  border: 1px solid #e5ebf3;
+  border-radius: 8px;
+  background: #ffffff;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 
 .quota-card {
@@ -365,6 +394,54 @@ body {
   height: 36px;
 }
 
+.notification-category-tag {
+  margin-inline-end: 0;
+  font-weight: 600;
+  border-radius: 6px;
+}
+
+.notification-category-tag-system {
+  color: #1d4ed8;
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+.notification-category-tag-support {
+  color: #047857;
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+}
+
+.notification-filter-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.notification-filter-label::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+}
+
+.notification-filter-label-system {
+  color: #1d4ed8;
+}
+
+.notification-filter-label-system::before {
+  background: #3b82f6;
+}
+
+.notification-filter-label-support {
+  color: #047857;
+}
+
+.notification-filter-label-support::before {
+  background: #10b981;
+}
+
 .about-logo {
   width: 64px;
   height: 64px;
@@ -432,6 +509,11 @@ body {
   background: #111827;
 }
 
+:root[data-theme='dark'] .plan-option-limit {
+  border-color: #243044;
+  background: #0f172a;
+}
+
 :root[data-theme='dark'] .license-status-icon-ok {
   color: #86efac;
   background: #052e1b;
@@ -456,6 +538,26 @@ body {
   color: #8bbcff;
   background: #10284f;
   border-color: #1d4f9a;
+}
+
+:root[data-theme='dark'] .notification-category-tag-system {
+  color: #93c5fd;
+  background: #10284f;
+  border-color: #1d4f9a;
+}
+
+:root[data-theme='dark'] .notification-category-tag-support {
+  color: #6ee7b7;
+  background: #052e1b;
+  border-color: #047857;
+}
+
+:root[data-theme='dark'] .notification-filter-label-system {
+  color: #93c5fd;
+}
+
+:root[data-theme='dark'] .notification-filter-label-support {
+  color: #6ee7b7;
 }
 
 :root[data-theme='dark'] .feedback-bubble {
