@@ -3,6 +3,8 @@ data/
 src/data/
 run.lock
 config/backups/
+config/accounts.yaml
+!config/accounts.example.yaml
 
 # Local proxy credential lists
 ip_*
@@ -11,7 +13,10 @@ config/private/
 # Build artifacts
 *.zip
 build/
+build-test-package/
 runtime/dist/
+runtime/dist-*/
+runtime/build-validation/
 runtime/dist-x64/
 runtime/dist-smoke-data/
 .runtime-build-venv/
@@ -21,9 +26,13 @@ build-x64/
 desktop/node_modules/
 desktop/dist/
 desktop/.env
+desktop/.env.production
+desktop/.env.test
+!desktop/.env.example
 desktop/.env.local
 desktop/.env.*.local
 desktop/src-tauri/target/
+desktop/src-tauri/target-*/
 desktop/.m20-tmp/
 desktop/.m9-appdata/
 desktop/.m9-install-test/
@@ -32,10 +41,14 @@ desktop/src-tauri/resources/runtime/*
 desktop/tests/.m20-*.log
 desktop/tests/actions.db
 desktop/tests/actions.db-*
+desktop/tests/*.db
+desktop/tests/*.db-*
+desktop/tests/*.log
 desktop/tests/m20-data/actions.db
 desktop/tests/m20-data/actions.db-*
 desktop/tests/direct-*.txt
 desktop/tests/runtime-smoke-output/
+desktop/vite-dev.*.log
 desktop/.codex-tmp/
 desktop/tests/.m14-temp/
 desktop/tests/.runtime-fyp-video-tests/

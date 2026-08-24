@@ -157,8 +157,8 @@ python test_comment.py --min 100 --no-post   # 调低门槛、只定位不发评
 ```yaml
 target_accounts:
   enabled: true
-  handles: [mechlinkthai2025, mechlink_indonesia, mechlink0]   # 目标官方号
-  participants: [tiktok_6, ..., tiktok_15]   # 执行号（10 个）
+  handles: [brand_account_1, brand_account_2, brand_account_3]   # 目标官方号
+  participants: [tiktok_example_6, ..., tiktok_example_15]   # 执行号（10 个）
   first_run_latest_n: 1       # 无记录时只处理最新 1 条
   max_videos_per_run: 3       # 单次单目标最多处理几条新视频
   like_probability: 0.9

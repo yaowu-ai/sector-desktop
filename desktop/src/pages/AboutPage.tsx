@@ -9,14 +9,13 @@ import {
   Typography,
   message,
 } from "antd";
-import { CheckCircle2, DownloadCloud, Info, RefreshCw } from "lucide-react";
+import { CheckCircle2, Info, RefreshCw } from "lucide-react";
 
 import { useDesktopAuth } from "../app/DesktopAuthContext";
 import { PageHeader } from "../components/PageHeader";
 import desktopIcon from "../../src-tauri/icons/icon.png";
 
 const APP_VERSION = "0.1.0";
-const DOWNLOAD_URL = "待配置";
 
 export function AboutPage() {
   const auth = useDesktopAuth();
@@ -80,16 +79,6 @@ export function AboutPage() {
               >
                 自动更新待接入
               </Descriptions.Item>
-              <Descriptions.Item
-                label={
-                  <InfoLabel
-                    icon={<DownloadCloud size={15} />}
-                    text="下载地址"
-                  />
-                }
-              >
-                {DOWNLOAD_URL}
-              </Descriptions.Item>
             </Descriptions>
             <Space className="about-actions" wrap>
               <Button
@@ -97,18 +86,15 @@ export function AboutPage() {
                 icon={<RefreshCw size={16} />}
                 onClick={checkUpdate}
               >
-                检查更新
-              </Button>
-              <Button icon={<DownloadCloud size={16} />} disabled>
-                下载安装包（待配置）
+                更新最新版
               </Button>
             </Space>
             <Alert
               className="contact-hint"
               type="info"
               showIcon
-              message="下载与自动更新配置待接入"
-              description="后续可以由服务端下发最新版本号、安装包地址、更新说明和强制更新策略。"
+              message="自动更新配置待接入"
+              description="后续可以由服务端下发最新版本号、更新说明和强制更新策略。"
             />
           </Card>
         </Col>

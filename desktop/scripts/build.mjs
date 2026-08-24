@@ -1,9 +1,10 @@
 import { spawnSync } from 'node:child_process'
 
 const mode = normalizeMode(process.argv[2] || process.env.DESKTOP_BUILD_MODE || 'production')
+const corepack = process.platform === 'win32' ? 'corepack.cmd' : 'corepack'
 
-run('corepack', ['pnpm', 'exec', 'tsc'])
-run('corepack', ['pnpm', 'exec', 'vite', 'build', '--mode', mode])
+run(corepack, ['pnpm', 'exec', 'tsc'])
+run(corepack, ['pnpm', 'exec', 'vite', 'build', '--mode', mode])
 
 function normalizeMode(value) {
   const normalized = String(value || '').trim().toLowerCase()
@@ -18,6 +19,7 @@ function run(command, args) {
   const result = spawnSync(command, args, {
     stdio: 'inherit',
     env: process.env,
+    shell: process.platform === 'win32',
   })
 
   if (result.error) {
