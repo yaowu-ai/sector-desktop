@@ -1,0 +1,40 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "星域",
+  "version": "0.1.0",
+  "identifier": "com.accountmatrix.desktop",
+  "build": {
+    "beforeDevCommand": "corepack pnpm dev",
+    "beforeBuildCommand": "corepack pnpm build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "星域",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 960,
+        "minHeight": 640
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "nsis",
+    "icon": ["icons/icon.png", "icons/icon.icns", "icons/icon.ico"],
+    "resources": [
+      "resources/templates/config/accounts.yaml",
+      "resources/templates/config/comments.txt",
+      "resources/templates/config/comments_brand.txt",
+      "resources/runtime/**/*"
+    ],
+    "macOS": {
+      "signingIdentity": "-"
+    }
+  }
+}

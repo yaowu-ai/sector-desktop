@@ -1,0 +1,76 @@
+schema_version: 1
+
+defaults:
+  daily_actions:
+    fyp_browse_minutes: [2, 5]
+    like_probability: 0.35
+    follows_per_session: [0, 1]
+    comment:
+      enabled: false
+      comments_per_session: [0, 1]
+      min_video_comments: 1000
+      probability: 0.2
+  active_hours: [[9, 12], [19, 23]]
+  timezone: America/New_York
+
+platforms:
+  tiktok:
+    warmup:
+      fyp_browse_minutes: [2, 5]
+      like_probability: 0.35
+      follows_per_session: [0, 1]
+      comment:
+        enabled: false
+        comments_per_session: [0, 1]
+        min_video_comments: 1000
+        probability: 0.2
+    target_engagement:
+      enabled: false
+      handles: []
+      participants: []
+      first_run_latest_n: 1
+      max_videos_per_run: 3
+      like_probability: 0.5
+      comment_probability: 0.2
+      comments_file: comments_brand.txt
+      follow: false
+      follow_probability: 0.0
+    comments:
+      general_file: comments.txt
+      target_file: comments_brand.txt
+    scheduler:
+      fires_per_day: 3
+      active_hours: [[9, 12], [19, 23]]
+
+bitbrowser:
+  api_url: http://127.0.0.1:54345
+
+scheduler:
+  fires_per_day: 3
+
+target_accounts:
+  enabled: false
+  handles: []
+  participants: []
+  first_run_latest_n: 1
+  max_videos_per_run: 3
+  like_probability: 0.5
+  comment_probability: 0.2
+  comments_file: comments_brand.txt
+  follow: false
+  follow_probability: 0.0
+
+notify:
+  enabled: false
+  type: webhook
+  webhook:
+    url: ""
+
+accounts:
+  - id: example_tiktok_1
+    platform: tiktok
+    enabled: false
+    ip_group: 1
+    active_hours: [[9, 12]]
+    bitbrowser_profile_id: ""
+    notes: "Replace this example with your own account and BitBrowser profile."
