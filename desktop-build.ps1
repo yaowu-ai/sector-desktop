@@ -8,7 +8,15 @@ $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $desktop = Join-Path $root "desktop"
-$rustRoot = "D:\DesktopAPPs\Rust"
+$rustRoot = $env:ACCOUNT_MATRIX_RUST_ROOT
+if ([string]::IsNullOrWhiteSpace($rustRoot)) {
+  if (Test-Path "D:\DesktopAPPs\Rust") {
+    $rustRoot = "D:\DesktopAPPs\Rust"
+  }
+  else {
+    $rustRoot = $env:USERPROFILE
+  }
+}
 
 $env:RUSTUP_HOME = Join-Path $rustRoot ".rustup"
 $env:CARGO_HOME = Join-Path $rustRoot ".cargo"

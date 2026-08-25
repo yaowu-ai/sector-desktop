@@ -40,4 +40,4 @@ fi
 arch -x86_64 "${RUNTIME}" version --json
 
 cd desktop
-corepack pnpm tauri build --target x86_64-apple-darwin
+corepack pnpm tauri build --target x86_64-apple-darwin --bundles dmg
