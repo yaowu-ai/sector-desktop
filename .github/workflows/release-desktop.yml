@@ -110,14 +110,12 @@ jobs:
     runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v4
-      - name: Setup pnpm and Node
-        uses: pnpm/setup@v2
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          runtime: node@22
-          cache: true
-          cache-dependency-path: desktop/pnpm-lock.yaml
-          package-json-file: desktop/package.json
-          install: false
+          node-version: "22"
+      - name: Install pnpm
+        run: npm install -g pnpm@11.15.1
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
