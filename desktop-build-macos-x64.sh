@@ -11,8 +11,12 @@ fi
 
 PYTHON_BIN="${PYTHON_BIN:-${SCRIPT_DIR}/.runtime-build-venv-x64/bin/python}"
 if [[ ! -x "${PYTHON_BIN}" ]]; then
-  echo "[error] Intel Python not found: ${PYTHON_BIN}" >&2
-  exit 1
+  RESOLVED_PYTHON_BIN="$(command -v "${PYTHON_BIN}" || true)"
+  if [[ -z "${RESOLVED_PYTHON_BIN}" || ! -x "${RESOLVED_PYTHON_BIN}" ]]; then
+    echo "[error] Intel Python not found: ${PYTHON_BIN}" >&2
+    exit 1
+  fi
+  PYTHON_BIN="${RESOLVED_PYTHON_BIN}"
 fi
 
 PYTHON_MACHINE="$(arch -x86_64 "${PYTHON_BIN}" -c 'import platform; print(platform.machine())')"
