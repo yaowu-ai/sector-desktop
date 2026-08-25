@@ -90,6 +90,24 @@ export interface DesktopUsageReportResponse {
   status: 'ok'
 }
 
+export type DesktopUpdatePlatform = 'windows' | 'macos' | 'linux'
+export type DesktopUpdateArch = 'x64' | 'arm64'
+
+export interface DesktopDownloadOptionResponse {
+  platform: DesktopUpdatePlatform
+  arch: DesktopUpdateArch
+  label: string
+  url: string
+  available: boolean
+  version?: string
+}
+
+export interface DesktopDownloadOptionsResponse {
+  version?: string
+  releaseUrl?: string
+  options: DesktopDownloadOptionResponse[]
+}
+
 export type DesktopBroadcastNotificationType = 'system' | 'maintenance' | 'risk' | 'feature'
 export type DesktopBroadcastNotificationPriority = 'normal' | 'important' | 'urgent'
 export type DesktopBroadcastNotificationStatus = 'draft' | 'published' | 'revoked'
@@ -390,6 +408,24 @@ export function reportDesktopUsage(
   )
 }
 
+export function loadDesktopDownloadOptions(apiBaseUrl = getDesktopApiBaseUrl()) {
+  return desktopApiRequest<DesktopDownloadOptionsResponse>(
+    getPublicApiBaseUrl(apiBaseUrl),
+    '/desktop-updates/download-options',
+    {
+      method: 'GET',
+    },
+  )
+}
+
+export function resolveDesktopDownloadUrl(downloadUrl: string, apiBaseUrl = getDesktopApiBaseUrl()) {
+  const normalized = downloadUrl.trim()
+  if (/^https?:\/\//i.test(normalized)) return normalized
+
+  const apiOrigin = getApiOrigin(apiBaseUrl)
+  return new URL(normalized, `${apiOrigin}/`).toString()
+}
+
 export function loadDesktopNotifications(session: DesktopSession, apiBaseUrl = getDesktopApiBaseUrl()) {
   return desktopApiRequest<DesktopBroadcastNotificationsResponse>(
     apiBaseUrl,
@@ -481,6 +517,19 @@ async function desktopApiRequest<T>(
 
 function normalizeApiBaseUrl(value: string) {
   return value.trim().replace(/\/+$/, '')
+}
+
+function getPublicApiBaseUrl(apiBaseUrl: string) {
+  const url = new URL(normalizeApiBaseUrl(apiBaseUrl))
+  url.pathname = url.pathname.replace(/\/api\/desktop\/?$/, '/api')
+  url.search = ''
+  url.hash = ''
+  return normalizeApiBaseUrl(url.toString())
+}
+
+function getApiOrigin(apiBaseUrl: string) {
+  const url = new URL(normalizeApiBaseUrl(apiBaseUrl))
+  return url.origin
 }
 
 function normalizeUserRole(role: unknown): 1 | 2 {

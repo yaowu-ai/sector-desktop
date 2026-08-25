@@ -1,6 +1,6 @@
 import { Alert, Badge, Button, Layout, Menu, Space, Switch, Tooltip, Typography, message } from 'antd'
 import type { MenuProps } from 'antd'
-import { LogOut, Moon, RefreshCw, Sun, UserRound } from 'lucide-react'
+import { Bell, LogOut, Moon, RefreshCw, Sun, UserRound } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { useDesktopAuth } from '../app/DesktopAuthContext'
@@ -42,6 +42,7 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
   const permittedAppRoutes = useMemo(() => filterRoutesByRole(appRoutes, userRole), [userRole])
   const defaultRouteKey = permittedRoutes[0]?.key ?? 'home'
   const isTechnician = userRole === DESKTOP_USER_ROLES.technician
+  const canOpenNotifications = permittedAppRoutes.some((route) => route.key === 'notifications')
   const siderMenuItems = useMemo(
     () => buildSiderMenuItems(permittedRoutes, desktopNotifications.unreadCount),
     [desktopNotifications.unreadCount, permittedRoutes],
@@ -240,6 +241,25 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
             </Space>
           </Space>
           <Space size={12}>
+            {canOpenNotifications ? (
+              <Tooltip title="消息通知">
+                <Badge
+                  className="app-header-notification-badge"
+                  count={desktopNotifications.unreadCount}
+                  overflowCount={99}
+                  size="small"
+                  offset={[-8, 10]}
+                >
+                  <Button
+                    className="app-header-notification"
+                    type="text"
+                    aria-label="消息通知"
+                    icon={<Bell size={22} />}
+                    onClick={() => setActiveKey('notifications')}
+                  />
+                </Badge>
+              </Tooltip>
+            ) : null}
             <Tooltip title={themeMode === 'dark' ? '切换为浅色模式' : '切换为深色模式'}>
               <Switch
                 checked={themeMode === 'dark'}

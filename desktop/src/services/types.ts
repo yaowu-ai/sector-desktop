@@ -42,6 +42,12 @@ export interface ProjectPaths {
   logPollIntervalSeconds: number
 }
 
+export interface AppReleaseContext {
+  version: string
+  platform: 'windows' | 'macos' | 'linux' | string
+  arch: 'x64' | 'arm64' | string
+}
+
 export interface Account {
   id: string
   platform: Platform

@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core'
 
 import type {
   AccountSummary,
+  AppReleaseContext,
   ApiStatus,
   AppInitializationStatus,
   AccountsPayload,
@@ -95,6 +96,14 @@ function notifyProcessStarted(result: ProcessStartResult) {
 
 export function getProjectPaths() {
   return invoke<ProjectPaths>('get_project_paths')
+}
+
+export function getAppReleaseContext() {
+  return invoke<AppReleaseContext>('get_app_release_context')
+}
+
+export function openExternalLink(url: string) {
+  return invoke<void>('open_external_link', { url })
 }
 
 export function loadAccounts(platform: Platform | 'all' = 'all') {
