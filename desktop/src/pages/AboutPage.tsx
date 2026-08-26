@@ -10,7 +10,7 @@ import {
   Typography,
   message,
 } from "antd";
-import { CheckCircle2, Info, RefreshCw } from "lucide-react";
+import { CheckCircle2, Download, Info, RefreshCw } from "lucide-react";
 
 import { PageHeader } from "../components/PageHeader";
 import { getAppReleaseContext, openExternalLink } from "../services/api";
@@ -35,6 +35,7 @@ type UpdateStatus =
   | "idle"
   | "checking"
   | "available"
+  | "opening"
   | "current"
   | "unavailable"
   | "error";
@@ -139,8 +140,19 @@ export function AboutPage() {
       return;
     }
 
+    setUpdateState((current) => ({
+      ...current,
+      status: "opening",
+      message: "正在打开下载链接。",
+    }));
+
     try {
       await openExternalLink(updateState.downloadUrl);
+      setUpdateState((current) => ({
+        ...current,
+        status: "available",
+        message: "已打开下载链接，请下载后退出当前客户端手动安装。",
+      }));
       message.success("已打开浏览器下载链接，请下载后手动安装。");
     } catch {
       const opened = window.open(
@@ -149,8 +161,18 @@ export function AboutPage() {
         "noopener,noreferrer",
       );
       if (opened) {
+        setUpdateState((current) => ({
+          ...current,
+          status: "available",
+          message: "已打开下载链接，请下载后退出当前客户端手动安装。",
+        }));
         message.success("已打开浏览器下载链接，请下载后手动安装。");
       } else {
+        setUpdateState((current) => ({
+          ...current,
+          status: "error",
+          message: "无法打开下载链接，请检查系统浏览器设置。",
+        }));
         message.error("无法打开下载链接，请检查系统浏览器设置。");
       }
     }
@@ -223,8 +245,17 @@ export function AboutPage() {
             <Space className="about-actions" wrap>
               <Button
                 type="primary"
-                icon={<RefreshCw size={16} />}
-                loading={updateState.status === "checking"}
+                icon={
+                  updateState.status === "available" ? (
+                    <Download size={16} />
+                  ) : (
+                    <RefreshCw size={16} />
+                  )
+                }
+                loading={
+                  updateState.status === "checking" ||
+                  updateState.status === "opening"
+                }
                 onClick={handleUpdateAction}
               >
                 {getUpdateActionText(updateState)}
@@ -302,6 +333,7 @@ function parseVersion(value: string) {
 
 function renderUpdateStatus(state: UpdateState) {
   if (state.status === "checking") return "检查中";
+  if (state.status === "opening") return "打开下载链接中";
   if (state.status === "available") {
     return (
       <Typography.Text type="success">
@@ -321,6 +353,7 @@ function renderUpdateStatus(state: UpdateState) {
 
 function getUpdateActionText(state: UpdateState) {
   if (state.status === "checking") return "检查中";
+  if (state.status === "opening") return "打开中";
   if (state.status === "available") return "下载最新版";
   if (state.status === "current") return "重新检查";
   return "检查更新";
@@ -335,10 +368,13 @@ function getUpdateAlertType(state: UpdateState) {
 
 function getUpdateAlertMessage(state: UpdateState) {
   if (state.message) return state.message;
-  return "手动检查更新";
+  return "手动更新";
 }
 
 function getUpdateAlertDescription(state: UpdateState) {
+  if (state.status === "opening") {
+    return "正在调用系统浏览器打开安装包下载地址，不会自动安装或后台更新。";
+  }
   if (state.status === "available") {
     return `适用安装包：${state.platformLabel || "当前平台"}。点击“下载最新版”会打开浏览器下载安装包，请退出当前客户端后手动安装。`;
   }
