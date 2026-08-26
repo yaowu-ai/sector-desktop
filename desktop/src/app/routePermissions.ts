@@ -1,4 +1,5 @@
 import type { AppRoute } from './routes'
+import type { PlatformDefinition } from '../platforms/types'
 
 export const DESKTOP_USER_ROLES = {
   technician: 1,
@@ -37,4 +38,13 @@ export function canAccessRoute(routeKey: string, role: DesktopUserRole) {
 
 export function filterRoutesByRole<T extends Pick<AppRoute, 'key'>>(routes: T[], role: DesktopUserRole) {
   return routes.filter((route) => canAccessRoute(route.key, role))
+}
+
+export function canAccessPlatform(platform: Pick<PlatformDefinition, 'status'>, role: DesktopUserRole) {
+  if (role === DESKTOP_USER_ROLES.technician) return true
+  return platform.status === 'supported'
+}
+
+export function filterPlatformsByRole<T extends Pick<PlatformDefinition, 'status'>>(platforms: T[], role: DesktopUserRole) {
+  return platforms.filter((platform) => canAccessPlatform(platform, role))
 }

@@ -243,6 +243,33 @@ body {
   background: #f0f6ff;
 }
 
+.ant-card:has(.plan-option-card) > .ant-card-body > .ant-row:has(> .ant-col .plan-option-card) {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 8px;
+  scroll-snap-type: x proximity;
+}
+
+.ant-card:has(.plan-option-card) > .ant-card-body > .ant-row:has(> .ant-col .plan-option-card) > .ant-col {
+  flex: 0 0 min(500px, 82vw);
+  max-width: min(500px, 82vw);
+  scroll-snap-align: start;
+}
+
+.ant-card:has(.plan-option-card) > .ant-card-body > .ant-row:has(> .ant-col .plan-option-card)::-webkit-scrollbar {
+  height: 8px;
+}
+
+.ant-card:has(.plan-option-card) > .ant-card-body > .ant-row:has(> .ant-col .plan-option-card)::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+.ant-card:has(.plan-option-card) > .ant-card-body > .ant-row:has(> .ant-col .plan-option-card)::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 .plan-option-head {
   width: 100%;
   justify-content: space-between;

@@ -36,6 +36,15 @@
       "resources/templates/config/comments_brand.txt",
       "resources/runtime/**/*"
     ],
+    "windows": {
+      "nsis": {
+        "languages": ["SimpChinese"],
+        "customLanguageFiles": {
+          "SimpChinese": "nsis/SimpChinese.nsh"
+        },
+        "sidebarImage": "icons/nsis-sidebar-164x314.bmp"
+      }
+    },
     "macOS": {
       "signingIdentity": "-"
     }
