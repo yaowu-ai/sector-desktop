@@ -56,6 +56,7 @@ export interface DesktopPlanItem {
     scheduler: boolean
     targetEngagement: boolean
     exportCsv: boolean
+    aiComment: boolean
   } | null
   status: 'active' | 'disabled'
 }
@@ -389,6 +390,25 @@ export async function verifyDesktopLicense(license: DesktopLicenseCurrentRespons
   }
 }
 
+export function desktopLicenseAllowsAiComment(license: DesktopLicenseCurrentResponse | null) {
+  return readDesktopLicenseLimits(license).aiComment
+}
+
+export function readDesktopLicenseLimits(license: DesktopLicenseCurrentResponse | null) {
+  const limits = license?.claims?.limits
+  if (!limits || typeof limits !== 'object' || Array.isArray(limits)) return DEFAULT_DESKTOP_LIMITS
+  const record = limits as Record<string, unknown>
+  return {
+    maxEnabledAccounts: readLimitNumber(record.maxEnabledAccounts),
+    maxDevices: readLimitNumber(record.maxDevices),
+    dailyTaskRuns: readLimitNumber(record.dailyTaskRuns),
+    scheduler: record.scheduler === true,
+    targetEngagement: record.targetEngagement === true,
+    exportCsv: record.exportCsv === true,
+    aiComment: record.aiComment === true,
+  }
+}
+
 export function reportDesktopUsage(
   session: DesktopSession,
   payload: { metricKey: string; metricValue: string | number; metricDate?: string },
@@ -534,6 +554,25 @@ function getApiOrigin(apiBaseUrl: string) {
 
 function normalizeUserRole(role: unknown): 1 | 2 {
   return role === 1 ? 1 : DEFAULT_DESKTOP_USER_ROLE
+}
+
+function readLimitNumber(value: unknown) {
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.trunc(value)
+  if (typeof value === 'string' && value.trim()) {
+    const next = Number(value)
+    if (Number.isFinite(next)) return Math.trunc(next)
+  }
+  return 0
+}
+
+const DEFAULT_DESKTOP_LIMITS = {
+  maxEnabledAccounts: 0,
+  maxDevices: 0,
+  dailyTaskRuns: 0,
+  scheduler: false,
+  targetEngagement: false,
+  exportCsv: false,
+  aiComment: false,
 }
 
 function normalizePemEnvValue(value: string) {

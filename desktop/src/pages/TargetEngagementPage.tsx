@@ -27,6 +27,7 @@ import { PageHeader } from '../components/PageHeader'
 import { ProcessOutputPanel } from '../components/ProcessOutputPanel'
 import { StatusTag } from '../components/StatusTag'
 import { AccountBrowserEnvironment } from '../components/AccountBrowserEnvironment'
+import { useDesktopAuth } from '../app/DesktopAuthContext'
 import { usePlatformContext } from '../app/PlatformContext'
 import {
   loadConfig,
@@ -38,6 +39,7 @@ import {
   saveCommentPools,
   saveTargetEngagementSettings,
 } from '../services/api'
+import { readDesktopLicenseLimits } from '../services/desktopApi'
 import { getPlatformLabel, isExecutablePlatform } from '../services/platforms'
 import type {
   Account,
@@ -69,6 +71,8 @@ interface TargetEngagementPageProps {
 
 export function TargetEngagementPage({ hideProcessOutput = false, onDataChanged }: TargetEngagementPageProps = {}) {
   const { currentPlatform } = usePlatformContext()
+  const { license } = useDesktopAuth()
+  const licenseLimits = readDesktopLicenseLimits(license)
   const [form] = Form.useForm<TargetEngagementSettings>()
   const [snapshot, setSnapshot] = useState<ConfigSnapshot | null>(null)
   const [accounts, setAccounts] = useState<Account[]>([])
@@ -136,6 +140,10 @@ export function TargetEngagementPage({ hideProcessOutput = false, onDataChanged 
   }, [refresh])
 
   const saveSettings = async () => {
+    if (!licenseLimits.targetEngagement) {
+      message.warning('当前套餐不支持目标号互动')
+      return
+    }
     const values = normalizeTargetSettings(await form.validateFields())
     setSaving(true)
     try {
@@ -151,6 +159,10 @@ export function TargetEngagementPage({ hideProcessOutput = false, onDataChanged 
   }
 
   const confirmRunParticipants = () => {
+    if (!licenseLimits.targetEngagement) {
+      message.warning('当前套餐不支持目标号互动')
+      return
+    }
     const settings = normalizeTargetSettings(form.getFieldsValue(true))
     if (!settings.enabled) {
       message.warning('请先启用目标号互动')
@@ -266,7 +278,10 @@ export function TargetEngagementPage({ hideProcessOutput = false, onDataChanged 
   }
 
   const settings = normalizeTargetSettings(snapshot?.targetEngagement)
-  const runParticipantsDisabledReason = !settings.enabled
+  const targetEntitlementReason = licenseLimits.targetEngagement ? undefined : '当前套餐不支持目标号互动'
+  const runParticipantsDisabledReason = targetEntitlementReason
+    ? targetEntitlementReason
+    : !settings.enabled
     ? '目标号互动配置未启用'
     : executableParticipantAccounts.length === 0
       ? '没有可执行的参与账号'
@@ -289,7 +304,13 @@ export function TargetEngagementPage({ hideProcessOutput = false, onDataChanged 
             <Button icon={<RefreshCw size={16} />} onClick={() => void refresh()} loading={loading}>
               刷新
             </Button>
-            <Button type="primary" icon={<Save size={16} />} onClick={() => void saveSettings()} loading={saving}>
+            <Button
+              type="primary"
+              icon={<Save size={16} />}
+              onClick={() => void saveSettings()}
+              loading={saving}
+              disabled={Boolean(targetEntitlementReason)}
+            >
               保存配置
             </Button>
           </Space>
@@ -304,7 +325,7 @@ export function TargetEngagementPage({ hideProcessOutput = false, onDataChanged 
                 <Row gutter={16}>
                   <Col xs={24} md={8}>
                     <Form.Item name="enabled" label="启用" valuePropName="checked">
-                      <Switch checkedChildren="开启" unCheckedChildren="关闭" />
+                      <Switch checkedChildren="开启" unCheckedChildren="关闭" disabled={Boolean(targetEntitlementReason)} />
                     </Form.Item>
                   </Col>
                   <Col xs={24} md={16}>
@@ -426,7 +447,7 @@ export function TargetEngagementPage({ hideProcessOutput = false, onDataChanged 
             <Card title="立即执行" extra={<Target size={16} />}>
               <Space direction="vertical" size={14} className="full-width">
                 <Descriptions size="small" column={1} bordered>
-                  <Descriptions.Item label="配置状态">
+                  <Descriptions.Item label="目标号配置状态">
                     <StatusTag status={settings.enabled ? 'ok' : 'warning'} label={settings.enabled ? '启用' : '关闭'} />
                   </Descriptions.Item>
                   <Descriptions.Item label="目标号">{settings.handles.length}</Descriptions.Item>

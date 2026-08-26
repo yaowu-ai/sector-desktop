@@ -35,6 +35,9 @@ from browser_providers import account_provider_name, BITBROWSER
 
 
 SCHEDULER_LOGIN_CREDENTIALS_ENV = "AM_SCHEDULER_LOGIN_CREDENTIALS"
+DESKTOP_API_BASE_URL_ENV = "AM_DESKTOP_API_BASE_URL"
+DESKTOP_ACCESS_TOKEN_ENV = "AM_DESKTOP_ACCESS_TOKEN"
+DEVICE_FINGERPRINT_ENV = "AM_DEVICE_FINGERPRINT"
 ACCOUNT_LOGIN_ENV_KEYS = (
     "AM_LOGIN_ACCOUNT_ID",
     "AM_LOGIN_USERNAME",
@@ -153,6 +156,30 @@ def bitbrowser_responsive():
         return False
 
 
+def reserve_scheduler_task_quota(account_id, platform):
+    api_base_url = os.environ.get(DESKTOP_API_BASE_URL_ENV, "").strip().rstrip("/")
+    access_token = os.environ.get(DESKTOP_ACCESS_TOKEN_ENV, "").strip()
+    device_fingerprint = os.environ.get(DEVICE_FINGERPRINT_ENV, "").strip()
+    if not api_base_url or not access_token or not device_fingerprint:
+        return "missing desktop entitlement context"
+    try:
+        response = requests.post(
+            f"{api_base_url}/usage/reserve-task",
+            json={
+                "deviceFingerprint": device_fingerprint,
+                "taskType": f"{platform}_scheduler",
+            },
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=10,
+        )
+        payload = response.json()
+    except Exception as exc:
+        return f"daily task quota check failed for {account_id}: {exc}"
+    if response.ok and payload.get("success"):
+        return None
+    return payload.get("desc") or f"daily task quota check rejected account {account_id}"
+
+
 def resolve_active_hours(account, cfg):
     """Account-specific active_hours, falling back to defaults."""
     platform = account_platform(account)
@@ -188,6 +215,12 @@ async def account_session_task(account_id, job_id=None):
         detail = "BitBrowser API unreachable on 127.0.0.1:54345. Is the BitBrowser app running?"
         main_runtime.record_scheduler_job_finished(job_id, "skipped", detail)
         logger.error(f"Skipped {account_id} — {detail}")
+        return
+
+    quota_error = reserve_scheduler_task_quota(account_id, platform)
+    if quota_error:
+        main_runtime.record_scheduler_job_finished(job_id, "skipped", quota_error)
+        logger.error(f"Skipped {account_id} — {quota_error}")
         return
 
     async with session_lock:

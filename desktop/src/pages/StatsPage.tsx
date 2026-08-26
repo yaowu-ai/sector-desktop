@@ -20,9 +20,11 @@ import type { Dayjs } from 'dayjs'
 import { BarChart3, Database, Download, RefreshCw, Target, Users } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
+import { useDesktopAuth } from '../app/DesktopAuthContext'
 import { PageHeader } from '../components/PageHeader'
 import { PlatformScopeFilter } from '../components/PlatformScopeFilter'
 import { getSqliteStatus, loadConfig, queryFypStats, queryTargetStats } from '../services/api'
+import { readDesktopLicenseLimits } from '../services/desktopApi'
 import type {
   Account,
   FypAccountStats,
@@ -81,6 +83,8 @@ const EMPTY_TARGET_STATS: TargetStatsSummary = {
 }
 
 export function StatsPage() {
+  const { license } = useDesktopAuth()
+  const licenseLimits = readDesktopLicenseLimits(license)
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS)
   const [accounts, setAccounts] = useState<Account[]>([])
   const [sqliteStatus, setSqliteStatus] = useState<SqliteStatus | null>(null)
@@ -152,6 +156,10 @@ export function StatsPage() {
   }
 
   const exportCsv = () => {
+    if (!licenseLimits.exportCsv) {
+      message.warning('当前套餐不支持 CSV 导出')
+      return
+    }
     const rows = buildCsvRows(displayedFypStats, displayedTargetStats)
     if (rows.length === 0) {
       message.warning('当前筛选范围没有可导出的统计')
@@ -167,7 +175,7 @@ export function StatsPage() {
         description="汇总普通养号和目标号互动统计。"
         extra={
           <Space>
-            <Button icon={<Download size={16} />} onClick={exportCsv} disabled={loading}>
+            <Button icon={<Download size={16} />} onClick={exportCsv} disabled={loading || !licenseLimits.exportCsv}>
               导出 CSV
             </Button>
             <Button type="primary" icon={<RefreshCw size={16} />} loading={loading} onClick={() => void refresh()}>

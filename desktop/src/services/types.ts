@@ -148,6 +148,19 @@ export interface AiCommentGenerationResult {
   model: string
 }
 
+export interface LicenseEntitlementsPayload {
+  maxEnabledAccounts: number
+  maxDevices: number
+  dailyTaskRuns: number
+  scheduler: boolean
+  targetEngagement: boolean
+  exportCsv: boolean
+  aiComment: boolean
+  apiBaseUrl: string
+  accessToken: string
+  deviceFingerprint: string
+}
+
 export type AccountSummary = Account
 
 export interface BrowserProfile {

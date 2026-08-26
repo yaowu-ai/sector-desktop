@@ -39,6 +39,7 @@ const PLAN_QUOTA_ITEMS = [
   { key: "scheduler", label: "自动调度", type: "boolean" },
   { key: "targetEngagement", label: "目标号互动", type: "boolean" },
   { key: "exportCsv", label: "CSV 导出", type: "boolean" },
+  { key: "aiComment", label: "AI评论", type: "boolean" },
 ] as const;
 
 export function PlanCenterPage() {
@@ -203,6 +204,11 @@ export function PlanCenterPage() {
                 icon={<ShieldCheck size={22} />}
                 title="CSV 导出"
                 value={formatBooleanLimit(limits.exportCsv)}
+              />
+              <QuotaCard
+                icon={<ShieldCheck size={22} />}
+                title="AI评论"
+                value={formatBooleanLimit(limits.aiComment)}
               />
             </Row>
           </Card>

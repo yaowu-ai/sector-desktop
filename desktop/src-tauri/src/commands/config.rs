@@ -10,9 +10,11 @@ use std::io::Write;
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use tauri::State;
 
 use crate::paths::{normalize, project_paths, ProjectPaths};
 use crate::security::{redact_line, redact_text};
+use crate::state::{AppState, LicenseEntitlements};
 
 const CONFIG_SCHEMA_VERSION: i64 = 1;
 const DEFAULT_BROWSER_PROVIDER: &str = "bitbrowser";
@@ -445,6 +447,21 @@ pub struct AiCommentPreviewPayload {
     pub settings: AiCommentSettingsPayload,
     pub title: String,
     pub description: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LicenseEntitlementsPayload {
+    pub max_enabled_accounts: i64,
+    pub max_devices: i64,
+    pub daily_task_runs: i64,
+    pub scheduler: bool,
+    pub target_engagement: bool,
+    pub export_csv: bool,
+    pub ai_comment: bool,
+    pub api_base_url: String,
+    pub access_token: String,
+    pub device_fingerprint: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -885,7 +902,10 @@ pub fn save_config(payload: ConfigPayload) -> Result<SaveResult, String> {
 }
 
 #[tauri::command]
-pub fn save_accounts(payload: AccountsPayload) -> Result<SaveResult, String> {
+pub fn save_accounts(
+    payload: AccountsPayload,
+    state: State<'_, AppState>,
+) -> Result<SaveResult, String> {
     let paths = project_paths()?;
     let raw_yaml = fs::read_to_string(&paths.config_path)
         .map_err(|err| format!("failed to read {}: {}", paths.config_path, err))?;
@@ -940,6 +960,7 @@ pub fn save_accounts(payload: AccountsPayload) -> Result<SaveResult, String> {
         }
     }
 
+    ensure_enabled_account_limit(&config_value, &state)?;
     let next_yaml = serde_yaml::to_string(&config_value)
         .map_err(|err| format!("failed to serialize accounts.yaml: {}", err))?;
     let validation = validate_raw_yaml(&next_yaml);
@@ -1051,7 +1072,35 @@ pub fn load_ai_comment_settings() -> Result<AiCommentSettings, String> {
 }
 
 #[tauri::command]
-pub fn save_ai_comment_settings(payload: AiCommentSettingsPayload) -> Result<SaveResult, String> {
+pub fn set_license_entitlements(
+    payload: LicenseEntitlementsPayload,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let mut entitlements = state
+        .license_entitlements
+        .lock()
+        .map_err(|_| "failed to lock license entitlements".to_string())?;
+    *entitlements = LicenseEntitlements {
+        max_enabled_accounts: payload.max_enabled_accounts,
+        max_devices: payload.max_devices,
+        daily_task_runs: payload.daily_task_runs,
+        scheduler: payload.scheduler,
+        target_engagement: payload.target_engagement,
+        export_csv: payload.export_csv,
+        ai_comment: payload.ai_comment,
+        api_base_url: payload.api_base_url.trim().trim_end_matches('/').to_string(),
+        access_token: payload.access_token.trim().to_string(),
+        device_fingerprint: payload.device_fingerprint.trim().to_string(),
+    };
+    Ok(())
+}
+
+#[tauri::command]
+pub fn save_ai_comment_settings(
+    payload: AiCommentSettingsPayload,
+    state: State<'_, AppState>,
+) -> Result<SaveResult, String> {
+    ensure_ai_comment_payload_entitled(&payload, &state)?;
     validate_ai_comment_settings_payload(&payload)?;
 
     let paths = project_paths()?;
@@ -1145,7 +1194,9 @@ pub fn get_ai_comment_api_key_status(
 #[tauri::command]
 pub fn test_ai_comment_connection(
     payload: AiCommentTestPayload,
+    state: State<'_, AppState>,
 ) -> Result<AiCommentGenerationResult, String> {
+    ensure_ai_comment_entitled(&state)?;
     validate_ai_comment_settings_payload(&payload.settings)?;
     run_ai_comment_generation(
         &payload.settings,
@@ -1157,7 +1208,9 @@ pub fn test_ai_comment_connection(
 #[tauri::command]
 pub fn preview_ai_comment(
     payload: AiCommentPreviewPayload,
+    state: State<'_, AppState>,
 ) -> Result<AiCommentGenerationResult, String> {
+    ensure_ai_comment_entitled(&state)?;
     validate_ai_comment_settings_payload(&payload.settings)?;
     let title = payload.title.trim();
     let description = payload.description.as_deref().unwrap_or("").trim();
@@ -1253,7 +1306,9 @@ pub fn save_instagram_warmup_settings(
 #[tauri::command]
 pub fn save_target_engagement_settings(
     payload: TargetEngagementPayload,
+    state: State<'_, AppState>,
 ) -> Result<SaveResult, String> {
+    ensure_target_engagement_entitled(&state)?;
     let platform = normalize_platform(payload.platform.as_deref().unwrap_or("tiktok"), "platform")?;
     ensure_platform_capability(&platform, "targetEngagement")?;
 
@@ -1289,7 +1344,11 @@ pub fn save_target_engagement_settings(
 }
 
 #[tauri::command]
-pub fn save_scheduler_settings(payload: SchedulerSettingsPayload) -> Result<SaveResult, String> {
+pub fn save_scheduler_settings(
+    payload: SchedulerSettingsPayload,
+    state: State<'_, AppState>,
+) -> Result<SaveResult, String> {
+    ensure_scheduler_entitled(&state)?;
     if payload.fires_per_day < 0 {
         return Err("scheduler.fires_per_day must be greater than or equal to 0".to_string());
     }
@@ -1956,6 +2015,91 @@ fn run_ai_comment_generation(
             .map(|error| redact_text(&error, &vec![api_key.to_string()])),
         ..result
     })
+}
+
+fn ensure_ai_comment_payload_entitled(
+    payload: &AiCommentSettingsPayload,
+    state: &State<'_, AppState>,
+) -> Result<(), String> {
+    if !payload.enabled {
+        return Ok(());
+    }
+    ensure_ai_comment_entitled(state)
+}
+
+fn ensure_ai_comment_entitled(state: &State<'_, AppState>) -> Result<(), String> {
+    let entitlements = state
+        .license_entitlements
+        .lock()
+        .map_err(|_| "failed to lock license entitlements".to_string())?;
+    if entitlements.ai_comment {
+        Ok(())
+    } else {
+        Err("当前套餐不支持 AI 评论".to_string())
+    }
+}
+
+fn ensure_target_engagement_entitled(state: &State<'_, AppState>) -> Result<(), String> {
+    let entitlements = state
+        .license_entitlements
+        .lock()
+        .map_err(|_| "failed to lock license entitlements".to_string())?;
+    if entitlements.target_engagement {
+        Ok(())
+    } else {
+        Err("当前套餐不支持目标号互动".to_string())
+    }
+}
+
+fn ensure_scheduler_entitled(state: &State<'_, AppState>) -> Result<(), String> {
+    let entitlements = state
+        .license_entitlements
+        .lock()
+        .map_err(|_| "failed to lock license entitlements".to_string())?;
+    if entitlements.scheduler {
+        Ok(())
+    } else {
+        Err("当前套餐不支持自动调度".to_string())
+    }
+}
+
+fn ensure_enabled_account_limit(
+    config_value: &Value,
+    state: &State<'_, AppState>,
+) -> Result<(), String> {
+    let entitlements = state
+        .license_entitlements
+        .lock()
+        .map_err(|_| "failed to lock license entitlements".to_string())?;
+    if entitlements.max_enabled_accounts < 0 {
+        return Ok(());
+    }
+    let enabled_count = count_enabled_yaml_accounts(config_value);
+    if enabled_count <= entitlements.max_enabled_accounts {
+        Ok(())
+    } else {
+        Err(format!("当前套餐最多启用 {} 个账号", entitlements.max_enabled_accounts))
+    }
+}
+
+fn count_enabled_yaml_accounts(config_value: &Value) -> i64 {
+    config_value
+        .get("accounts")
+        .and_then(Value::as_sequence)
+        .map(|accounts| {
+            accounts
+                .iter()
+                .filter(|account| yaml_bool(account, "enabled").unwrap_or(true))
+                .count() as i64
+        })
+        .unwrap_or(0)
+}
+
+fn yaml_bool(value: &Value, key: &str) -> Option<bool> {
+    value
+        .as_mapping()
+        .and_then(|mapping| mapping.get(Value::String(key.to_string())))
+        .and_then(Value::as_bool)
 }
 
 fn run_ai_comment_python(

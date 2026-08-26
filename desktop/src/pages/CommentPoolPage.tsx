@@ -22,6 +22,7 @@ import { ClipboardPaste, KeyRound, PlugZap, Plus, RefreshCw, Save, Sparkles, Tra
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { PageHeader } from '../components/PageHeader'
+import { useDesktopAuth } from '../app/DesktopAuthContext'
 import { usePlatformContext } from '../app/PlatformContext'
 import {
   deleteAiCommentApiKey,
@@ -34,6 +35,7 @@ import {
   saveCommentPools,
   testAiCommentConnection,
 } from '../services/api'
+import { desktopLicenseAllowsAiComment } from '../services/desktopApi'
 import type {
   AiCommentApiKeyStatus,
   AiCommentGenerationResult,
@@ -77,6 +79,8 @@ const DEFAULT_AI_COMMENT_SETTINGS: AiCommentSettings = {
 
 export function CommentPoolPage() {
   const { currentPlatform, currentPlatformDefinition } = usePlatformContext()
+  const { license } = useDesktopAuth()
+  const aiCommentAllowed = desktopLicenseAllowsAiComment(license)
   const [snapshot, setSnapshot] = useState<CommentPoolsSnapshot | null>(null)
   const [drafts, setDrafts] = useState<Record<PoolKey, PoolDraft>>({
     general: emptyDraft(),
@@ -173,6 +177,10 @@ export function CommentPoolPage() {
   }
 
   const updateAiSettings = <Key extends keyof AiCommentSettings>(key: Key, value: AiCommentSettings[Key]) => {
+    if (key === 'enabled' && Boolean(value) && !aiCommentAllowed) {
+      message.warning('当前套餐不支持 AI 评论')
+      return
+    }
     setAiSettings((current) => ({ ...current, [key]: value }))
     if (key === 'provider') {
       void refreshApiKeyStatus(String(value))
@@ -192,7 +200,7 @@ export function CommentPoolPage() {
   const saveAiSettingsOnly = async () => {
     setSavingAiSettings(true)
     try {
-      const nextSettings = normalizeAiSettings(aiSettings)
+      const nextSettings = normalizeAiSettings(aiCommentAllowed ? aiSettings : { ...aiSettings, enabled: false })
       const result = await saveAiCommentSettings(nextSettings)
       setAiSettings(nextSettings)
       setSavedAiSettings(nextSettings)
@@ -249,6 +257,10 @@ export function CommentPoolPage() {
   }
 
   const testAiConnection = async () => {
+    if (!aiCommentAllowed) {
+      message.warning('当前套餐不支持 AI 评论')
+      return
+    }
     setTestingAi(true)
     try {
       const result = await testAiCommentConnection({ settings: normalizeAiSettings(aiSettings) })
@@ -266,6 +278,10 @@ export function CommentPoolPage() {
   }
 
   const previewAi = async () => {
+    if (!aiCommentAllowed) {
+      message.warning('当前套餐不支持 AI 评论')
+      return
+    }
     if (!previewTitle.trim() && !previewDescription.trim()) {
       message.warning('请输入示例标题或描述')
       return
@@ -437,7 +453,8 @@ export function CommentPoolPage() {
           </Row>
 
           <AiCommentSettingsPanel
-            settings={aiSettings}
+            settings={aiCommentAllowed ? aiSettings : { ...aiSettings, enabled: false }}
+            allowed={aiCommentAllowed}
             saved={apiKeyStatus?.saved ?? false}
             readable={apiKeyStatus?.readable ?? false}
             statusError={apiKeyStatus?.error}
@@ -588,6 +605,7 @@ function CommentPoolEditor({
 
 function AiCommentSettingsPanel({
   settings,
+  allowed,
   saved,
   readable,
   statusError,
@@ -613,6 +631,7 @@ function AiCommentSettingsPanel({
   onPreviewDescriptionChange,
 }: {
   settings: AiCommentSettings
+  allowed: boolean
   saved: boolean
   readable: boolean
   statusError?: string
@@ -653,6 +672,9 @@ function AiCommentSettingsPanel({
       }
     >
       <Space direction="vertical" size={16} className="full-width">
+        {!allowed ? (
+          <Alert type="warning" showIcon message="当前套餐不支持 AI 评论，运行任务时会使用评论池。" />
+        ) : null}
         {!saved ? (
           <Alert type="warning" showIcon message="未配置 API Key，开启后仍会回退评论池。" />
         ) : null}
@@ -664,7 +686,11 @@ function AiCommentSettingsPanel({
           <Col xs={24} lg={8}>
             <Space direction="vertical" size={6} className="full-width">
               <Typography.Text strong>启用 AI 评论</Typography.Text>
-              <Switch checked={settings.enabled} onChange={(checked) => onUpdate('enabled', checked)} />
+              <Switch
+                checked={settings.enabled}
+                disabled={!allowed}
+                onChange={(checked) => onUpdate('enabled', checked)}
+              />
             </Space>
           </Col>
           <Col xs={24} lg={8}>
@@ -768,7 +794,7 @@ function AiCommentSettingsPanel({
         <Row gutter={[16, 16]}>
           <Col xs={24} lg={10}>
             <Space direction="vertical" size={8} className="full-width">
-              <Button icon={<PlugZap size={16} />} loading={testing} onClick={onTest}>
+              <Button icon={<PlugZap size={16} />} loading={testing} disabled={!allowed} onClick={onTest}>
                 测试连接
               </Button>
               {testResult ? <AiCommentResultAlert result={testResult} compact /> : null}
@@ -787,7 +813,7 @@ function AiCommentSettingsPanel({
                 placeholder="示例描述"
                 onChange={(event) => onPreviewDescriptionChange(event.target.value)}
               />
-              <Button icon={<Sparkles size={16} />} loading={previewing} onClick={onPreview}>
+              <Button icon={<Sparkles size={16} />} loading={previewing} disabled={!allowed} onClick={onPreview}>
                 试生成
               </Button>
               {previewResult ? <AiCommentResultAlert result={previewResult} /> : null}

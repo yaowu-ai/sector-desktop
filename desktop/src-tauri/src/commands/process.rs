@@ -1,5 +1,6 @@
 use chrono::Local;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 #[cfg(windows)]
@@ -18,7 +19,7 @@ use crate::commands::config::{
 };
 use crate::paths::{normalize, project_paths, project_root, python_command_parts, ProjectPaths};
 use crate::security::redact_line;
-use crate::state::{AppState, AuthInterventionState, BrowserPreviewState, RunState};
+use crate::state::{AppState, AuthInterventionState, BrowserPreviewState, LicenseEntitlements, RunState};
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -158,6 +159,12 @@ pub struct StopResult {
     message: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct DesktopApiEnvelope {
+    success: bool,
+    desc: String,
+}
+
 #[tauri::command]
 pub fn run_python_script(
     request: PythonRunRequest,
@@ -186,6 +193,7 @@ pub fn run_one_account(
     validate_account_id(&account_id)?;
     run_platform_task_inner(
         state.current_run.clone(),
+        state.license_entitlements.clone(),
         PlatformTaskRequest {
             platform: "tiktok".to_string(),
             task_type: "fyp".to_string(),
@@ -207,6 +215,7 @@ pub fn run_account_script(
 pub fn run_all_accounts(state: State<'_, AppState>) -> Result<ProcessStartResult, String> {
     run_platform_task_inner(
         state.current_run.clone(),
+        state.license_entitlements.clone(),
         PlatformTaskRequest {
             platform: "tiktok".to_string(),
             task_type: "fyp".to_string(),
@@ -226,6 +235,7 @@ pub fn run_selected_accounts(
     }
     run_platform_task_inner(
         state.current_run.clone(),
+        state.license_entitlements.clone(),
         PlatformTaskRequest {
             platform: "tiktok".to_string(),
             task_type: "fyp".to_string(),
@@ -240,7 +250,11 @@ pub fn run_platform_task(
     request: PlatformTaskRequest,
     state: State<'_, AppState>,
 ) -> Result<ProcessStartResult, String> {
-    run_platform_task_inner(state.current_run.clone(), request)
+    run_platform_task_inner(
+        state.current_run.clone(),
+        state.license_entitlements.clone(),
+        request,
+    )
 }
 
 #[tauri::command]
@@ -251,6 +265,7 @@ pub fn run_tiktok_register(
     let account_id = account_id.trim().to_string();
     validate_account_id(&account_id)?;
     ensure_tiktok_register_account(&account_id)?;
+    reserve_daily_task_quota(&state.license_entitlements, "tiktok_register")?;
 
     {
         let mut run = state
@@ -263,6 +278,7 @@ pub fn run_tiktok_register(
 
     spawn_account_process(
         state.current_run.clone(),
+        state.license_entitlements.clone(),
         account_id,
         "tiktok_register".to_string(),
     )
@@ -285,6 +301,7 @@ pub fn run_tiktok_register_batch(
         validate_account_id(account_id)?;
         ensure_tiktok_register_account(account_id)?;
     }
+    reserve_daily_task_quota(&state.license_entitlements, "tiktok_register")?;
 
     let mut queue = account_ids.clone();
     let first = queue.remove(0);
@@ -302,6 +319,7 @@ pub fn run_tiktok_register_batch(
 
     spawn_account_process(
         state.current_run.clone(),
+        state.license_entitlements.clone(),
         first,
         "tiktok_register".to_string(),
     )
@@ -455,6 +473,7 @@ pub fn run_gmail_setup(
         "gmail".to_string(),
         None,
         env_vars,
+        None,
     )
 }
 
@@ -516,14 +535,23 @@ pub fn skip_auth_intervention(state: State<'_, AppState>) -> Result<StopResult, 
 
 fn run_accounts(
     run_state: Arc<Mutex<RunState>>,
+    license_entitlements: Arc<Mutex<LicenseEntitlements>>,
     account_ids: Vec<String>,
     task_type: String,
 ) -> Result<ProcessStartResult, String> {
-    run_accounts_for_platform(run_state, "tiktok", "warmupTask", account_ids, task_type)
+    run_accounts_for_platform(
+        run_state,
+        license_entitlements,
+        "tiktok",
+        "warmupTask",
+        account_ids,
+        task_type,
+    )
 }
 
 fn run_platform_task_inner(
     run_state: Arc<Mutex<RunState>>,
+    license_entitlements: Arc<Mutex<LicenseEntitlements>>,
     request: PlatformTaskRequest,
 ) -> Result<ProcessStartResult, String> {
     let platform = normalize_platform(&request.platform, "platform")?;
@@ -546,6 +574,8 @@ fn run_platform_task_inner(
         ));
     }
     let capability = capability_for_task(&task_type)?;
+    ensure_task_capability_entitled(&license_entitlements, capability)?;
+    reserve_daily_task_quota(&license_entitlements, &task_type)?;
     if !account_ids.is_empty() {
         ensure_account_ids_belong_to_platform(&platform, &account_ids)
             .map_err(|error| format!("{}; capability='{}'", error, capability))?;
@@ -597,6 +627,7 @@ fn run_platform_task_inner(
 
     run_accounts_for_platform(
         run_state,
+        license_entitlements,
         &platform,
         capability,
         account_ids,
@@ -606,6 +637,7 @@ fn run_platform_task_inner(
 
 fn run_accounts_for_platform(
     run_state: Arc<Mutex<RunState>>,
+    license_entitlements: Arc<Mutex<LicenseEntitlements>>,
     platform: &str,
     capability: &str,
     account_ids: Vec<String>,
@@ -629,7 +661,7 @@ fn run_accounts_for_platform(
         run.queue = remaining;
     }
 
-    spawn_account_process(run_state, first, task_type)
+    spawn_account_process(run_state, license_entitlements, first, task_type)
 }
 
 fn start_single_python_process(
@@ -653,6 +685,7 @@ fn start_single_python_process(
 
 fn spawn_account_process(
     run_state: Arc<Mutex<RunState>>,
+    license_entitlements: Arc<Mutex<LicenseEntitlements>>,
     account_id: String,
     task_type: String,
 ) -> Result<ProcessStartResult, String> {
@@ -667,7 +700,7 @@ fn spawn_account_process(
             return Err(error);
         }
     };
-    let (ai_env_vars, ai_redactions) = ai_comment_env_for_runtime();
+    let (ai_env_vars, ai_redactions) = ai_comment_env_for_runtime(&license_entitlements);
     for (key, value) in ai_env_vars {
         env_vars.insert(key, value);
     }
@@ -697,6 +730,7 @@ fn spawn_account_process(
         task_type,
         Some(account_id),
         env_vars,
+        Some(license_entitlements),
     )
 }
 
@@ -722,6 +756,7 @@ fn spawn_process(
         task_type,
         account_id,
         HashMap::new(),
+        None,
     )
 }
 
@@ -731,6 +766,7 @@ fn spawn_process_with_env(
     task_type: String,
     account_id: Option<String>,
     mut env_vars: HashMap<String, String>,
+    license_entitlements: Option<Arc<Mutex<LicenseEntitlements>>>,
 ) -> Result<ProcessStartResult, String> {
     let result = spawn_process_with_env_inner(
         run_state.clone(),
@@ -738,6 +774,7 @@ fn spawn_process_with_env(
         task_type,
         account_id,
         &mut env_vars,
+        license_entitlements,
     );
     if let Err(error) = &result {
         mark_start_failure(&run_state, error);
@@ -788,7 +825,12 @@ fn login_env_for_account(
     Ok((env_vars, vec![password]))
 }
 
-fn ai_comment_env_for_runtime() -> (HashMap<String, String>, Vec<String>) {
+fn ai_comment_env_for_runtime(
+    license_entitlements: &Arc<Mutex<LicenseEntitlements>>,
+) -> (HashMap<String, String>, Vec<String>) {
+    if !license_allows_ai_comment(license_entitlements) {
+        return (HashMap::new(), Vec::new());
+    }
     let Ok(config) = load_config() else {
         return (HashMap::new(), Vec::new());
     };
@@ -805,6 +847,71 @@ fn ai_comment_env_for_runtime() -> (HashMap<String, String>, Vec<String>) {
     let mut env_vars = HashMap::new();
     env_vars.insert(AI_COMMENT_API_KEY_ENV.to_string(), api_key.clone());
     (env_vars, vec![api_key])
+}
+
+fn ensure_task_capability_entitled(
+    license_entitlements: &Arc<Mutex<LicenseEntitlements>>,
+    capability: &str,
+) -> Result<(), String> {
+    let entitlements = license_entitlements
+        .lock()
+        .map_err(|_| "failed to lock license entitlements".to_string())?;
+    match capability {
+        "targetEngagement" if !entitlements.target_engagement => {
+            Err("当前套餐不支持目标号互动".to_string())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn reserve_daily_task_quota(
+    license_entitlements: &Arc<Mutex<LicenseEntitlements>>,
+    task_type: &str,
+) -> Result<(), String> {
+    let entitlements = license_entitlements
+        .lock()
+        .map_err(|_| "failed to lock license entitlements".to_string())?
+        .clone();
+    if entitlements.access_token.is_empty() || entitlements.device_fingerprint.is_empty() {
+        return Err("当前授权信息不完整，无法校验每日任务额度".to_string());
+    }
+    tauri::async_runtime::block_on(reserve_daily_task_quota_remote(entitlements, task_type))
+}
+
+async fn reserve_daily_task_quota_remote(
+    entitlements: LicenseEntitlements,
+    task_type: &str,
+) -> Result<(), String> {
+    let url = format!("{}/usage/reserve-task", entitlements.api_base_url);
+    let response = reqwest::Client::new()
+        .post(url)
+        .bearer_auth(entitlements.access_token)
+        .json(&json!({
+            "deviceFingerprint": entitlements.device_fingerprint,
+            "taskType": task_type,
+        }))
+        .send()
+        .await
+        .map_err(|err| format!("每日任务额度校验失败：{}", err))?;
+    let status = response.status();
+    let envelope = response
+        .json::<DesktopApiEnvelope>()
+        .await
+        .map_err(|err| format!("每日任务额度响应解析失败：{}", err))?;
+    if status.is_success() && envelope.success {
+        Ok(())
+    } else {
+        Err(envelope.desc)
+    }
+}
+
+fn license_allows_ai_comment(
+    license_entitlements: &Arc<Mutex<LicenseEntitlements>>,
+) -> bool {
+    license_entitlements
+        .lock()
+        .map(|entitlements| entitlements.ai_comment)
+        .unwrap_or(false)
 }
 
 fn sensitive_env_redactions(env_vars: &HashMap<String, String>) -> Vec<String> {
@@ -831,6 +938,7 @@ fn spawn_process_with_env_inner(
     task_type: String,
     account_id: Option<String>,
     env_vars: &mut HashMap<String, String>,
+    license_entitlements: Option<Arc<Mutex<LicenseEntitlements>>>,
 ) -> Result<ProcessStartResult, String> {
     let paths = project_paths()?;
     let (command, current_dir) = build_runtime_command(&script_args, &paths)?;
@@ -899,7 +1007,7 @@ fn spawn_process_with_env_inner(
         run.child = Some(child);
     }
 
-    spawn_waiter(run_state.clone(), task_type.clone());
+    spawn_waiter(run_state.clone(), task_type.clone(), license_entitlements);
 
     Ok(ProcessStartResult {
         process_id: Some(process_id),
@@ -935,7 +1043,11 @@ fn mark_start_failure(run_state: &Arc<Mutex<RunState>>, error: &str) {
     run.child = None;
 }
 
-fn spawn_waiter(run_state: Arc<Mutex<RunState>>, task_type: String) {
+fn spawn_waiter(
+    run_state: Arc<Mutex<RunState>>,
+    task_type: String,
+    license_entitlements: Option<Arc<Mutex<LicenseEntitlements>>>,
+) {
     thread::spawn(move || loop {
         thread::sleep(Duration::from_millis(500));
 
@@ -1010,9 +1122,13 @@ fn spawn_waiter(run_state: Arc<Mutex<RunState>>, task_type: String) {
         };
 
         if let Some(account_id) = next_account {
-            if let Err(error) =
-                spawn_account_process(run_state.clone(), account_id, task_type.clone())
-            {
+            let result = match license_entitlements.clone() {
+                Some(entitlements) => {
+                    spawn_account_process(run_state.clone(), entitlements, account_id, task_type.clone())
+                }
+                None => Err("missing license entitlements for queued account run".to_string()),
+            };
+            if let Err(error) = result {
                 if let Ok(mut run) = run_state.lock() {
                     run.status = "partial_failed".to_string();
                     run.error = Some(error);

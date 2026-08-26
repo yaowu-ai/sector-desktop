@@ -34,6 +34,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { confirmDanger } from "../components/ConfirmDanger";
 import { PageHeader } from "../components/PageHeader";
 import { StatusTag } from "../components/StatusTag";
+import { useDesktopAuth } from "../app/DesktopAuthContext";
 import { usePlatformContext } from "../app/PlatformContext";
 import {
   checkBitbrowserApi,
@@ -46,6 +47,7 @@ import {
   startScheduler,
   stopScheduler,
 } from "../services/api";
+import { readDesktopLicenseLimits } from "../services/desktopApi";
 import {
   getAutomaticExecutionDisabledReason,
   getPlatformLabel,
@@ -100,6 +102,8 @@ const EMPTY_PROCESS: SchedulerProcessStatus = {
 
 export function SchedulerPage() {
   const { currentPlatform } = usePlatformContext();
+  const { license } = useDesktopAuth();
+  const licenseLimits = readDesktopLicenseLimits(license);
   const [form] = Form.useForm<ActiveHoursFormValues>();
   const [bitbrowser, setBitbrowser] = useState<ApiStatus | null>(null);
   const [health, setHealth] = useState<SchedulerHealth>(EMPTY_HEALTH);
@@ -127,9 +131,7 @@ export function SchedulerPage() {
   const schedulerStartDisabledReason =
     processStatus.status === "running"
       ? "调度服务已在运行"
-      : !isExecutablePlatform(currentPlatform)
-        ? getAutomaticExecutionDisabledReason(currentPlatform, "scheduler")
-        : undefined;
+      : schedulerDisabledReason(licenseLimits.scheduler, currentPlatform);
   const rowAccountIds = useMemo(
     () => new Set(rows.map((row) => row.id)),
     [rows],
@@ -243,6 +245,11 @@ export function SchedulerPage() {
   }, [refresh]);
 
   const start = async () => {
+    const disabledReason = schedulerDisabledReason(licenseLimits.scheduler, currentPlatform);
+    if (disabledReason) {
+      message.warning(disabledReason);
+      return;
+    }
     setStarting(true);
     try {
       const result = await startScheduler();
@@ -301,6 +308,11 @@ export function SchedulerPage() {
   };
 
   const save = async () => {
+    const disabledReason = schedulerDisabledReason(licenseLimits.scheduler, currentPlatform);
+    if (disabledReason) {
+      message.warning(disabledReason);
+      return;
+    }
     setSaving(true);
     try {
       await saveSchedulerSettings({
@@ -560,6 +572,7 @@ export function SchedulerPage() {
                 type="primary"
                 icon={<Save size={16} />}
                 loading={saving}
+                disabled={Boolean(schedulerDisabledReason(licenseLimits.scheduler, currentPlatform))}
                 onClick={() => void save()}
               >
                 保存配置
@@ -825,6 +838,14 @@ function formatSchedulerJobRunStatus(status: SchedulerJobRunRecord["status"]) {
     return "未运行";
   }
   return status || "-";
+}
+
+function schedulerDisabledReason(schedulerAllowed: boolean, currentPlatform: Platform) {
+  if (!schedulerAllowed) return "当前套餐不支持自动调度";
+  if (!isExecutablePlatform(currentPlatform)) {
+    return getAutomaticExecutionDisabledReason(currentPlatform, "scheduler");
+  }
+  return undefined;
 }
 
 function schedulerJobRunStatusColor(status: SchedulerJobRunRecord["status"]) {
