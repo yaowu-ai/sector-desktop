@@ -38,6 +38,7 @@ fn main() {
             commands::config::save_login_password,
             commands::config::delete_login_password,
             commands::config::load_ai_comment_settings,
+            commands::config::set_license_entitlements,
             commands::config::save_ai_comment_settings,
             commands::config::save_ai_comment_api_key,
             commands::config::delete_ai_comment_api_key,

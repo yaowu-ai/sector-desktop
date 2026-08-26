@@ -67,10 +67,4 @@ notify:
     url: ""
 
 accounts:
-  - id: example_tiktok_1
-    platform: tiktok
-    enabled: false
-    ip_group: 1
-    active_hours: [[9, 12]]
-    bitbrowser_profile_id: ""
-    notes: "Replace this example with your own account and BitBrowser profile."
+  []

@@ -154,7 +154,6 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
     const onProcessStarted = (event: Event) => {
       const result = (event as CustomEvent<ProcessStartResult>).detail
       if (desktopAuth.session) {
-        void reportUsageMetric(desktopAuth.session, 'desktop_task_started', 1)
         if (result?.taskType) {
           void reportUsageMetric(desktopAuth.session, `desktop_task_started.${result.taskType}`, 1)
         }
@@ -224,6 +223,7 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
         <Header className="app-header">
           <Space size={16} wrap>
             <PlatformSelector
+              userRole={userRole}
               canOpenSettings={isTechnician}
               onOpenSettings={() => {
                 if (permittedAppRoutes.some((route) => route.key === 'platforms')) {

@@ -7,6 +7,7 @@ use std::net::TcpStream;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::State;
 
@@ -14,11 +15,14 @@ use crate::commands::config::{
     load_config, read_ai_comment_api_key_for_runtime, read_login_password_for_runtime,
 };
 use crate::paths::{normalize, project_paths, project_root, python_command_parts, ProjectPaths};
-use crate::state::AppState;
+use crate::state::{AppState, LicenseEntitlements};
 
 const SCHEDULER_HOST: &str = "127.0.0.1";
 const SCHEDULER_PORT: u16 = 9601;
 const SCHEDULER_LOGIN_CREDENTIALS_ENV: &str = "AM_SCHEDULER_LOGIN_CREDENTIALS";
+const DESKTOP_API_BASE_URL_ENV: &str = "AM_DESKTOP_API_BASE_URL";
+const DESKTOP_ACCESS_TOKEN_ENV: &str = "AM_DESKTOP_ACCESS_TOKEN";
+const DEVICE_FINGERPRINT_ENV: &str = "AM_DEVICE_FINGERPRINT";
 const AI_COMMENT_API_KEY_ENV: &str = "AM_AI_COMMENT_API_KEY";
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -124,6 +128,7 @@ struct RawHealth {
 
 #[tauri::command]
 pub fn start_scheduler(state: State<'_, AppState>) -> Result<SchedulerStartResult, String> {
+    ensure_scheduler_entitled(state.license_entitlements.clone())?;
     {
         let mut scheduler = state
             .scheduler_process
@@ -175,7 +180,8 @@ pub fn start_scheduler(state: State<'_, AppState>) -> Result<SchedulerStartResul
     }
 
     let login_credentials = scheduler_login_credentials()?;
-    let ai_comment_api_key = scheduler_ai_comment_api_key();
+    let ai_comment_api_key = scheduler_ai_comment_api_key(state.license_entitlements.clone());
+    let quota_env = scheduler_quota_env(state.license_entitlements.clone())?;
     let (command, current_dir) = scheduler_command_for_paths(&paths)?;
     let mut command_builder = Command::new(&command[0]);
     command_builder
@@ -183,6 +189,7 @@ pub fn start_scheduler(state: State<'_, AppState>) -> Result<SchedulerStartResul
         .current_dir(&current_dir)
         .env("PYTHONUNBUFFERED", "1")
         .env(SCHEDULER_LOGIN_CREDENTIALS_ENV, login_credentials)
+        .envs(quota_env)
         .envs(ai_comment_api_key)
         .env(
             "AM_AUTO_CLOSE_PROFILE",
@@ -214,7 +221,12 @@ pub fn start_scheduler(state: State<'_, AppState>) -> Result<SchedulerStartResul
     })
 }
 
-fn scheduler_ai_comment_api_key() -> HashMap<String, String> {
+fn scheduler_ai_comment_api_key(
+    license_entitlements: Arc<Mutex<LicenseEntitlements>>,
+) -> HashMap<String, String> {
+    if !license_allows_ai_comment(&license_entitlements) {
+        return HashMap::new();
+    }
     let Ok(config) = load_config() else {
         return HashMap::new();
     };
@@ -229,6 +241,49 @@ fn scheduler_ai_comment_api_key() -> HashMap<String, String> {
         return HashMap::new();
     }
     HashMap::from([(AI_COMMENT_API_KEY_ENV.to_string(), api_key)])
+}
+
+fn ensure_scheduler_entitled(
+    license_entitlements: Arc<Mutex<LicenseEntitlements>>,
+) -> Result<(), String> {
+    let allowed = license_entitlements
+        .lock()
+        .map(|entitlements| entitlements.scheduler)
+        .unwrap_or(false);
+    if allowed {
+        Ok(())
+    } else {
+        Err("当前套餐不支持自动调度".to_string())
+    }
+}
+
+fn scheduler_quota_env(
+    license_entitlements: Arc<Mutex<LicenseEntitlements>>,
+) -> Result<HashMap<String, String>, String> {
+    let entitlements = license_entitlements
+        .lock()
+        .map_err(|_| "failed to lock license entitlements".to_string())?
+        .clone();
+    if entitlements.api_base_url.is_empty()
+        || entitlements.access_token.is_empty()
+        || entitlements.device_fingerprint.is_empty()
+    {
+        return Err("当前授权信息不完整，无法校验每日任务额度".to_string());
+    }
+    Ok(HashMap::from([
+        (DESKTOP_API_BASE_URL_ENV.to_string(), entitlements.api_base_url),
+        (DESKTOP_ACCESS_TOKEN_ENV.to_string(), entitlements.access_token),
+        (DEVICE_FINGERPRINT_ENV.to_string(), entitlements.device_fingerprint),
+    ]))
+}
+
+fn license_allows_ai_comment(
+    license_entitlements: &Arc<Mutex<LicenseEntitlements>>,
+) -> bool {
+    license_entitlements
+        .lock()
+        .map(|entitlements| entitlements.ai_comment)
+        .unwrap_or(false)
 }
 
 fn scheduler_login_credentials() -> Result<String, String> {

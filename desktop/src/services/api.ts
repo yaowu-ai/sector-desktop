@@ -38,6 +38,7 @@ import type {
   HomeSummary,
   LogChunk,
   LoginCredentialStatus,
+  LicenseEntitlementsPayload,
   LoginPasswordPayload,
   BrowserProfile,
   ProcessLogChunk,
@@ -152,6 +153,10 @@ export function deleteLoginPassword(accountId: string) {
 
 export function loadAiCommentSettings() {
   return invoke<AiCommentSettings>('load_ai_comment_settings')
+}
+
+export function setLicenseEntitlements(payload: LicenseEntitlementsPayload) {
+  return invoke<void>('set_license_entitlements', { payload })
 }
 
 export function saveAiCommentSettings(payload: AiCommentSettings) {

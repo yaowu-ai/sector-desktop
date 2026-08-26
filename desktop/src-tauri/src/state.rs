@@ -8,6 +8,21 @@ pub struct AppState {
     pub current_run: Arc<Mutex<RunState>>,
     pub scheduler_process: Mutex<Option<u32>>,
     pub initialization_status: Mutex<Option<AppInitializationStatus>>,
+    pub license_entitlements: Arc<Mutex<LicenseEntitlements>>,
+}
+
+#[derive(Clone, Default)]
+pub struct LicenseEntitlements {
+    pub max_enabled_accounts: i64,
+    pub max_devices: i64,
+    pub daily_task_runs: i64,
+    pub scheduler: bool,
+    pub target_engagement: bool,
+    pub export_csv: bool,
+    pub ai_comment: bool,
+    pub api_base_url: String,
+    pub access_token: String,
+    pub device_fingerprint: String,
 }
 
 pub struct RunState {

@@ -1,7 +1,5 @@
 use std::process::Command;
 
-use tauri::Manager;
-
 const BITBROWSER_DOWNLOAD_URL: &str = "https://www.bitbrowser.cn/download";
 
 #[derive(serde::Serialize)]

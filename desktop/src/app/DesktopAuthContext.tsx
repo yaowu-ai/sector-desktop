@@ -9,16 +9,19 @@ import {
 } from "react";
 
 import { DesktopLoginPage } from "../pages/DesktopLoginPage";
+import { setLicenseEntitlements } from "../services/api";
 import {
   activateDesktopDevice,
   buildDesktopSession,
   clearDesktopSession,
   deactivateDesktopDevice,
+  getDeviceFingerprint,
   desktopLogin,
   getDesktopApiBaseUrl,
   loadCurrentSubscription,
   loadDesktopSession,
   loadVerifiedCurrentLicense,
+  readDesktopLicenseLimits,
   saveDesktopApiBaseUrl,
   saveDesktopSession,
   type DesktopDeviceResponse,
@@ -27,7 +30,7 @@ import {
   type DesktopSubscriptionCurrentResponse,
 } from "../services/desktopApi";
 
-const ENTITLEMENT_POLL_MS = 60 * 1000;
+const ENTITLEMENT_POLL_MS = 10 * 1000;
 
 interface DesktopAuthContextValue {
   apiBaseUrl: string;
@@ -255,6 +258,16 @@ export function DesktopAuthProvider({
 
     return () => window.clearInterval(id);
   }, [apiBaseUrl, hydrateEntitlement, session]);
+
+  useEffect(() => {
+    const limits = readDesktopLicenseLimits(license);
+    void setLicenseEntitlements({
+      ...limits,
+      apiBaseUrl,
+      accessToken: session?.accessToken ?? "",
+      deviceFingerprint: getDeviceFingerprint(),
+    }).catch(() => undefined);
+  }, [apiBaseUrl, license, session?.accessToken]);
 
   const value = useMemo(
     () => ({

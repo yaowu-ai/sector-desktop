@@ -56,6 +56,8 @@ import {
   runTikTokRegisterBatch,
 } from "../services/api";
 import { usePlatformContext } from "../app/PlatformContext";
+import { useDesktopAuth } from "../app/DesktopAuthContext";
+import { readDesktopLicenseLimits } from "../services/desktopApi";
 import {
   getPlatformLabel,
   isExecutablePlatform,
@@ -119,6 +121,8 @@ const ACCOUNT_DRAFT_FIELD_NAMES = [
 
 export function AccountPage() {
   const { currentPlatform } = usePlatformContext();
+  const { license } = useDesktopAuth();
+  const licenseLimits = readDesktopLicenseLimits(license);
   const [form] = Form.useForm<AccountFormValues>();
   const [snapshot, setSnapshot] = useState<ConfigSnapshot | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -419,6 +423,11 @@ export function AccountPage() {
     nextAccounts: Account[],
     successText: string,
   ): Promise<boolean> => {
+    const limitReason = enabledAccountLimitReason(nextAccounts, licenseLimits.maxEnabledAccounts);
+    if (limitReason) {
+      message.warning(limitReason);
+      return false;
+    }
     setSaving(true);
     try {
       await saveAccounts({
@@ -1728,6 +1737,13 @@ function formatRegisterStartError(error: unknown) {
     /(password|credential|proxy password|token|cookie|session)\s*[:=]\s*[^,\s;]+/gi,
     "$1=[已隐藏]",
   );
+}
+
+function enabledAccountLimitReason(accounts: Account[], limit: number) {
+  if (limit < 0) return undefined;
+  const enabledCount = accounts.filter((account) => account.enabled).length;
+  if (enabledCount <= limit) return undefined;
+  return `当前套餐最多启用 ${limit} 个账号`;
 }
 
 function resolveBrowserProvider(account: Account): BrowserProviderId {
