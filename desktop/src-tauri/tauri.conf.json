@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "星域",
+  "productName": "sector",
   "version": "0.1.0",
   "identifier": "com.accountmatrix.desktop",
   "build": {
