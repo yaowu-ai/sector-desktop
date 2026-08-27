@@ -1,15 +1,13 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 
 import {
-  buildDesktopFeedbackWsUrl,
   loadDesktopNotifications,
   markDesktopNotificationRead,
-  type DesktopFeedbackRealtimeEvent,
   type DesktopNotification,
 } from '../services/desktopApi'
 import { useDesktopAuth } from './DesktopAuthContext'
 
-const NOTIFICATION_POLL_MS = 30 * 1000
+const NOTIFICATION_POLL_MS = 15 * 1000
 
 interface DesktopNotificationsContextValue {
   notifications: DesktopNotification[]
@@ -26,26 +24,21 @@ export function DesktopNotificationsProvider({ children }: { children: React.Rea
   const auth = useDesktopAuth()
   const [notifications, setNotifications] = useState<DesktopNotification[]>([])
   const [loading, setLoading] = useState(false)
-  const refreshRef = useRef<() => Promise<void>>(async () => undefined)
 
-  const refreshNotifications = useCallback(async () => {
+  const refreshNotifications = useCallback(async (options: { silent?: boolean } = {}) => {
     if (!auth.session) {
       setNotifications([])
       return
     }
 
-    setLoading(true)
+    if (!options.silent) setLoading(true)
     try {
       const response = await loadDesktopNotifications(auth.session, auth.apiBaseUrl)
       setNotifications(response.notifications ?? [])
     } finally {
-      setLoading(false)
+      if (!options.silent) setLoading(false)
     }
   }, [auth.apiBaseUrl, auth.session])
-
-  useEffect(() => {
-    refreshRef.current = refreshNotifications
-  }, [refreshNotifications])
 
   const markRead = useCallback(
     async (notification: DesktopNotification) => {
@@ -84,29 +77,10 @@ export function DesktopNotificationsProvider({ children }: { children: React.Rea
   useEffect(() => {
     if (!auth.session) return
     const id = window.setInterval(() => {
-      void refreshNotifications().catch(() => undefined)
+      void refreshNotifications({ silent: true }).catch(() => undefined)
     }, NOTIFICATION_POLL_MS)
     return () => window.clearInterval(id)
   }, [auth.session, refreshNotifications])
-
-  useEffect(() => {
-    if (!auth.session) return
-
-    const socket = new WebSocket(buildDesktopFeedbackWsUrl(auth.session, auth.apiBaseUrl))
-    socket.onmessage = (event) => {
-      const data = parseJson<DesktopFeedbackRealtimeEvent>(event.data)
-      if (!data) return
-      if (data.type === 'notifications.changed') {
-        void refreshRef.current().catch(() => undefined)
-        return
-      }
-      if (data.type === 'feedback.message.created' && data.message.senderType === 'admin') {
-        void refreshRef.current().catch(() => undefined)
-      }
-    }
-
-    return () => socket.close()
-  }, [auth.apiBaseUrl, auth.session])
 
   const unreadCount = notifications.filter((item) => !item.read).length
   const value = useMemo(
@@ -134,12 +108,4 @@ export function useDesktopNotifications() {
 
 function markAsRead(notification: DesktopNotification): DesktopNotification {
   return { ...notification, read: true, readAt: notification.readAt || new Date().toISOString() }
-}
-
-function parseJson<T>(value: string): T | null {
-  try {
-    return JSON.parse(value) as T
-  } catch {
-    return null
-  }
 }

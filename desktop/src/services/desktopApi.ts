@@ -134,45 +134,11 @@ export interface DesktopBroadcastNotificationsResponse {
   notifications: DesktopNotification[]
 }
 
-export interface DesktopFeedbackThread {
-  id: string
-  userId: string
-  userName: string
-  userPhone: string
-  status: 'pending' | 'processing' | 'resolved' | 'closed'
-  originalContent: string
-  originalImages: string[]
-  lastMessageAt: string | null
-  createTime: string
-  updateTime: string
-}
-
-export interface DesktopFeedbackMessage {
-  id: string
-  threadId: string
-  userId: string
-  senderType: 'user' | 'admin' | 'system'
-  senderAdminId: string
-  content: string
-  imageUrls: string[]
-  messageStatus: string
-  createTime: string
-}
-
 export interface DesktopFeedbackCreateResponse {
   threadId: string
   messageId: string
   status: 'created'
 }
-
-export type DesktopFeedbackRealtimeEvent =
-  | { type: 'connected'; subjectType: string; userId: string }
-  | { type: 'feedback.ack'; requestId?: string; data?: unknown }
-  | { type: 'feedback.thread.created'; thread: DesktopFeedbackThread; message: DesktopFeedbackMessage }
-  | { type: 'feedback.message.created'; thread: DesktopFeedbackThread; message: DesktopFeedbackMessage }
-  | { type: 'feedback.thread.status.updated'; thread: DesktopFeedbackThread }
-  | { type: 'notifications.changed'; scope: 'all' | 'user'; userId?: string }
-  | { type: 'feedback.error'; requestId?: string; message: string }
 
 export function getDesktopApiBaseUrl() {
   return normalizeApiBaseUrl(window.localStorage.getItem(API_BASE_STORAGE_KEY) || DEFAULT_API_BASE_URL)
@@ -486,16 +452,6 @@ export function submitDesktopFeedback(
       },
     },
   )
-}
-
-export function buildDesktopFeedbackWsUrl(session: DesktopSession, apiBaseUrl = getDesktopApiBaseUrl()) {
-  const url = new URL(normalizeApiBaseUrl(apiBaseUrl))
-  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
-  url.port = import.meta.env.VITE_FEEDBACK_WS_PORT || '3002'
-  url.pathname = import.meta.env.VITE_FEEDBACK_WS_PATH || '/ws/feedback'
-  url.search = ''
-  url.searchParams.set('token', session.accessToken)
-  return url.toString()
 }
 
 async function desktopApiRequest<T>(
