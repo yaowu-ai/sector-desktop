@@ -10,6 +10,16 @@ if [[ -f "${HOME}/.cargo/env" ]]; then
 fi
 
 PYTHON_BIN="${PYTHON_BIN:-${SCRIPT_DIR}/.runtime-build-venv-x64/bin/python}"
+BUILD_MODE="${BUILD_MODE:-production}"
+case "${BUILD_MODE}" in
+  test|prod|production)
+    ;;
+  *)
+    echo "Unsupported BUILD_MODE: ${BUILD_MODE}" >&2
+    exit 1
+    ;;
+esac
+
 if [[ ! -x "${PYTHON_BIN}" ]]; then
   RESOLVED_PYTHON_BIN="$(command -v "${PYTHON_BIN}" || true)"
   if [[ -z "${RESOLVED_PYTHON_BIN}" || ! -x "${RESOLVED_PYTHON_BIN}" ]]; then
@@ -44,4 +54,24 @@ fi
 arch -x86_64 "${RUNTIME}" version --json
 
 cd desktop
-corepack pnpm tauri build --target x86_64-apple-darwin --bundles dmg
+if [ "${BUILD_MODE}" = "prod" ]; then
+  export DESKTOP_BUILD_MODE="production"
+else
+  export DESKTOP_BUILD_MODE="${BUILD_MODE}"
+fi
+
+corepack pnpm tauri build --target x86_64-apple-darwin --bundles app
+
+APP_NAME="$(node -p "require('./src-tauri/tauri.conf.json').productName")"
+APP_VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+APP_PATH="src-tauri/target/x86_64-apple-darwin/release/bundle/macos/${APP_NAME}.app"
+DMG_DIR="src-tauri/target/x86_64-apple-darwin/release/bundle/dmg"
+DMG_PATH="${DMG_DIR}/${APP_NAME}_${APP_VERSION}_x64.dmg"
+
+if [[ ! -d "${APP_PATH}" ]]; then
+  echo "[error] app bundle not found: ${APP_PATH}" >&2
+  exit 1
+fi
+
+mkdir -p "${DMG_DIR}"
+hdiutil create -volname "${APP_NAME}" -srcfolder "${APP_PATH}" -ov -format UDZO "${DMG_PATH}"
