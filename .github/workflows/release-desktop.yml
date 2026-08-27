@@ -41,6 +41,7 @@ jobs:
           fi
 
   build-windows:
+    needs: prepare
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -56,6 +57,11 @@ jobs:
         with:
           python-version: "3.13"
       - uses: dtolnay/rust-toolchain@stable
+      - name: Set desktop version from release tag
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag_name }}
+        run: node desktop/scripts/set-release-version.mjs
       - name: Install desktop dependencies
         shell: pwsh
         working-directory: desktop
@@ -74,6 +80,7 @@ jobs:
           if-no-files-found: error
 
   build-macos-arm64:
+    needs: prepare
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
@@ -89,6 +96,10 @@ jobs:
         with:
           python-version: "3.13"
       - uses: dtolnay/rust-toolchain@stable
+      - name: Set desktop version from release tag
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag_name }}
+        run: node desktop/scripts/set-release-version.mjs
       - name: Install desktop dependencies
         working-directory: desktop
         run: pnpm install --frozen-lockfile
@@ -107,6 +118,7 @@ jobs:
           if-no-files-found: error
 
   build-macos-x64:
+    needs: prepare
     runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v4
@@ -120,6 +132,10 @@ jobs:
         with:
           python-version: "3.13"
       - uses: dtolnay/rust-toolchain@stable
+      - name: Set desktop version from release tag
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag_name }}
+        run: node desktop/scripts/set-release-version.mjs
       - name: Install desktop dependencies
         working-directory: desktop
         run: pnpm install --frozen-lockfile
