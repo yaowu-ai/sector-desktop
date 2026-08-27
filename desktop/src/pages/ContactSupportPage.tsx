@@ -1,15 +1,10 @@
 import { Alert, Button, Card, Col, Descriptions, Form, Input, Row, Space, Tag, Typography, message } from 'antd'
 import { Loader2, MessageSquareText, Send } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 
 import { useDesktopAuth } from '../app/DesktopAuthContext'
 import { PageHeader } from '../components/PageHeader'
-import {
-  buildDesktopFeedbackWsUrl,
-  submitDesktopFeedback,
-  type DesktopFeedbackRealtimeEvent,
-  type DesktopFeedbackThread,
-} from '../services/desktopApi'
+import { submitDesktopFeedback } from '../services/desktopApi'
 
 const CONTACT_PLACEHOLDER = '请联系项目对接人获取'
 
@@ -17,68 +12,14 @@ export function ContactSupportPage() {
   const auth = useDesktopAuth()
   const [form] = Form.useForm<{ category: string; content: string }>()
   const [submitting, setSubmitting] = useState(false)
-  const [wsConnected, setWsConnected] = useState(false)
-  const [thread, setThread] = useState<DesktopFeedbackThread | null>(null)
   const [lastSubmittedAt, setLastSubmittedAt] = useState<string | null>(null)
-  const socketRef = useRef<WebSocket | null>(null)
-  const pendingRequestsRef = useRef(new Map<string, { resolve: () => void; reject: (error: Error) => void }>())
-
-  useEffect(() => {
-    if (!auth.session) return
-
-    const socket = new WebSocket(buildDesktopFeedbackWsUrl(auth.session, auth.apiBaseUrl))
-    socketRef.current = socket
-    socket.onopen = () => setWsConnected(true)
-    socket.onclose = () => setWsConnected(false)
-    socket.onerror = () => setWsConnected(false)
-    socket.onmessage = (event) => {
-      const data = parseJson<DesktopFeedbackRealtimeEvent>(event.data)
-      if (!data) return
-      if (data.type === 'feedback.ack') {
-        const pending = data.requestId ? pendingRequestsRef.current.get(data.requestId) : undefined
-        if (pending) {
-          pendingRequestsRef.current.delete(data.requestId as string)
-          pending.resolve()
-        }
-        return
-      }
-      if (data.type === 'feedback.error') {
-        const pending = data.requestId ? pendingRequestsRef.current.get(data.requestId) : undefined
-        if (pending) {
-          pendingRequestsRef.current.delete(data.requestId as string)
-          pending.reject(new Error(formatSupportError(data.message || '反馈消息发送失败')))
-          return
-        }
-        message.error(formatSupportError(data.message || '反馈消息同步失败'))
-        return
-      }
-      if (data.type === 'feedback.thread.created' || data.type === 'feedback.message.created') {
-        setThread(data.thread)
-        return
-      }
-      if (data.type === 'feedback.thread.status.updated') {
-        setThread(data.thread)
-      }
-    }
-
-    return () => {
-      pendingRequestsRef.current.forEach((pending) => pending.reject(new Error('页面已关闭，反馈发送已取消')))
-      pendingRequestsRef.current.clear()
-      socketRef.current = null
-      socket.close()
-    }
-  }, [auth.apiBaseUrl, auth.session])
 
   const submitFeedback = async (values: { category: string; content: string }) => {
     if (!auth.session) return
     const content = [`问题类型：${values.category || '未填写'}`, `问题描述：${values.content}`].join('\n')
     setSubmitting(true)
     try {
-      if (socketRef.current?.readyState === WebSocket.OPEN) {
-        await sendFeedbackViaSocket(socketRef.current, pendingRequestsRef.current, content)
-      } else {
-        await submitDesktopFeedback(auth.session, { content, imageUrls: [] }, auth.apiBaseUrl)
-      }
+      await submitDesktopFeedback(auth.session, { content, imageUrls: [] }, auth.apiBaseUrl)
       form.resetFields()
       setLastSubmittedAt(new Date().toISOString())
       message.success('反馈已提交')
@@ -116,8 +57,7 @@ export function ContactSupportPage() {
             title="问题反馈"
             extra={
               <Space>
-                {thread ? <Tag color={getFeedbackStatusColor(thread.status)}>{formatFeedbackStatus(thread.status)}</Tag> : null}
-                <Tag color={wsConnected ? 'green' : 'default'}>{wsConnected ? '实时同步中' : '普通提交模式'}</Tag>
+                <Tag color="default">HTTP 提交</Tag>
               </Space>
             }
           >
@@ -160,66 +100,10 @@ function InfoLabel({ icon, text }: { icon: React.ReactNode; text: string }) {
   )
 }
 
-function formatFeedbackStatus(status: DesktopFeedbackThread['status']) {
-  const labels: Record<DesktopFeedbackThread['status'], string> = {
-    pending: '待处理',
-    processing: '处理中',
-    resolved: '已解决',
-    closed: '已关闭',
-  }
-  return labels[status] || status
-}
-
-function getFeedbackStatusColor(status: DesktopFeedbackThread['status']) {
-  const colors: Record<DesktopFeedbackThread['status'], string> = {
-    pending: 'orange',
-    processing: 'blue',
-    resolved: 'green',
-    closed: 'default',
-  }
-  return colors[status] || 'default'
-}
-
 function formatDateTime(value: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value || '-'
   return date.toLocaleString()
-}
-
-function parseJson<T>(value: string): T | null {
-  try {
-    return JSON.parse(value) as T
-  } catch {
-    return null
-  }
-}
-
-function sendFeedbackViaSocket(
-  socket: WebSocket,
-  pendingRequests: Map<string, { resolve: () => void; reject: (error: Error) => void }>,
-  content: string,
-) {
-  const requestId = createRequestId()
-  return new Promise<void>((resolve, reject) => {
-    pendingRequests.set(requestId, { resolve, reject })
-    try {
-      socket.send(JSON.stringify({ type: 'feedback.user_message.send', requestId, content, imageUrls: [] }))
-    } catch {
-      pendingRequests.delete(requestId)
-      reject(new Error('反馈消息发送失败，请稍后重试'))
-      return
-    }
-    window.setTimeout(() => {
-      if (!pendingRequests.has(requestId)) return
-      pendingRequests.delete(requestId)
-      reject(new Error('反馈消息发送超时，请稍后重试'))
-    }, 10_000)
-  })
-}
-
-function createRequestId() {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID()
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
 function formatSupportError(error: unknown) {
