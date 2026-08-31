@@ -8,12 +8,7 @@ import type {
   AccountsPayload,
   ActionLog,
   ActionLogFilter,
-  AiCommentApiKeyPayload,
-  AiCommentApiKeyStatus,
-  AiCommentGenerationResult,
-  AiCommentPreviewPayload,
   AiCommentSettings,
-  AiCommentTestPayload,
   BackupResult,
   BatchCreateProfileRequest,
   BatchCreateProfileResult,
@@ -161,26 +156,6 @@ export function setLicenseEntitlements(payload: LicenseEntitlementsPayload) {
 
 export function saveAiCommentSettings(payload: AiCommentSettings) {
   return invoke<SaveResult>('save_ai_comment_settings', { payload })
-}
-
-export function saveAiCommentApiKey(payload: AiCommentApiKeyPayload) {
-  return invoke<AiCommentApiKeyStatus>('save_ai_comment_api_key', { payload })
-}
-
-export function deleteAiCommentApiKey(provider?: string) {
-  return invoke<AiCommentApiKeyStatus>('delete_ai_comment_api_key', { provider })
-}
-
-export function getAiCommentApiKeyStatus(provider?: string) {
-  return invoke<AiCommentApiKeyStatus>('get_ai_comment_api_key_status', { provider })
-}
-
-export function testAiCommentConnection(payload: AiCommentTestPayload) {
-  return invoke<AiCommentGenerationResult>('test_ai_comment_connection', { payload })
-}
-
-export function previewAiComment(payload: AiCommentPreviewPayload) {
-  return invoke<AiCommentGenerationResult>('preview_ai_comment', { payload })
 }
 
 export function saveFypSettings(payload: FypSettings, platform: Platform = 'tiktok') {

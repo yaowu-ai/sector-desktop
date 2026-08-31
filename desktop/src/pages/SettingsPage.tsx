@@ -245,9 +245,9 @@ export function SettingsPage() {
       setBuiltinChromiumStatus(status);
       if (status.available && status.executablePath) {
         systemForm.setFieldValue("chromiumExecutable", status.executablePath);
-        message.success("已自动检测并填入 Chromium 可执行文件");
+        message.success("已自动检测并填入内置浏览器可执行文件");
       } else {
-        message.warning("未检测到可用 Chromium，请安装 Chrome/Edge 或手动指定可执行文件。");
+        message.warning("未检测到可用内置浏览器，请安装 Chrome/Edge 或手动指定可执行文件。");
       }
     } catch (error) {
       message.error(formatError(error));
@@ -380,16 +380,16 @@ export function SettingsPage() {
                     }
                   }}
                   options={[
-                    { value: "bitbrowser", label: "BitBrowser" },
-                    { value: "builtin_chromium", label: "内置 Chromium" },
+                    { value: "bitbrowser", label: "Bit浏览器" },
+                    { value: "builtin_chromium", label: "内置浏览器" },
                   ]}
                 />
               </Form.Item>
               {defaultBrowserProvider === "builtin_chromium" ? (
                 <Form.Item
                   name="chromiumExecutable"
-                  label="Chromium 可执行文件"
-                  extra="系统会自动检测 Chrome/Edge/Chromium；检测不到时再手动指定。BitBrowser 仍是 TikTok 默认推荐方案。"
+                  label="内置浏览器可执行文件"
+                  extra="系统会自动检测 Chrome/Edge 等浏览器；检测不到时再手动指定。Bit浏览器仍是 TikTok 默认推荐方案。"
                 >
                   <Input
                     placeholder="C:/Program Files/Google/Chrome/Application/chrome.exe"
@@ -410,11 +410,11 @@ export function SettingsPage() {
                 <Alert
                   type={builtinChromiumStatus.available ? "info" : "warning"}
                   showIcon
-                  message="内置 Chromium 是生产可选方案"
+                  message="内置浏览器是生产可选方案"
                   description={
                     builtinChromiumStatus.available
-                      ? "已检测到可用的 Chromium。账号浏览器数据将保存在本机应用数据中；不等价替代 BitBrowser 的指纹环境能力。"
-                      : "未检测到可用的 Chromium。使用内置 Chromium 时，请确认本机已安装，或指定可执行文件。"
+                      ? "已检测到可用的内置浏览器。账号浏览器数据将保存在本机应用数据中；不等价替代 Bit浏览器的指纹环境能力。"
+                      : "未检测到可用的内置浏览器。使用内置浏览器时，请确认本机已安装，或指定可执行文件。"
                   }
                 />
               ) : null}
@@ -433,9 +433,9 @@ export function SettingsPage() {
                 <Col xs={24} md={12}>
                   <Form.Item
                     name="bitbrowserApiUrl"
-                    label="BitBrowser API 地址"
+                    label="Bit浏览器 API 地址"
                     rules={[
-                      { required: true, message: "请配置 BitBrowser API 地址" },
+                      { required: true, message: "请配置 Bit浏览器 API 地址" },
                       {
                         type: "url",
                         message: "请输入 http:// 或 https:// URL",
@@ -821,7 +821,7 @@ export function SettingsPage() {
           <Card title="危险操作">
             <Space direction="vertical" size={12} className="full-width">
               <Typography.Text type="secondary">
-                这些操作只影响本地运行环境，不会删除 BitBrowser profile。
+                这些操作只影响本地运行环境，不会删除 Bit浏览器 profile。
               </Typography.Text>
               <Button
                 danger
@@ -859,8 +859,8 @@ function formatProviderLabel(
   fallback: string,
 ) {
   const labels: Record<BrowserProviderCapability["provider"], string> = {
-    bitbrowser: "BitBrowser",
-    builtin_chromium: "内置 Chromium",
+    bitbrowser: "Bit浏览器",
+    builtin_chromium: "内置浏览器",
   };
   return labels[provider] ?? fallback;
 }
@@ -877,9 +877,9 @@ function formatProviderRisk(riskLevel: BrowserProviderCapability["riskLevel"]) {
 function formatProviderNotes(provider: BrowserProviderCapability) {
   const notes: Record<BrowserProviderCapability["provider"], string> = {
     bitbrowser:
-      "生产默认方案。使用 BitBrowser Local API 和现有 bitbrowser_profile_id。",
+      "生产默认方案。使用 Bit浏览器 Local API 和现有 Bit浏览器 profile_id。",
     builtin_chromium:
-      "生产可选方案。使用本机 Chromium、账号独立数据目录和临时 CDP 端口启动；不等价替代 BitBrowser 的指纹环境能力，BitBrowser 仍是默认推荐。",
+      "生产可选方案。使用本机内置浏览器、账号独立数据目录和临时 CDP 端口启动；不等价替代 Bit浏览器的指纹环境能力，Bit浏览器仍是默认推荐。",
   };
   return notes[provider.provider] ?? provider.notes;
 }

@@ -359,8 +359,7 @@ export function BrowserProfilePage() {
     const values = await syncForm.validateFields();
     confirmDanger({
       title: "写入账号配置",
-      content:
-        "将把 dry-run 中可追加的账号写入 accounts.yaml，保存前会自动备份。",
+      content: "",
       onOk: () => {
         void (async () => {
           setSyncLoading(true);
@@ -397,9 +396,9 @@ export function BrowserProfilePage() {
 
   const cleanupChromiumAccount = (accountId: string) => {
     confirmDanger({
-      title: "清理内置 Chromium 数据",
+      title: "清理内置浏览器数据",
       content:
-        "只会删除该账号在星域内置 Chromium 下的本地用户数据，不会删除 BitBrowser profile。如该账号浏览器正在运行，将先终止进程。",
+        "只会删除该账号在星域内置浏览器下的本地用户数据，不会删除 Bit浏览器窗口。如该账号浏览器正在运行，将先终止进程。",
       onOk: () => {
         void (async () => {
           setCleaningAccountId(accountId);
@@ -425,7 +424,7 @@ export function BrowserProfilePage() {
   const toggleProfileById = async (profileId: string) => {
     const profile = profiles.find((item) => item.id === profileId);
     if (!profile) {
-      message.warning("未找到该 BitBrowser profile");
+      message.warning("未找到该 Bit浏览器窗口，请刷新后重试");
       return;
     }
     await toggleProfile(profile);
@@ -523,7 +522,7 @@ export function BrowserProfilePage() {
     <>
       <PageHeader
         title="浏览器环境"
-        description="管理 BitBrowser 与内置 Chromium 浏览器环境、账号绑定、代理检测和运行状态。"
+        description="管理 Bit浏览器与内置浏览器环境、账号绑定、代理检测和运行状态。"
         extra={
           <Button
             icon={<RefreshCw size={16} />}
@@ -539,23 +538,20 @@ export function BrowserProfilePage() {
         <Col xs={24} md={8}>
           <Card
             size="small"
-            title="BitBrowser"
-            extra={<Tag color="green">生产默认推荐</Tag>}
+            title="Bit浏览器"
+            extra={<Tag color="green">推荐</Tag>}
           >
             <Statistic
-              title="API 状态"
+              title="接口状态"
               value={apiStatus?.available ? "在线" : "不可用"}
               valueStyle={{
                 color: apiStatus?.available ? "#16a34a" : "#dc2626",
                 fontSize: 20,
               }}
             />
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              {apiStatus?.apiUrl ?? "未检测"}
-            </Typography.Text>
             <Row gutter={16} style={{ marginTop: 12 }}>
               <Col span={8}>
-                <Statistic title="Profile" value={scopedProfiles.length} />
+                <Statistic title="窗口数" value={scopedProfiles.length} />
               </Col>
               <Col span={8}>
                 <Statistic title="已绑定" value={boundCount} />
@@ -569,8 +565,8 @@ export function BrowserProfilePage() {
         <Col xs={24} md={8}>
           <Card
             size="small"
-            title="内置 Chromium"
-            extra={<Tag color="gold">生产可选</Tag>}
+            title="内置浏览器"
+            extra={<Tag color="gold">可选</Tag>}
           >
             <Statistic
               title="可用状态"
@@ -591,32 +587,23 @@ export function BrowserProfilePage() {
                 type="secondary"
                 style={{ fontSize: 12 }}
                 ellipsis
-                copyable={{ text: chromiumStatus.executablePath ?? "" }}
-              >
-                {chromiumStatus.executablePath ?? "未知"}
-              </Typography.Text>
+              ></Typography.Text>
             ) : (
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                 {chromiumStatus?.error ??
-                  "未检测到可用 Chromium，请安装 Chrome/Edge 或手动指定可执行文件。"}
+                  "未检测到可用内置浏览器，请安装 Chrome/Edge 或手动指定可执行文件。"}
               </Typography.Text>
             )}
-            <Typography.Text
-              type="secondary"
-              style={{ fontSize: 12, display: "block", marginTop: 4 }}
-            >
-              数据根目录：{chromiumStatus?.dataRoot ?? "-"}
-            </Typography.Text>
           </Card>
         </Col>
         <Col xs={24} md={8}>
           <Card size="small" title="账号环境">
             <Row gutter={16}>
               <Col span={8}>
-                <Statistic title="BitBrowser" value={bitbrowserAccountCount} />
+                <Statistic title="Bit浏览器" value={bitbrowserAccountCount} />
               </Col>
               <Col span={8}>
-                <Statistic title="Chromium" value={chromiumAccountCount} />
+                <Statistic title="内置浏览器" value={chromiumAccountCount} />
               </Col>
               <Col span={8}>
                 <Statistic
@@ -628,9 +615,6 @@ export function BrowserProfilePage() {
                 />
               </Col>
             </Row>
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              待处理含未绑定 profile 或 Chromium 不可用
-            </Typography.Text>
           </Card>
         </Col>
 
@@ -639,17 +623,17 @@ export function BrowserProfilePage() {
             items={[
               {
                 key: "profiles",
-                label: "BitBrowser Profile",
+                label: "Bit浏览器窗口",
                 children: (
                   <>
                     {!apiStatus?.available ? (
                       <Alert
                         type="warning"
                         showIcon
-                        message="BitBrowser Local API 不可用"
+                        message="Bit浏览器本地接口不可用"
                         description={
                           apiStatus?.error ??
-                          "请确认 BitBrowser 客户端和 Local API 已启动。其他 Tab 不受影响。"
+                          "请确认 Bit浏览器客户端和本地接口已启动。其他标签页不受影响。"
                         }
                         action={
                           <Button
@@ -657,7 +641,7 @@ export function BrowserProfilePage() {
                             size="small"
                             onClick={() => void openBitbrowserDownload()}
                           >
-                            下载 BitBrowser
+                            下载 Bit浏览器
                           </Button>
                         }
                         style={{ marginBottom: 16 }}
@@ -673,7 +657,7 @@ export function BrowserProfilePage() {
                       locale={{
                         emptyText: (
                           <EmptyState
-                            title="暂无 BitBrowser Profile"
+                            title="暂无 Bit浏览器窗口"
                             description="可通过批量工具创建并绑定账号。"
                           />
                         ),
@@ -685,7 +669,7 @@ export function BrowserProfilePage() {
 
               {
                 key: "chromium",
-                label: "内置 Chromium",
+                label: "内置浏览器",
                 children: (
                   <BuiltinChromiumPanel
                     chromiumStatus={chromiumStatus}
@@ -730,7 +714,7 @@ export function BrowserProfilePage() {
                 label: "批量工具",
                 children: (
                   <Space direction="vertical" size={16} className="full-width">
-                    <Card title="BitBrowser 单个创建">
+                    <Card title="Bit浏览器单个创建">
                       <SingleCreatePanel
                         form={singleForm}
                         proxyResult={proxyResult}
@@ -740,7 +724,7 @@ export function BrowserProfilePage() {
                         onCreate={() => void createSingle()}
                       />
                     </Card>
-                    <Card title="BitBrowser 批量创建">
+                    <Card title="Bit浏览器批量创建">
                       <BatchCreatePanel
                         form={batchForm}
                         result={batchResult}
@@ -797,7 +781,7 @@ function SingleCreatePanel({
             label="窗口名称"
             rules={[{ required: true, message: "请输入窗口名称" }]}
           >
-            <Input placeholder="例如 tiktok_26、instagram_26、whatsapp_26、douyin_26" />
+            <Input placeholder="例如 tiktok_001" />
           </Form.Item>
           <Form.Item
             name="proxyType"
@@ -814,9 +798,9 @@ function SingleCreatePanel({
               { validator: validateProxyFormat },
             ]}
           >
-            <Input.Password placeholder="host:port:用户名:密码" />
+            <Input.Password placeholder="主机:端口:用户名:密码" />
           </Form.Item>
-          <Form.Item name="groupId" label="BitBrowser 分组 ID">
+          <Form.Item name="groupId" label="Bit浏览器分组 ID">
             <Input placeholder="可选" />
           </Form.Item>
           <Row gutter={12}>
@@ -851,7 +835,7 @@ function SingleCreatePanel({
               loading={creating}
               onClick={onCreate}
             >
-              BitBrowser 创建 profile
+              Bit浏览器创建窗口
             </Button>
           </Space>
         </Form>
@@ -934,7 +918,7 @@ function BatchCreatePanel({
             </Form.Item>
           </Col>
           <Col xs={24} md={6}>
-            <Form.Item name="groupId" label="BitBrowser 分组 ID">
+            <Form.Item name="groupId" label="Bit浏览器分组 ID">
               <Input placeholder="可选" />
             </Form.Item>
           </Col>
@@ -967,7 +951,7 @@ function BatchCreatePanel({
           <Input.TextArea
             rows={8}
             placeholder={
-              "每行一个 host:port:用户名:密码\n空行和 # 注释会被忽略"
+              "每行一个 主机:端口:用户名:密码\n空行和 # 注释会被忽略"
             }
           />
         </Form.Item>
@@ -999,7 +983,7 @@ function BatchCreatePanel({
             loading={creating}
             onClick={onCreate}
           >
-            BitBrowser 批量创建
+            Bit浏览器批量创建
           </Button>
         </Space>
       </Form>
@@ -1028,7 +1012,7 @@ function SyncPanel({
         type="info"
         showIcon
         message="先试运行，再同步"
-        description="同步会按 BitBrowser 精确窗口名生成缺失账号，例如 tiktok_21、instagram_21。apply 写入前会备份 accounts.yaml。"
+        description="同步会按 Bit浏览器精确窗口名生成缺失账号，例如 tiktok_001。"
       />
       <Form form={form} layout="vertical" requiredMark={false}>
         <Row gutter={12}>
@@ -1194,9 +1178,9 @@ function AccountBindingPanel({
       render: (_, account) => {
         const provider = effectiveProvider(account);
         return provider === "bitbrowser" ? (
-          <Tag color="green">BitBrowser</Tag>
+          <Tag color="green">Bit浏览器</Tag>
         ) : (
-          <Tag color="gold">内置 Chromium</Tag>
+          <Tag color="gold">内置浏览器</Tag>
         );
       },
     },
@@ -1273,7 +1257,7 @@ function AccountBindingPanel({
             account.bitbrowserProfileId ?? account.browser?.profileId;
           if (!profileId) {
             return (
-              <Typography.Text type="secondary">待绑定 profile</Typography.Text>
+              <Typography.Text type="secondary">待绑定窗口</Typography.Text>
             );
           }
           const profile = profileById.get(profileId);
@@ -1511,41 +1495,15 @@ function BuiltinChromiumPanel({
       <Alert
         type="info"
         showIcon
-        message="内置 Chromium 为生产可选方案"
-        description="不等价替代 BitBrowser 指纹环境能力。强指纹隔离场景请继续优先使用 BitBrowser。"
+        message="内置浏览器为可选方案"
+        description="强指纹隔离场景请优先使用 Bit浏览器。"
       />
-
-      <Card size="small" title="Chromium 环境信息">
-        <Descriptions size="small" column={1}>
-          <Descriptions.Item label="可执行文件">
-            {chromiumStatus?.available ? (
-              <Typography.Text
-                copyable={{ text: chromiumStatus.executablePath ?? "" }}
-              >
-                {chromiumStatus.executablePath ?? "未知"}
-              </Typography.Text>
-            ) : (
-              <Typography.Text type="danger">
-                {chromiumStatus?.error ??
-                  "未检测到可用 Chromium，请安装 Chrome/Edge 或手动指定可执行文件。"}
-              </Typography.Text>
-            )}
-          </Descriptions.Item>
-          <Descriptions.Item label="数据根目录">
-            <Typography.Text
-              copyable={{ text: chromiumStatus?.dataRoot ?? "" }}
-            >
-              {chromiumStatus?.dataRoot ?? "-"}
-            </Typography.Text>
-          </Descriptions.Item>
-        </Descriptions>
-      </Card>
 
       {accounts.length === 0 ? (
         <Card>
           <EmptyState
-            title="暂无内置 Chromium 账号"
-            description="可在账号管理中将浏览器提供方设为内置 Chromium。"
+            title="暂无内置浏览器账号"
+            description="可在账号管理中将浏览器提供方设为内置浏览器。"
           />
         </Card>
       ) : (
@@ -1632,7 +1590,7 @@ function ResultBox({ proxyResult }: { proxyResult: ProxyCheckResult | null }) {
             <Descriptions.Item label="代理">
               {proxyResult.proxy.masked}
             </Descriptions.Item>
-            <Descriptions.Item label="Host">
+            <Descriptions.Item label="主机">
               {proxyResult.proxy.host}
             </Descriptions.Item>
             <Descriptions.Item label="端口">
@@ -1663,7 +1621,7 @@ function BatchResult({ result }: { result: BatchCreateProfileResult }) {
           { title: "行号", dataIndex: "lineNumber", width: 80 },
           { title: "窗口", dataIndex: "name", width: 160 },
           {
-            title: "profile_id",
+            title: "窗口ID",
             dataIndex: "profileId",
             render: (value: string) => (
               <Typography.Text copyable>{value}</Typography.Text>
@@ -1702,7 +1660,7 @@ function SyncPreviewView({ preview }: { preview: SyncPreview }) {
         <Tag color="blue">待追加 {preview.accountsToAdd.length}</Tag>
         <Tag>已存在 {preview.existingAccounts.length}</Tag>
         <Tag color={preview.missingProfiles.length ? "red" : "green"}>
-          缺失 profile {preview.missingProfiles.length}
+          缺失窗口 {preview.missingProfiles.length}
         </Tag>
         <Tag color={preview.duplicateProfiles.length ? "red" : "green"}>
           重名窗口 {preview.duplicateProfiles.length}
@@ -1712,7 +1670,7 @@ function SyncPreviewView({ preview }: { preview: SyncPreview }) {
         <Alert
           type="error"
           showIcon
-          message="当前 dry-run 不能不能同步"
+          message="当前试运行不能同步"
           description={[
             preview.missingProfiles.length
               ? `缺失窗口：${preview.missingProfiles.join(", ")}`
@@ -1747,7 +1705,7 @@ function SyncPreviewView({ preview }: { preview: SyncPreview }) {
               ranges.map(([start, end]) => `${start}-${end}`).join(", "),
           },
           {
-            title: "profile_id",
+            title: "窗口ID",
             dataIndex: "bitbrowserProfileId",
             render: (value: string) => (
               <Typography.Text copyable>{value}</Typography.Text>
@@ -2038,7 +1996,7 @@ function validateProxyFormat(_: unknown, value?: string) {
   }
   const parts = value.trim().split(":");
   if (parts.length < 4 || parts.slice(0, 4).some((part) => !part)) {
-    return Promise.reject(new Error("代理格式必须是 host:port:用户名:密码"));
+    return Promise.reject(new Error("代理格式必须是 主机:端口:用户名:密码"));
   }
   const port = Number(parts[1]);
   if (!Number.isInteger(port) || port < 1 || port > 65535) {

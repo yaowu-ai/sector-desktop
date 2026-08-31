@@ -304,7 +304,7 @@ export function DiagnosticPage() {
             showIcon
             type="info"
             message="诊断脚本会打开或接管对应账号的浏览器环境"
-            description="点赞诊断会测试三种点击策略；评论诊断默认只定位并输出 HTML，关闭只定位不发布后才会发布脚本内置测试评论。内置 Chromium 账号会按账号配置启动并检测 CDP。"
+            description="点赞诊断会测试三种点击策略；评论诊断默认只定位并输出 HTML，关闭只定位不发布后才会发布脚本内置测试评论。内置浏览器账号会按账号配置启动并检测 CDP。"
           />
         </Col>
 
@@ -986,7 +986,7 @@ function accountDiagnosticDisabledReason(account: Account) {
     !account.bitbrowserProfileId &&
     !account.browser?.profileId
   ) {
-    return `${account.id} 未绑定 BitBrowser profile`;
+    return `${account.id} 未绑定 Bit浏览器 profile`;
   }
   return undefined;
 }
@@ -997,8 +997,8 @@ function resolveBrowserProvider(account: Account): BrowserProviderId {
 
 function formatBrowserProvider(provider: BrowserProviderId) {
   const labels: Record<BrowserProviderId, string> = {
-    bitbrowser: "BitBrowser",
-    builtin_chromium: "内置 Chromium",
+    bitbrowser: "Bit浏览器",
+    builtin_chromium: "内置浏览器",
   };
   return labels[provider];
 }

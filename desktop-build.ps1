@@ -34,3 +34,13 @@ corepack pnpm tauri build --bundles nsis
 if ($LASTEXITCODE -ne 0) {
   throw "desktop package build failed with exit code $LASTEXITCODE"
 }
+
+$nsisBundleDir = Join-Path $desktop "src-tauri\target\release\bundle\nsis"
+if (Test-Path $nsisBundleDir) {
+  Get-ChildItem $nsisBundleDir -Filter "*.exe" | ForEach-Object {
+    if ($_.Name -like "星域_*") {
+      $targetName = $_.Name -replace "^星域_", "sector_"
+      Rename-Item -LiteralPath $_.FullName -NewName $targetName -Force
+    }
+  }
+}

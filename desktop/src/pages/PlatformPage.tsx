@@ -258,16 +258,16 @@ function AccessDetailItem({
 function platformAccessDetails(platform: PlatformDefinition) {
   if (platform.id === 'tiktok') {
     return {
-      browser: '使用 BitBrowser Local API 和账号绑定 profile_id。',
+      browser: '使用 Bit浏览器 Local API 和账号绑定 profile_id。',
       runner: '已接入统一入口和诊断脚本，可启动真实自动化任务。',
       runnerChips: ['src/main.py', 'src/test_like.py', 'src/test_comment.py', 'src/scheduler.py'],
-      api: '运行前需要本机 Python、BitBrowser API、账号配置和动作数据库。',
-      apiChips: ['Python', 'BitBrowser API', 'config/accounts.yaml', 'data/actions.db'],
+      api: '运行前需要本机 Python、Bit浏览器 API、账号配置和动作数据库。',
+      apiChips: ['Python', 'Bit浏览器 API', 'config/accounts.yaml', 'data/actions.db'],
     }
   }
   if (platform.id === 'douyin') {
     return {
-      browser: '可预留账号和 BitBrowser profile 绑定。',
+      browser: '可预留账号和 Bit浏览器 profile 绑定。',
       runner: '现有抓取器暂不接入 PC 端自动执行，启动入口保持禁用。',
       runnerChips: ['src/douyin-fetcher'],
       api: '后续接入时需补齐平台 adapter、执行器入口和日志统计口径。',
@@ -275,7 +275,7 @@ function platformAccessDetails(platform: PlatformDefinition) {
     }
   }
   return {
-    browser: '可预留账号和 BitBrowser profile 绑定。',
+    browser: '可预留账号和 Bit浏览器 profile 绑定。',
     runner: '自动执行 runner 未接入，启动类入口保持禁用。',
     runnerChips: ['reserved runner'],
     api: '后续接入时需补齐平台 adapter、平台 API 凭据或网页自动化环境说明。',
