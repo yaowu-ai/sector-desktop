@@ -20,14 +20,16 @@ for (const relativePath of ["package.json", "src-tauri/tauri.conf.json"]) {
 
 const cargoPath = join(desktopRoot, "src-tauri/Cargo.toml");
 const cargoToml = readFileSync(cargoPath, "utf8");
-const updatedCargoToml = cargoToml.replace(
-  /^(version = ")[^"]+(")$/m,
-  `$1${version}$2`,
-);
-
-if (updatedCargoToml === cargoToml) {
-  throw new Error("Unable to update package version in Cargo.toml");
+const cargoVersionPattern = /^(version = ")[^"]+(")$/m;
+if (!cargoVersionPattern.test(cargoToml)) {
+  throw new Error("Unable to find package version in Cargo.toml");
 }
 
-writeFileSync(cargoPath, updatedCargoToml);
+const updatedCargoToml = cargoToml.replace(cargoVersionPattern, `$1${version}$2`);
+
+if (updatedCargoToml === cargoToml) {
+  console.log(`Cargo.toml already set to ${version}`);
+} else {
+  writeFileSync(cargoPath, updatedCargoToml);
+}
 console.log(`Desktop release version set to ${version}`);
