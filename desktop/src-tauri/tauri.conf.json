@@ -42,7 +42,9 @@
         "customLanguageFiles": {
           "SimpChinese": "nsis/SimpChinese.nsh"
         },
-        "sidebarImage": "icons/nsis-sidebar-164x314.bmp"
+        "sidebarImage": "icons/nsis-sidebar-164x314.bmp",
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico"
       }
     },
     "macOS": {

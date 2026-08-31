@@ -15,7 +15,7 @@ use tauri::State;
 use crate::commands::bitbrowser::{auto_configure_chromium_executable, check_bitbrowser_api};
 use crate::commands::config::{
     ensure_account_ids_belong_to_platform, ensure_platform_capability, load_config,
-    normalize_platform, read_ai_comment_api_key_for_runtime, read_login_password_for_runtime,
+    normalize_platform, read_login_password_for_runtime,
 };
 use crate::paths::{normalize, project_paths, project_root, python_command_parts, ProjectPaths};
 use crate::security::redact_line;
@@ -23,7 +23,10 @@ use crate::state::{AppState, AuthInterventionState, BrowserPreviewState, License
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
-const AI_COMMENT_API_KEY_ENV: &str = "AM_AI_COMMENT_API_KEY";
+const DESKTOP_AI_COMMENT_MODE_ENV: &str = "AM_DESKTOP_AI_COMMENT_MODE";
+const DESKTOP_API_BASE_URL_ENV: &str = "AM_DESKTOP_API_BASE_URL";
+const DESKTOP_ACCESS_TOKEN_ENV: &str = "AM_DESKTOP_ACCESS_TOKEN";
+const DEVICE_FINGERPRINT_ENV: &str = "AM_DEVICE_FINGERPRINT";
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -828,25 +831,35 @@ fn login_env_for_account(
 fn ai_comment_env_for_runtime(
     license_entitlements: &Arc<Mutex<LicenseEntitlements>>,
 ) -> (HashMap<String, String>, Vec<String>) {
-    if !license_allows_ai_comment(license_entitlements) {
-        return (HashMap::new(), Vec::new());
-    }
     let Ok(config) = load_config() else {
         return (HashMap::new(), Vec::new());
     };
     if !config.ai_comment_enabled() {
         return (HashMap::new(), Vec::new());
     }
-    let provider = config.ai_comment_provider().to_string();
-    let Ok(Some(api_key)) = read_ai_comment_api_key_for_runtime(Some(&provider)) else {
-        return (HashMap::new(), Vec::new());
+    let mut env_vars = HashMap::from([(DESKTOP_AI_COMMENT_MODE_ENV.to_string(), "remote".to_string())]);
+    let Ok(entitlements) = license_entitlements.lock() else {
+        return (env_vars, Vec::new());
     };
-    if api_key.trim().is_empty() {
-        return (HashMap::new(), Vec::new());
+    if entitlements.api_base_url.is_empty()
+        || entitlements.access_token.is_empty()
+        || entitlements.device_fingerprint.is_empty()
+    {
+        return (env_vars, Vec::new());
     }
-    let mut env_vars = HashMap::new();
-    env_vars.insert(AI_COMMENT_API_KEY_ENV.to_string(), api_key.clone());
-    (env_vars, vec![api_key])
+    env_vars.insert(
+        DESKTOP_API_BASE_URL_ENV.to_string(),
+        entitlements.api_base_url.clone(),
+    );
+    env_vars.insert(
+        DESKTOP_ACCESS_TOKEN_ENV.to_string(),
+        entitlements.access_token.clone(),
+    );
+    env_vars.insert(
+        DEVICE_FINGERPRINT_ENV.to_string(),
+        entitlements.device_fingerprint.clone(),
+    );
+    (env_vars, vec![entitlements.access_token.clone()])
 }
 
 fn ensure_task_capability_entitled(
@@ -903,15 +916,6 @@ async fn reserve_daily_task_quota_remote(
     } else {
         Err(envelope.desc)
     }
-}
-
-fn license_allows_ai_comment(
-    license_entitlements: &Arc<Mutex<LicenseEntitlements>>,
-) -> bool {
-    license_entitlements
-        .lock()
-        .map(|entitlements| entitlements.ai_comment)
-        .unwrap_or(false)
 }
 
 fn sensitive_env_redactions(env_vars: &HashMap<String, String>) -> Vec<String> {

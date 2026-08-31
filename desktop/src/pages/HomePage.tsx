@@ -141,7 +141,7 @@ export function HomePage() {
           <Col xs={24} md={12} xl={4}>
             <Card>
               <Statistic
-                title="BitBrowser API"
+                title="Bit浏览器 API"
                 value={summary?.bitbrowser.available ? "在线" : "不可用"}
                 valueStyle={{ fontSize: 22 }}
               />

@@ -363,7 +363,7 @@ export function AccountPage() {
   const confirmDeleteAccount = (account: Account) => {
     confirmDanger({
       title: `删除账号 ${account.id}`,
-      content: `只会从 accounts.yaml 删除该账号配置，不会删除 BitBrowser profile ${account.bitbrowserProfileId ?? "未绑定"}。此操作不可撤销。`,
+      content: `只会从【账号管理】删除该账号配置，不会删除 Bit浏览器窗口 ID ${account.bitbrowserProfileId ?? "未绑定"}。此操作不可撤销。`,
       onOk: () => {
         void persistAccounts(
           accounts.filter((item) => item.id !== account.id),
@@ -423,7 +423,10 @@ export function AccountPage() {
     nextAccounts: Account[],
     successText: string,
   ): Promise<boolean> => {
-    const limitReason = enabledAccountLimitReason(nextAccounts, licenseLimits.maxEnabledAccounts);
+    const limitReason = enabledAccountLimitReason(
+      nextAccounts,
+      licenseLimits.maxEnabledAccounts,
+    );
     if (limitReason) {
       message.warning(limitReason);
       return false;
@@ -487,9 +490,9 @@ export function AccountPage() {
 
   const cleanupBuiltinData = (account: Account) => {
     Modal.confirm({
-      title: `清理内置 Chromium 数据 ${account.id}`,
+      title: `清理内置浏览器数据 ${account.id}`,
       content:
-        "只会删除该账号在星域内置 Chromium 下的本地用户数据，不会删除 BitBrowser profile。",
+        "只会删除该账号在星域内置浏览器下的本地用户数据，不会删除 Bit浏览器 配置文件。",
       okText: "清理",
       okType: "danger",
       cancelText: "取消",
@@ -608,7 +611,7 @@ export function AccountPage() {
       ),
     },
     {
-      title: "profile 状态",
+      title: "配置状态",
       dataIndex: "profileOpen",
       key: "profileOpen",
       width: 120,
@@ -718,7 +721,7 @@ export function AccountPage() {
     <>
       <PageHeader
         title="账号管理"
-        description="读取、编辑、校验 accounts.yaml 中的账号。"
+        description="显示、编辑、校验账号。"
         extra={
           <Space>
             <Button
@@ -767,7 +770,7 @@ export function AccountPage() {
                 <Space wrap>
                   <Input.Search
                     allowClear
-                    placeholder="搜索账号、平台、profile 或备注"
+                    placeholder="搜索账号、平台、配置状态或备注"
                     style={{ width: 320 }}
                     onSearch={setQuery}
                     onChange={(event) => setQuery(event.target.value)}
@@ -1028,8 +1031,7 @@ function AccountForm({
     }
     Modal.confirm({
       title: `删除 ${account.id} 的登录密码`,
-      content:
-        "只会删除本机加密保存的登录凭据，不会改动 accounts.yaml 中的账号配置。",
+      content: "只会删除本机加密保存的登录凭据。",
       okText: "删除",
       okType: "danger",
       cancelText: "取消",
@@ -1113,7 +1115,7 @@ function AccountForm({
           },
         ]}
       >
-        <Input placeholder="例如 tiktok_106、instagram_106、whatsapp_106、douyin_106" />
+        <Input placeholder="例如 tiktok_001" />
       </Form.Item>
 
       <Row gutter={12}>
@@ -1152,7 +1154,7 @@ function AccountForm({
           min={0}
           precision={0}
           className="full-width"
-          placeholder="例如 101"
+          placeholder="例如 01"
         />
       </Form.Item>
 
@@ -1169,15 +1171,15 @@ function AccountForm({
                 void openBitbrowserDownload();
               }}
             >
-              下载 BitBrowser
+              下载 Bit浏览器
             </Typography.Link>
           ) : null
         }
       >
         <Select
           options={[
-            { value: "bitbrowser", label: "BitBrowser" },
-            { value: "builtin_chromium", label: "内置 Chromium" },
+            { value: "bitbrowser", label: "Bit浏览器" },
+            { value: "builtin_chromium", label: "内置浏览器" },
           ]}
         />
       </Form.Item>
@@ -1185,7 +1187,7 @@ function AccountForm({
       {browserProvider === "bitbrowser" ? (
         <Form.Item
           name="bitbrowserProfileId"
-          label="BitBrowser 窗口 ID"
+          label="Bit浏览器窗口 ID"
           rules={[
             {
               validator: (_, value?: string) => {
@@ -1208,7 +1210,7 @@ function AccountForm({
             },
           ]}
         >
-          <Input placeholder="BitBrowser 窗口 ID" />
+          <Input placeholder="Bit浏览器窗口 ID" />
         </Form.Item>
       ) : null}
 
@@ -1217,8 +1219,7 @@ function AccountForm({
           <Alert
             type="warning"
             showIcon
-            message="内置 Chromium 是生产可选方案。TikTok 默认推荐仍是 BitBrowser。"
-            description="星域会为每个账号使用独立用户数据目录，打开临时 CDP 端口，并且只关闭由它自己启动的浏览器进程；它不等价替代 BitBrowser 的指纹环境能力。"
+            message="内置浏览器是可选方案。TikTok 默认推荐 Bit浏览器。"
           />
           <Row gutter={12}>
             <Col xs={24} md={8}>
@@ -1236,17 +1237,13 @@ function AccountForm({
               <Form.Item
                 name="proxy"
                 label="代理"
-                extra="可选。格式：主机:端口:用户名:密码"
+                extra="格式：主机:端口:用户名:密码"
               >
                 <Input placeholder="127.0.0.1:1080" />
               </Form.Item>
             </Col>
           </Row>
-          <Form.Item
-            name="userDataDir"
-            label="用户数据目录"
-            extra="可选。留空时星域会自动创建 data/browser/builtin_chromium/<账号>/user-data。"
-          >
+          <Form.Item name="userDataDir" label="用户数据目录" extra="可选。">
             <Input placeholder="留空使用每账号默认目录" />
           </Form.Item>
         </>
@@ -1263,7 +1260,6 @@ function AccountForm({
           type="info"
           showIcon
           message="这里配置平台账号和自动登录凭据。"
-          description="密码只保存在本机加密凭据存储中；accounts.yaml 只保存登录用户名和 credential_ref。"
         />
         <Form.Item name="loginEnabled" label="自动登录" valuePropName="checked">
           <Switch />
@@ -1448,7 +1444,9 @@ function IssueAlert({
               type="text"
               size="small"
               aria-label={collapsed ? "展开配置告警" : "收起配置告警"}
-              icon={collapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+              icon={
+                collapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />
+              }
               onClick={() => setCollapsed((nextCollapsed) => !nextCollapsed)}
             />
           </Tooltip>
@@ -1696,7 +1694,7 @@ function accountRegisterDisabledReason(
     !account.bitbrowserProfileId &&
     !account.browser?.profileId
   ) {
-    return `${account.id} 未绑定 BitBrowser profile`;
+    return `${account.id} 未绑定 Bit浏览器窗口 ID`;
   }
   return undefined;
 }
@@ -1842,7 +1840,7 @@ function BitBrowserProxyCell({
         status="本地"
         color="gold"
         value={localDisplay}
-        detail="BitBrowser 代理同步失败"
+        detail="Bit浏览器 代理同步失败"
       />
     ) : (
       <Typography.Text type="secondary">同步失败</Typography.Text>
@@ -1856,11 +1854,7 @@ function BitBrowserProxyCell({
   }
   if (bitbrowserDisplay && !localDisplay) {
     return (
-      <ProxyDisplay
-        status="BitBrowser"
-        color="blue"
-        value={bitbrowserDisplay}
-      />
+      <ProxyDisplay status="Bit浏览器" color="blue" value={bitbrowserDisplay} />
     );
   }
   if (localDisplay && !bitbrowserDisplay) {
@@ -1869,7 +1863,7 @@ function BitBrowserProxyCell({
         status="本地"
         color="gold"
         value={localDisplay}
-        detail="BitBrowser 未返回代理"
+        detail="Bit浏览器 未返回代理"
       />
     );
   }

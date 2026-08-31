@@ -24,9 +24,8 @@ import {
 import type { AppReleaseContext } from "../services/types";
 import desktopIcon from "../../src-tauri/icons/icon.png";
 
-const APP_VERSION = "0.1.0";
 const DEFAULT_RELEASE_CONTEXT: AppReleaseContext = {
-  version: APP_VERSION,
+  version: "",
   platform: inferBrowserPlatform(),
   arch: "x64",
 };
@@ -55,6 +54,11 @@ export function AboutPage() {
   const [updateState, setUpdateState] = useState<UpdateState>({
     status: "idle",
   });
+  const displayedReleaseContext = resolveDisplayedReleaseContext(
+    releaseContext,
+    updateState,
+  );
+  const displayedVersion = formatDisplayVersion(displayedReleaseContext.version);
 
   useEffect(() => {
     let disposed = false;
@@ -103,7 +107,10 @@ export function AboutPage() {
       const downloadUrl = resolveDesktopDownloadUrl(option.url);
       const platformLabel = formatDownloadTarget(option);
 
-      if (latestVersion && compareVersions(latestVersion, context.version) <= 0) {
+      if (
+        latestVersion &&
+        compareVersions(latestVersion, context.version) <= 0
+      ) {
         setUpdateState({
           status: "current",
           latestVersion,
@@ -127,9 +134,7 @@ export function AboutPage() {
       setUpdateState({
         status: "error",
         message:
-          error instanceof Error
-            ? error.message
-            : "检查更新失败，请稍后重试。",
+          error instanceof Error ? error.message : "检查更新失败，请稍后重试。",
       });
     }
   }, []);
@@ -209,7 +214,7 @@ export function AboutPage() {
                 </Typography.Text>
                 <div className="profile-role-row">
                   <Typography.Text strong>
-                    版本 {releaseContext.version}
+                    版本 {displayedVersion}
                   </Typography.Text>
                 </div>
               </div>
@@ -223,7 +228,7 @@ export function AboutPage() {
               <Descriptions.Item
                 label={<InfoLabel icon={<Info size={15} />} text="当前版本" />}
               >
-                {releaseContext.version}
+                {displayedVersion}
               </Descriptions.Item>
               <Descriptions.Item
                 label={
@@ -283,8 +288,23 @@ async function resolveReleaseContext() {
   }
 }
 
+function resolveDisplayedReleaseContext(
+  context: AppReleaseContext,
+  state: UpdateState,
+) {
+  if (state.status === "current" && state.latestVersion) {
+    return { ...context, version: state.latestVersion };
+  }
+  return context;
+}
+
+function formatDisplayVersion(version: string) {
+  return version || "未检测";
+}
+
 function inferBrowserPlatform(): AppReleaseContext["platform"] {
-  const value = `${navigator.platform || ""} ${navigator.userAgent || ""}`.toLowerCase();
+  const value =
+    `${navigator.platform || ""} ${navigator.userAgent || ""}`.toLowerCase();
   if (value.includes("mac")) return "macos";
   if (value.includes("linux")) return "linux";
   return "windows";
@@ -337,7 +357,9 @@ function renderUpdateStatus(state: UpdateState) {
   if (state.status === "available") {
     return (
       <Typography.Text type="success">
-        {state.latestVersion ? `可更新到 ${state.latestVersion}` : "有可用安装包"}
+        {state.latestVersion
+          ? `可更新到 ${state.latestVersion}`
+          : "有可用安装包"}
       </Typography.Text>
     );
   }
@@ -373,21 +395,21 @@ function getUpdateAlertMessage(state: UpdateState) {
 
 function getUpdateAlertDescription(state: UpdateState) {
   if (state.status === "opening") {
-    return "正在调用系统浏览器打开安装包下载地址，不会自动安装或后台更新。";
+    return "正在调用系统浏览器打开安装包下载地址。";
   }
   if (state.status === "available") {
     return `适用安装包：${state.platformLabel || "当前平台"}。点击“下载最新版”会打开浏览器下载安装包，请退出当前客户端后手动安装。`;
   }
   if (state.status === "current") {
-    return "服务端没有比当前客户端更高的已发布版本。";
+    return "";
   }
   if (state.status === "unavailable") {
-    return "请先在 h-sector 后台为当前平台和架构新增并发布桌面端版本。";
+    return "";
   }
   if (state.status === "error") {
-    return "请确认 h-sector 服务端可访问，并且桌面端 API 地址配置正确。";
+    return "";
   }
-  return "点击按钮后会向 h-sector 获取当前系统对应的最新安装包地址，不会自动下载或自动安装。";
+  return "";
 }
 
 function formatReleaseContext(context: AppReleaseContext) {
@@ -395,7 +417,8 @@ function formatReleaseContext(context: AppReleaseContext) {
   if (context.platform === "macos" && context.arch === "arm64") {
     return "macOS Apple Silicon";
   }
-  if (context.platform === "macos" && context.arch === "x64") return "macOS Intel";
+  if (context.platform === "macos" && context.arch === "x64")
+    return "macOS Intel";
   return `${context.platform} ${context.arch}`;
 }
 
@@ -404,7 +427,8 @@ function formatDownloadTarget(option: DesktopDownloadOptionResponse) {
   if (option.platform === "macos" && option.arch === "arm64") {
     return "macOS Apple Silicon";
   }
-  if (option.platform === "macos" && option.arch === "x64") return "macOS Intel";
+  if (option.platform === "macos" && option.arch === "x64")
+    return "macOS Intel";
   return option.label;
 }
 

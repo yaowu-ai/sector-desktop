@@ -3,8 +3,8 @@ import { Space, Tag, Typography } from 'antd'
 import type { Account, BrowserProviderId } from '../services/types'
 
 const PROVIDER_LABELS: Record<BrowserProviderId, string> = {
-  bitbrowser: 'BitBrowser',
-  builtin_chromium: '内置 Chromium',
+  bitbrowser: 'Bit浏览器',
+  builtin_chromium: '内置浏览器',
 }
 
 const PROVIDER_COLORS: Record<BrowserProviderId, string> = {

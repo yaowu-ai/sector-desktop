@@ -114,29 +114,6 @@ export interface AiCommentSettings {
   blockedWords: string[]
 }
 
-export interface AiCommentApiKeyPayload {
-  provider?: string
-  apiKey: string
-}
-
-export interface AiCommentApiKeyStatus {
-  provider: string
-  credentialRef: string
-  saved: boolean
-  readable: boolean
-  error?: string
-}
-
-export interface AiCommentTestPayload {
-  settings: AiCommentSettings
-}
-
-export interface AiCommentPreviewPayload {
-  settings: AiCommentSettings
-  title: string
-  description?: string
-}
-
 export interface AiCommentGenerationResult {
   ok: boolean
   comment: string

@@ -5,6 +5,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -51,6 +52,16 @@ interface DesktopAuthContextValue {
   logout: () => void;
 }
 
+interface EntitlementHydrationResult {
+  subscription: DesktopSubscriptionCurrentResponse;
+  license: DesktopLicenseCurrentResponse;
+}
+
+interface EntitlementRequestEntry {
+  key: string;
+  request: Promise<EntitlementHydrationResult>;
+}
+
 const DesktopAuthContext = createContext<DesktopAuthContextValue | null>(null);
 
 export function DesktopAuthProvider({
@@ -71,6 +82,7 @@ export function DesktopAuthProvider({
   const [entitlementWarning, setEntitlementWarning] = useState<string | null>(
     null,
   );
+  const entitlementRequestRef = useRef<EntitlementRequestEntry | null>(null);
 
   const clearRuntimeState = useCallback(() => {
     setSession(null);
@@ -81,37 +93,53 @@ export function DesktopAuthProvider({
 
   const hydrateEntitlement = useCallback(
     async (nextSession: DesktopSession, nextApiBaseUrl = apiBaseUrl) => {
-      const nextSubscription = await loadCurrentSubscription(
-        nextSession,
-        nextApiBaseUrl,
-      );
-      setSubscription(nextSubscription);
-
-      if (nextSubscription.status !== "active") {
-        const unavailableLicense =
-          buildUnavailableLicense("当前账号没有有效订阅");
-        setDevice(null);
-        setLicense(unavailableLicense);
-        return {
-          subscription: nextSubscription,
-          license: unavailableLicense,
-        };
+      const requestKey = `${nextApiBaseUrl}|${nextSession.accessToken}`;
+      if (entitlementRequestRef.current?.key === requestKey) {
+        return entitlementRequestRef.current.request;
       }
 
-      const nextDevice = await activateDesktopDevice(
-        nextSession,
-        nextApiBaseUrl,
-      );
-      const nextLicense = await loadVerifiedCurrentLicense(
-        nextSession,
-        nextApiBaseUrl,
-      );
-      setDevice(nextDevice);
-      setLicense(nextLicense);
-      return {
-        subscription: nextSubscription,
-        license: nextLicense,
-      };
+      const request = (async () => {
+        const nextSubscription = await loadCurrentSubscription(
+          nextSession,
+          nextApiBaseUrl,
+        );
+        setSubscription(nextSubscription);
+
+        if (nextSubscription.status !== "active") {
+          const unavailableLicense =
+            buildUnavailableLicense("当前账号没有有效订阅");
+          setDevice(null);
+          setLicense(unavailableLicense);
+          return {
+            subscription: nextSubscription,
+            license: unavailableLicense,
+          };
+        }
+
+        const nextDevice = await activateDesktopDevice(
+          nextSession,
+          nextApiBaseUrl,
+        );
+        const nextLicense = await loadVerifiedCurrentLicense(
+          nextSession,
+          nextApiBaseUrl,
+        );
+        setDevice(nextDevice);
+        setLicense(nextLicense);
+        return {
+          subscription: nextSubscription,
+          license: nextLicense,
+        };
+      })();
+
+      entitlementRequestRef.current = { key: requestKey, request };
+      try {
+        return await request;
+      } finally {
+        if (entitlementRequestRef.current?.request === request) {
+          entitlementRequestRef.current = null;
+        }
+      }
     },
     [apiBaseUrl],
   );

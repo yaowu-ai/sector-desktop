@@ -1,3 +1,5 @@
+import type { AiCommentGenerationResult, AiCommentSettings, Platform } from './types'
+
 const API_BASE_STORAGE_KEY = 'account-matrix-desktop-api-base-url'
 const SESSION_STORAGE_KEY = 'account-matrix-desktop-session'
 const DEVICE_FINGERPRINT_STORAGE_KEY = 'account-matrix-device-fingerprint'
@@ -138,6 +140,13 @@ export interface DesktopFeedbackCreateResponse {
   threadId: string
   messageId: string
   status: 'created'
+}
+
+export interface DesktopAiCommentGenerateRequest {
+  platform?: Platform
+  title: string
+  description?: string
+  settings: Pick<AiCommentSettings, 'language' | 'timeoutSeconds' | 'maxCommentLength' | 'blockedWords'>
 }
 
 export function getDesktopApiBaseUrl() {
@@ -449,6 +458,25 @@ export function submitDesktopFeedback(
       body: {
         content: payload.content,
         imageUrls: payload.imageUrls ?? [],
+      },
+    },
+  )
+}
+
+export function generateDesktopAiComment(
+  session: DesktopSession,
+  payload: DesktopAiCommentGenerateRequest,
+  apiBaseUrl = getDesktopApiBaseUrl(),
+) {
+  return desktopApiRequest<AiCommentGenerationResult>(
+    apiBaseUrl,
+    '/ai-comments/generate',
+    {
+      method: 'POST',
+      token: session.accessToken,
+      body: {
+        ...payload,
+        deviceFingerprint: getDeviceFingerprint(),
       },
     },
   )

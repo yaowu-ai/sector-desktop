@@ -245,7 +245,10 @@ export function SchedulerPage() {
   }, [refresh]);
 
   const start = async () => {
-    const disabledReason = schedulerDisabledReason(licenseLimits.scheduler, currentPlatform);
+    const disabledReason = schedulerDisabledReason(
+      licenseLimits.scheduler,
+      currentPlatform,
+    );
     if (disabledReason) {
       message.warning(disabledReason);
       return;
@@ -308,7 +311,10 @@ export function SchedulerPage() {
   };
 
   const save = async () => {
-    const disabledReason = schedulerDisabledReason(licenseLimits.scheduler, currentPlatform);
+    const disabledReason = schedulerDisabledReason(
+      licenseLimits.scheduler,
+      currentPlatform,
+    );
     if (disabledReason) {
       message.warning(disabledReason);
       return;
@@ -319,7 +325,7 @@ export function SchedulerPage() {
         firesPerDay,
         accounts: rows.map(rowToSchedulerAccount),
       });
-      message.success("调度配置已保存到 accounts.yaml");
+      message.success("调度配置已保存");
       await refresh();
     } catch (error) {
       message.error(formatError(error));
@@ -427,7 +433,7 @@ export function SchedulerPage() {
           <Alert
             showIcon
             type="info"
-            message="V1 调度使用运行机器本地时间"
+            message="调度计划使用运行机器本地时间"
             description="保存账号或调度配置后，调度器会在约 10 秒内自动重建剩余排期；如果检测到旧版本或配置路径不一致的调度进程，请先停止后重新启动。"
           />
         </Col>
@@ -446,7 +452,7 @@ export function SchedulerPage() {
         <Col xs={24} md={8} xl={4}>
           <Card>
             <Space direction="vertical" size={8}>
-              <Typography.Text type="secondary">BitBrowser API</Typography.Text>
+              <Typography.Text type="secondary">Bit浏览器</Typography.Text>
               <StatusTag
                 status={bitbrowser?.available ? "ok" : "error"}
                 label={bitbrowser?.available ? "可用" : "不可用"}
@@ -572,7 +578,12 @@ export function SchedulerPage() {
                 type="primary"
                 icon={<Save size={16} />}
                 loading={saving}
-                disabled={Boolean(schedulerDisabledReason(licenseLimits.scheduler, currentPlatform))}
+                disabled={Boolean(
+                  schedulerDisabledReason(
+                    licenseLimits.scheduler,
+                    currentPlatform,
+                  ),
+                )}
                 onClick={() => void save()}
               >
                 保存配置
@@ -840,7 +851,10 @@ function formatSchedulerJobRunStatus(status: SchedulerJobRunRecord["status"]) {
   return status || "-";
 }
 
-function schedulerDisabledReason(schedulerAllowed: boolean, currentPlatform: Platform) {
+function schedulerDisabledReason(
+  schedulerAllowed: boolean,
+  currentPlatform: Platform,
+) {
   if (!schedulerAllowed) return "当前套餐不支持自动调度";
   if (!isExecutablePlatform(currentPlatform)) {
     return getAutomaticExecutionDisabledReason(currentPlatform, "scheduler");

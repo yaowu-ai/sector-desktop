@@ -124,7 +124,7 @@ export const PLATFORM_CAPABILITIES: PlatformCapabilityDefinition[] = [
   {
     key: 'browserProfile',
     label: '浏览器环境',
-    description: 'BitBrowser profile 绑定、打开、关闭和状态检测',
+    description: 'Bit浏览器 profile 绑定、打开、关闭和状态检测',
   },
   {
     key: 'warmupTask',

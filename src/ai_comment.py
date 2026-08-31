@@ -15,6 +15,10 @@ from platform_config import DEFAULT_AI_COMMENT_CONFIG
 
 CredentialReader = Callable[[str], str | None]
 AI_COMMENT_API_KEY_ENV = "AM_AI_COMMENT_API_KEY"
+DESKTOP_AI_COMMENT_MODE_ENV = "AM_DESKTOP_AI_COMMENT_MODE"
+DESKTOP_API_BASE_URL_ENV = "AM_DESKTOP_API_BASE_URL"
+DESKTOP_ACCESS_TOKEN_ENV = "AM_DESKTOP_ACCESS_TOKEN"
+DEVICE_FINGERPRINT_ENV = "AM_DEVICE_FINGERPRINT"
 
 DEFAULT_SYSTEM_PROMPT = (
     "你只输出一句适合 TikTok 视频的自然短评论，不要解释，不要换行，"
@@ -154,6 +158,10 @@ def generate_ai_comment(
     """Generate and validate one comment using the configured provider adapter."""
     started = time.monotonic()
     merged_config = normalize_ai_comment_config(config)
+    remote_result = generate_ai_comment_via_desktop_api(context, merged_config, started)
+    if remote_result is not None:
+        return remote_result
+
     provider = merged_config["provider"]
 
     if not merged_config["enabled"]:
@@ -189,6 +197,81 @@ def generate_ai_comment(
         "reason": "generated",
         "latency_ms": elapsed_ms(started),
     }
+
+
+def generate_ai_comment_via_desktop_api(
+    context: Mapping[str, Any],
+    config: Mapping[str, Any],
+    started: float,
+) -> dict[str, Any] | None:
+    api_base_url = (os.environ.get(DESKTOP_API_BASE_URL_ENV) or "").strip().rstrip("/")
+    access_token = (os.environ.get(DESKTOP_ACCESS_TOKEN_ENV) or "").strip()
+    device_fingerprint = (os.environ.get(DEVICE_FINGERPRINT_ENV) or "").strip()
+    force_remote = (os.environ.get(DESKTOP_AI_COMMENT_MODE_ENV) or "").strip().lower() == "remote"
+    if not force_remote and not api_base_url and not access_token and not device_fingerprint:
+        return None
+    if not api_base_url or not access_token or not device_fingerprint:
+        return failure("credential_error", started, "desktop AI comment credentials are incomplete")
+
+    payload = {
+        "deviceFingerprint": device_fingerprint,
+        "platform": str(context.get("platform") or "tiktok"),
+        "title": str(context.get("title") or ""),
+        "description": str(context.get("description") or ""),
+        "settings": {
+            "language": config_value(config, "language", DEFAULT_AI_COMMENT_CONFIG["language"]),
+            "timeoutSeconds": int_config(config, "timeout_seconds", DEFAULT_AI_COMMENT_CONFIG["timeout_seconds"]),
+            "maxCommentLength": int_config(config, "max_comment_length", DEFAULT_AI_COMMENT_CONFIG["max_comment_length"]),
+            "blockedWords": list(config.get("blocked_words") or []),
+        },
+    }
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        response = requests.post(
+            f"{api_base_url}/ai-comments/generate",
+            headers=headers,
+            json=payload,
+            timeout=int_config(config, "timeout_seconds", DEFAULT_AI_COMMENT_CONFIG["timeout_seconds"]) + 3,
+        )
+        status_code = response.status_code
+        data = response.json()
+    except requests.Timeout as exc:
+        return failure("timeout", started, redact_error(exc))
+    except requests.RequestException as exc:
+        return failure("network_error", started, redact_error(exc))
+    except ValueError as exc:
+        return failure("invalid_response", started, redact_error(exc))
+
+    if not (200 <= status_code < 300):
+        return failure(http_status_reason(status_code), started, redact_error(response.text))
+    if not isinstance(data, Mapping):
+        return failure("invalid_response", started, "response envelope is not an object")
+    if not data.get("success"):
+        desc = str(data.get("desc") or "")
+        return failure(desktop_api_error_reason(desc), started, redact_error(desc))
+
+    result = data.get("data")
+    if not isinstance(result, Mapping):
+        return failure("invalid_response", started, "response data is not an object")
+    latency = result.get("latencyMs", result.get("latency_ms"))
+    try:
+        latency_ms = int(float(latency))
+    except (TypeError, ValueError):
+        latency_ms = elapsed_ms(started)
+    normalized = {
+        "ok": bool(result.get("ok")),
+        "comment": str(result.get("comment") or ""),
+        "source": str(result.get("source") or "ai"),
+        "reason": str(result.get("reason") or ("generated" if result.get("ok") else "failed")),
+        "latency_ms": latency_ms,
+    }
+    if result.get("error"):
+        normalized["error"] = redact_error(result.get("error"))
+    return normalized
 
 
 def validate_generated_comment(text: Any, config: Mapping[str, Any] | None = None) -> dict[str, Any]:
@@ -386,6 +469,10 @@ def redact_error(error: Any) -> str:
 
 def http_error_reason(error: requests.HTTPError) -> str:
     status_code = getattr(getattr(error, "response", None), "status_code", None)
+    return http_status_reason(status_code)
+
+
+def http_status_reason(status_code) -> str:
     if status_code == 400:
         return "invalid_request"
     if status_code == 401:
@@ -399,6 +486,19 @@ def http_error_reason(error: requests.HTTPError) -> str:
     if isinstance(status_code, int) and status_code >= 500:
         return "server_error"
     return "http_error"
+
+
+def desktop_api_error_reason(message: str) -> str:
+    text = str(message or "")
+    if "不支持 AI 评论" in text:
+        return "forbidden"
+    if "没有有效" in text or "未激活" in text or "请先登录" in text:
+        return "unauthorized"
+    if "频繁" in text or "限流" in text:
+        return "rate_limited"
+    if "未配置 AI 评论 API Key" in text:
+        return "missing_api_key"
+    return "server_error"
 
 
 def http_error_detail(error: requests.HTTPError) -> str:

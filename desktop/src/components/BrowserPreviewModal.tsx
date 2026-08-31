@@ -62,7 +62,7 @@ export function BrowserPreviewModal({ open, preview, onClose }: BrowserPreviewMo
   }, [open, preview?.cdpEndpoint])
 
   const title = preview ? `浏览器预览 - ${preview.accountId}` : '浏览器预览'
-  const waitingText = preview ? '正在连接 BitBrowser 画面...' : '等待浏览器启动...'
+  const waitingText = preview ? '正在连接 Bit浏览器画面...' : '等待浏览器启动...'
 
   return (
     <Modal
@@ -76,7 +76,7 @@ export function BrowserPreviewModal({ open, preview, onClose }: BrowserPreviewMo
     >
       <div className="browser-preview-shell">
         {frame ? (
-          <img className="browser-preview-frame" src={frame} alt="BitBrowser live preview" />
+          <img className="browser-preview-frame" src={frame} alt="Bit浏览器实时预览" />
         ) : (
           <div className="browser-preview-empty">
             <Space direction="vertical" align="center">

@@ -1,7 +1,6 @@
 use chrono::Local;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value as JsonValue};
 use serde_yaml::{Mapping, Value};
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -20,7 +19,6 @@ const CONFIG_SCHEMA_VERSION: i64 = 1;
 const DEFAULT_BROWSER_PROVIDER: &str = "bitbrowser";
 const DEFAULT_LOGIN_METHOD: &str = "password";
 const LOGIN_CREDENTIAL_PREFIX: &str = "account-login/";
-const AI_COMMENT_CREDENTIAL_PREFIX: &str = "ai-comment/";
 const DEFAULT_AI_COMMENT_PROVIDER: &str = "kimi_moonshot";
 const DEFAULT_AI_COMMENT_BASE_URL: &str = "https://api.moonshot.cn/v1";
 const DEFAULT_AI_COMMENT_MODEL: &str = "kimi-k2.6";
@@ -394,13 +392,6 @@ pub struct AiCommentSettingsPayload {
     pub blocked_words: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AiCommentApiKeyPayload {
-    pub provider: Option<String>,
-    pub api_key: String,
-}
-
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct LoginCredentialStatus {
@@ -425,30 +416,6 @@ pub struct AiCommentSettings {
     blocked_words: Vec<String>,
 }
 
-#[derive(Debug, Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct AiCommentApiKeyStatus {
-    provider: String,
-    credential_ref: String,
-    saved: bool,
-    readable: bool,
-    error: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AiCommentTestPayload {
-    pub settings: AiCommentSettingsPayload,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AiCommentPreviewPayload {
-    pub settings: AiCommentSettingsPayload,
-    pub title: String,
-    pub description: Option<String>,
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LicenseEntitlementsPayload {
@@ -462,20 +429,6 @@ pub struct LicenseEntitlementsPayload {
     pub api_base_url: String,
     pub access_token: String,
     pub device_fingerprint: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct AiCommentGenerationResult {
-    ok: bool,
-    comment: String,
-    source: String,
-    reason: String,
-    #[serde(rename = "latencyMs", alias = "latency_ms")]
-    latency_ms: i64,
-    error: Option<String>,
-    provider: String,
-    model: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -1133,100 +1086,6 @@ pub fn save_ai_comment_settings(
         backup_path: backup.backup_path,
         validation,
     })
-}
-
-#[tauri::command]
-pub fn save_ai_comment_api_key(
-    payload: AiCommentApiKeyPayload,
-) -> Result<AiCommentApiKeyStatus, String> {
-    let provider = normalize_ai_comment_provider(payload.provider.as_deref())?;
-    if payload.api_key.trim().is_empty() {
-        return Err("AI comment API Key must not be empty".to_string());
-    }
-    let credential_ref = ai_comment_credential_ref(&provider)?;
-    let encrypted = protect_ai_comment_secret(&credential_ref, payload.api_key.trim())?;
-    let credential_path = ai_comment_credential_ref_path(&credential_ref)?;
-    if let Some(parent) = credential_path.parent() {
-        fs::create_dir_all(parent).map_err(|err| {
-            format!(
-                "failed to create AI comment credential directory {}: {}",
-                normalize(parent),
-                err
-            )
-        })?;
-    }
-    fs::write(&credential_path, encrypted).map_err(|err| {
-        format!(
-            "failed to write encrypted AI comment credential {}: {}",
-            normalize(&credential_path),
-            err
-        )
-    })?;
-    Ok(ai_comment_api_key_status_for_provider(&provider))
-}
-
-#[tauri::command]
-pub fn delete_ai_comment_api_key(provider: Option<String>) -> Result<AiCommentApiKeyStatus, String> {
-    let provider = normalize_ai_comment_provider(provider.as_deref())?;
-    let credential_ref = ai_comment_credential_ref(&provider)?;
-    delete_ai_comment_secret(&credential_ref)?;
-    let credential_path = ai_comment_credential_ref_path(&credential_ref)?;
-    if credential_path.exists() {
-        fs::remove_file(&credential_path).map_err(|err| {
-            format!(
-                "failed to delete encrypted AI comment credential {}: {}",
-                normalize(&credential_path),
-                err
-            )
-        })?;
-    }
-    Ok(ai_comment_api_key_status_for_provider(&provider))
-}
-
-#[tauri::command]
-pub fn get_ai_comment_api_key_status(
-    provider: Option<String>,
-) -> Result<AiCommentApiKeyStatus, String> {
-    let provider = normalize_ai_comment_provider(provider.as_deref())?;
-    Ok(ai_comment_api_key_status_for_provider(&provider))
-}
-
-#[tauri::command]
-pub fn test_ai_comment_connection(
-    payload: AiCommentTestPayload,
-    state: State<'_, AppState>,
-) -> Result<AiCommentGenerationResult, String> {
-    ensure_ai_comment_entitled(&state)?;
-    validate_ai_comment_settings_payload(&payload.settings)?;
-    run_ai_comment_generation(
-        &payload.settings,
-        "A short TikTok video about a useful everyday tip",
-        "The creator demonstrates a simple idea in a natural, friendly style.",
-    )
-}
-
-#[tauri::command]
-pub fn preview_ai_comment(
-    payload: AiCommentPreviewPayload,
-    state: State<'_, AppState>,
-) -> Result<AiCommentGenerationResult, String> {
-    ensure_ai_comment_entitled(&state)?;
-    validate_ai_comment_settings_payload(&payload.settings)?;
-    let title = payload.title.trim();
-    let description = payload.description.as_deref().unwrap_or("").trim();
-    if title.is_empty() && description.is_empty() {
-        return Ok(AiCommentGenerationResult {
-            ok: false,
-            comment: String::new(),
-            source: "ai".to_string(),
-            reason: "missing_context".to_string(),
-            latency_ms: 0,
-            error: None,
-            provider: payload.settings.provider.trim().to_string(),
-            model: payload.settings.model.trim().to_string(),
-        });
-    }
-    run_ai_comment_generation(&payload.settings, title, description)
 }
 
 #[tauri::command]
@@ -1902,121 +1761,6 @@ fn login_credential_status(
     }
 }
 
-fn ai_comment_api_key_status_for_provider(provider: &str) -> AiCommentApiKeyStatus {
-    let provider = match normalize_ai_comment_provider(Some(provider)) {
-        Ok(provider) => provider,
-        Err(error) => {
-            return AiCommentApiKeyStatus {
-                provider: provider.to_string(),
-                credential_ref: String::new(),
-                saved: false,
-                readable: false,
-                error: Some(error),
-            };
-        }
-    };
-    let credential_ref = match ai_comment_credential_ref(&provider) {
-        Ok(credential_ref) => credential_ref,
-        Err(error) => {
-            return AiCommentApiKeyStatus {
-                provider,
-                credential_ref: String::new(),
-                saved: false,
-                readable: false,
-                error: Some(error),
-            };
-        }
-    };
-    let path = match ai_comment_credential_ref_path(&credential_ref) {
-        Ok(path) => path,
-        Err(error) => {
-            return AiCommentApiKeyStatus {
-                provider,
-                credential_ref,
-                saved: false,
-                readable: false,
-                error: Some(error),
-            };
-        }
-    };
-    if !path.exists() {
-        return AiCommentApiKeyStatus {
-            provider,
-            credential_ref,
-            saved: false,
-            readable: false,
-            error: None,
-        };
-    }
-    let encrypted = match fs::read_to_string(&path) {
-        Ok(encrypted) => encrypted,
-        Err(error) => {
-            return AiCommentApiKeyStatus {
-                provider,
-                credential_ref,
-                saved: true,
-                readable: false,
-                error: Some(format!(
-                    "failed to read encrypted AI comment credential {}: {}",
-                    normalize(&path),
-                    error
-                )),
-            };
-        }
-    };
-    match unprotect_ai_comment_secret(&credential_ref, &encrypted) {
-        Ok(_) => AiCommentApiKeyStatus {
-            provider,
-            credential_ref,
-            saved: true,
-            readable: true,
-            error: None,
-        },
-        Err(error) => AiCommentApiKeyStatus {
-            provider,
-            credential_ref,
-            saved: true,
-            readable: false,
-            error: Some(format!(
-                "stored AI comment credential exists but secure credential read failed: {}",
-                error
-            )),
-        },
-    }
-}
-
-fn run_ai_comment_generation(
-    settings: &AiCommentSettingsPayload,
-    title: &str,
-    description: &str,
-) -> Result<AiCommentGenerationResult, String> {
-    let provider = normalize_ai_comment_provider(Some(&settings.provider))?;
-    let missing_api_key_result = || AiCommentGenerationResult {
-        ok: false,
-        comment: String::new(),
-        source: "ai".to_string(),
-        reason: "missing_api_key".to_string(),
-        latency_ms: 0,
-        error: None,
-        provider: provider.clone(),
-        model: settings.model.trim().to_string(),
-    };
-    let Some(api_key) = read_ai_comment_api_key_for_runtime(Some(&provider))? else {
-        return Ok(missing_api_key_result());
-    };
-    if api_key.trim().is_empty() {
-        return Ok(missing_api_key_result());
-    }
-
-    let result = run_ai_comment_python(settings, title, description, &provider, &api_key)?;
-    Ok(AiCommentGenerationResult {
-        error: result
-            .error
-            .map(|error| redact_text(&error, &vec![api_key.to_string()])),
-        ..result
-    })
-}
-
 fn ensure_ai_comment_payload_entitled(
     payload: &AiCommentSettingsPayload,
     state: &State<'_, AppState>,
@@ -2102,127 +1846,6 @@ fn yaml_bool(value: &Value, key: &str) -> Option<bool> {
         .and_then(Value::as_bool)
 }
 
-fn run_ai_comment_python(
-    settings: &AiCommentSettingsPayload,
-    title: &str,
-    description: &str,
-    provider: &str,
-    api_key: &str,
-) -> Result<AiCommentGenerationResult, String> {
-    let paths = project_paths()?;
-    let payload = json!({
-        "config": ai_comment_payload_to_python_config(settings)?,
-        "context": {
-            "platform": "tiktok",
-            "title": title,
-            "description": description,
-        },
-    });
-    let (program, args, current_dir) = if paths.runtime_mode == "bundled" {
-        let runtime_dir = Path::new(&paths.runtime_path)
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from("."));
-        (
-            paths.runtime_path.clone(),
-            vec!["ai-comment".to_string()],
-            runtime_dir,
-        )
-    } else {
-        let command = crate::paths::python_command_parts()?;
-        let (program, args) = command
-            .split_first()
-            .ok_or_else(|| "python command is empty".to_string())?;
-        let script = r#"
-import json
-import os
-import sys
-
-sys.path.insert(0, os.environ["AM_PROJECT_SRC_DIR"])
-from ai_comment import generate_ai_comment, read_api_key_from_env
-
-payload = json.loads(sys.stdin.read() or "{}")
-config = payload.get("config") or {}
-result = generate_ai_comment(payload.get("context") or {}, config, read_api_key_from_env)
-result["provider"] = str(config.get("provider") or "")
-result["model"] = str(config.get("model") or "")
-print(json.dumps(result, ensure_ascii=True))
-"#;
-        let mut source_args = args.to_vec();
-        source_args.push("-B".to_string());
-        source_args.push("-c".to_string());
-        source_args.push(script.to_string());
-        (program.clone(), source_args, PathBuf::from("."))
-    };
-
-    let mut command_builder = Command::new(program);
-    command_builder
-        .args(args)
-        .current_dir(current_dir)
-        .env("AM_PROJECT_SRC_DIR", &paths.src_dir)
-        .env("AM_AI_COMMENT_API_KEY", api_key)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    hide_console_window(&mut command_builder);
-    let mut child = command_builder
-        .spawn()
-        .map_err(|err| format!("failed to start Python AI comment preview: {}", err))?;
-
-    if let Some(stdin) = child.stdin.as_mut() {
-        stdin
-            .write_all(payload.to_string().as_bytes())
-            .map_err(|err| format!("failed to write AI comment preview payload: {}", err))?;
-    }
-
-    let output = child
-        .wait_with_output()
-        .map_err(|err| format!("failed to run AI comment preview: {}", err))?;
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let stderr = redact_text(&String::from_utf8_lossy(&output.stderr), &vec![api_key.to_string()]);
-    if !output.status.success() {
-        return Ok(AiCommentGenerationResult {
-            ok: false,
-            comment: String::new(),
-            source: "ai".to_string(),
-            reason: "runtime_error".to_string(),
-            latency_ms: 0,
-            error: blank_to_none(Some(&stderr)),
-            provider: provider.to_string(),
-            model: settings.model.trim().to_string(),
-        });
-    }
-    let mut result: AiCommentGenerationResult = serde_json::from_str(&stdout)
-        .map_err(|err| format!("failed to parse AI comment preview result: {}", err))?;
-    result.provider = provider.to_string();
-    result.model = settings.model.trim().to_string();
-    Ok(result)
-}
-
-fn hide_console_window(command: &mut Command) {
-    #[cfg(windows)]
-    {
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
-}
-
-fn ai_comment_payload_to_python_config(
-    settings: &AiCommentSettingsPayload,
-) -> Result<JsonValue, String> {
-    let provider = normalize_ai_comment_provider(Some(&settings.provider))?;
-    Ok(json!({
-        "enabled": true,
-        "provider": provider,
-        "base_url": settings.base_url.trim().trim_end_matches('/'),
-        "model": settings.model.trim(),
-        "timeout_seconds": settings.timeout_seconds,
-        "max_comment_length": settings.max_comment_length,
-        "fallback_to_pool": settings.fallback_to_pool.unwrap_or(true),
-        "language": settings.language.trim(),
-        "blocked_words": normalize_plain_string_list(&settings.blocked_words),
-    }))
-}
-
 #[allow(dead_code)]
 pub(crate) fn read_login_password_for_runtime(account_id: &str) -> Result<Option<String>, String> {
     let account_id = normalize_account_id(account_id)?;
@@ -2243,32 +1866,8 @@ pub(crate) fn read_login_password_for_runtime(account_id: &str) -> Result<Option
     unprotect_login_secret(&credential_ref, &encrypted).map(Some)
 }
 
-#[allow(dead_code)]
-pub(crate) fn read_ai_comment_api_key_for_runtime(
-    provider: Option<&str>,
-) -> Result<Option<String>, String> {
-    let provider = normalize_ai_comment_provider(provider)?;
-    let credential_ref = ai_comment_credential_ref(&provider)?;
-    let credential_path = ai_comment_credential_ref_path(&credential_ref)?;
-    if !credential_path.exists() {
-        return Ok(None);
-    }
-    let encrypted = fs::read_to_string(&credential_path).map_err(|err| {
-        format!(
-            "failed to read encrypted AI comment credential {}: {}",
-            normalize(&credential_path),
-            err
-        )
-    })?;
-    unprotect_ai_comment_secret(&credential_ref, &encrypted).map(Some)
-}
-
 fn credential_ref_path(credential_ref: &str) -> Result<PathBuf, String> {
     local_secret_ref_path(credential_ref, LOGIN_CREDENTIAL_PREFIX, "login")
-}
-
-fn ai_comment_credential_ref_path(credential_ref: &str) -> Result<PathBuf, String> {
-    local_secret_ref_path(credential_ref, AI_COMMENT_CREDENTIAL_PREFIX, "ai_comment")
 }
 
 fn local_secret_ref_path(
@@ -2289,14 +1888,6 @@ fn local_secret_ref_path(
         .join("credentials")
         .join(category)
         .join(format!("{}.dpapi", name)))
-}
-
-fn ai_comment_credential_ref(provider: &str) -> Result<String, String> {
-    let provider = normalize_ai_comment_provider(Some(provider))?;
-    Ok(format!(
-        "{}{}/api-key",
-        AI_COMMENT_CREDENTIAL_PREFIX, provider
-    ))
 }
 
 fn sanitize_credential_component(value: &str) -> String {
@@ -2330,8 +1921,6 @@ fn is_valid_login_credential_ref(value: &str) -> bool {
 
 const LOGIN_SECRET_SERVICE: &str = "星域 Login Credential";
 const LEGACY_LOGIN_SECRET_SERVICE: &str = "Account Matrix Login Credential";
-const AI_COMMENT_SECRET_SERVICE: &str = "星域 AI Comment API Key";
-const LEGACY_AI_COMMENT_SECRET_SERVICE: &str = "Account Matrix AI Comment API Key";
 
 fn protect_login_secret(credential_ref: &str, secret: &str) -> Result<String, String> {
     protect_os_secret(LOGIN_SECRET_SERVICE, credential_ref, secret)
@@ -2346,22 +1935,6 @@ fn unprotect_login_secret(credential_ref: &str, encrypted: &str) -> Result<Strin
 fn delete_login_secret(credential_ref: &str) -> Result<(), String> {
     delete_os_secret(LOGIN_SECRET_SERVICE, credential_ref)?;
     let _ = delete_os_secret(LEGACY_LOGIN_SECRET_SERVICE, credential_ref);
-    Ok(())
-}
-
-fn protect_ai_comment_secret(credential_ref: &str, secret: &str) -> Result<String, String> {
-    protect_os_secret(AI_COMMENT_SECRET_SERVICE, credential_ref, secret)
-}
-
-fn unprotect_ai_comment_secret(credential_ref: &str, encrypted: &str) -> Result<String, String> {
-    unprotect_os_secret(AI_COMMENT_SECRET_SERVICE, credential_ref, encrypted).or_else(|_| {
-        unprotect_os_secret(LEGACY_AI_COMMENT_SECRET_SERVICE, credential_ref, encrypted)
-    })
-}
-
-fn delete_ai_comment_secret(credential_ref: &str) -> Result<(), String> {
-    delete_os_secret(AI_COMMENT_SECRET_SERVICE, credential_ref)?;
-    let _ = delete_os_secret(LEGACY_AI_COMMENT_SECRET_SERVICE, credential_ref);
     Ok(())
 }
 
