@@ -73,6 +73,26 @@ const storageKey = 'account-matrix-desktop-api-base-url'
 {
   const { api, storage } = loadDesktopApi({
     MODE: 'production',
+  })
+
+  assert.equal(
+    api.getDesktopApiBaseUrl(),
+    prodBaseUrl,
+    'production desktop must fall back to the prod API base URL when VITE_DESKTOP_API_BASE_URL is missing',
+  )
+
+  api.saveDesktopApiBaseUrl('http://localhost:3000/api/desktop')
+
+  assert.equal(
+    storage.get(storageKey),
+    prodBaseUrl,
+    'production desktop must not persist localhost when the build-time API env is missing',
+  )
+}
+
+{
+  const { api, storage } = loadDesktopApi({
+    MODE: 'production',
     VITE_DESKTOP_API_BASE_URL: prodBaseUrl,
   })
   storage.set(storageKey, 'http://localhost:3000/api/desktop')
