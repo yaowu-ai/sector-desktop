@@ -4,8 +4,11 @@ const API_BASE_STORAGE_KEY = 'account-matrix-desktop-api-base-url'
 const SESSION_STORAGE_KEY = 'account-matrix-desktop-session'
 const DEVICE_FINGERPRINT_STORAGE_KEY = 'account-matrix-device-fingerprint'
 
+const PRODUCTION_API_BASE_URL = 'https://sector.mechlabs.cn/api/desktop'
+const DEVELOPMENT_API_BASE_URL = 'http://localhost:3000/api/desktop'
 const DEFAULT_API_BASE_URL =
-  import.meta.env.VITE_DESKTOP_API_BASE_URL || 'http://localhost:3000/api/desktop'
+  import.meta.env.VITE_DESKTOP_API_BASE_URL ||
+  (import.meta.env.MODE === 'production' ? PRODUCTION_API_BASE_URL : DEVELOPMENT_API_BASE_URL)
 const DEFAULT_LICENSE_PUBLIC_KEY = import.meta.env.VITE_LICENSE_PUBLIC_KEY || ''
 const DEFAULT_DESKTOP_USER_ROLE = 2
 
