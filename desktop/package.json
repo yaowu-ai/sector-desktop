@@ -14,6 +14,7 @@
     "test:m14:frontend": "node tests/m14_frontend_checks.cjs",
     "test:m14:python": "python tests/m14_python_integration.py",
     "test:m15": "node tests/m15_acceptance_checks.cjs",
+    "test:desktop-api-base-url": "node tests/desktop_api_base_url_checks.cjs",
     "test:m20": "py -3.13 tests/m20_acceptance.py"
   },
   "dependencies": {

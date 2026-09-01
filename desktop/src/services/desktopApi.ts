@@ -150,7 +150,17 @@ export interface DesktopAiCommentGenerateRequest {
 }
 
 export function getDesktopApiBaseUrl() {
-  return normalizeApiBaseUrl(window.localStorage.getItem(API_BASE_STORAGE_KEY) || DEFAULT_API_BASE_URL)
+  const defaultApiBaseUrl = normalizeApiBaseUrl(DEFAULT_API_BASE_URL)
+  const savedApiBaseUrl = window.localStorage.getItem(API_BASE_STORAGE_KEY)
+  if (!savedApiBaseUrl) return defaultApiBaseUrl
+
+  const normalizedSavedApiBaseUrl = normalizeApiBaseUrl(savedApiBaseUrl)
+  if (shouldUseDesktopApiBaseUrlOverride(normalizedSavedApiBaseUrl, defaultApiBaseUrl)) {
+    return normalizedSavedApiBaseUrl
+  }
+
+  window.localStorage.setItem(API_BASE_STORAGE_KEY, defaultApiBaseUrl)
+  return defaultApiBaseUrl
 }
 
 export function getLicensePublicKey() {
@@ -162,7 +172,14 @@ export function hasLicensePublicKey() {
 }
 
 export function saveDesktopApiBaseUrl(value: string) {
-  window.localStorage.setItem(API_BASE_STORAGE_KEY, normalizeApiBaseUrl(value))
+  const defaultApiBaseUrl = normalizeApiBaseUrl(DEFAULT_API_BASE_URL)
+  const nextApiBaseUrl = normalizeApiBaseUrl(value)
+  window.localStorage.setItem(
+    API_BASE_STORAGE_KEY,
+    shouldUseDesktopApiBaseUrlOverride(nextApiBaseUrl, defaultApiBaseUrl)
+      ? nextApiBaseUrl
+      : defaultApiBaseUrl,
+  )
 }
 
 export function loadDesktopSession(): DesktopSession | null {
@@ -521,6 +538,12 @@ async function desktopApiRequest<T>(
 
 function normalizeApiBaseUrl(value: string) {
   return value.trim().replace(/\/+$/, '')
+}
+
+function shouldUseDesktopApiBaseUrlOverride(value: string, defaultValue: string) {
+  if (!value) return false
+  if (import.meta.env.MODE !== 'production') return true
+  return value === defaultValue
 }
 
 function getPublicApiBaseUrl(apiBaseUrl: string) {
