@@ -26,9 +26,9 @@ build-x64/
 desktop/node_modules/
 desktop/dist/
 desktop/.env
-desktop/.env.production
-desktop/.env.test
 !desktop/.env.example
+!desktop/.env.production
+!desktop/.env.test
 desktop/.env.local
 desktop/.env.*.local
 desktop/src-tauri/target/
