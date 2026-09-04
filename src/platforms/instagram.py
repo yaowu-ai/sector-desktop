@@ -1,4 +1,10 @@
-"""Compatibility shim for the Instagram runner."""
-from platforms.instagram_runner.runner import InstagramRunner, run_session
+"""Reserved Instagram runner."""
+from platforms.base import ReservedPlatformRunner
 
-__all__ = ["InstagramRunner", "run_session"]
+
+class InstagramRunner(ReservedPlatformRunner):
+    def __init__(self):
+        super().__init__("instagram")
+
+
+__all__ = ["InstagramRunner"]
