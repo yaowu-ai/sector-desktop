@@ -13,12 +13,14 @@ import { DesktopLoginPage } from "../pages/DesktopLoginPage";
 import { setLicenseEntitlements } from "../services/api";
 import {
   activateDesktopDevice,
+  buildDesktopSchedulerCredential,
   buildDesktopSession,
   clearDesktopSession,
   deactivateDesktopDevice,
   getDeviceFingerprint,
   desktopLogin,
   getDesktopApiBaseUrl,
+  issueDesktopSchedulerCredential,
   loadCurrentSubscription,
   loadDesktopSession,
   loadVerifiedCurrentLicense,
@@ -32,6 +34,7 @@ import {
 } from "../services/desktopApi";
 
 const ENTITLEMENT_POLL_MS = 10 * 1000;
+const SCHEDULER_CREDENTIAL_MIN_VALID_MS = 60 * 1000;
 
 interface DesktopAuthContextValue {
   apiBaseUrl: string;
@@ -124,6 +127,26 @@ export function DesktopAuthProvider({
           nextSession,
           nextApiBaseUrl,
         );
+        const nextLimits = readDesktopLicenseLimits(nextLicense);
+        let nextSessionWithCredential: DesktopSession = nextSession;
+        if (nextLimits.scheduler) {
+          if (!hasFreshSchedulerCredential(nextSession)) {
+            const schedulerCredential = buildDesktopSchedulerCredential(
+              await issueDesktopSchedulerCredential(nextSession, nextApiBaseUrl),
+            );
+            nextSessionWithCredential = {
+              ...nextSession,
+              schedulerCredential,
+            };
+          }
+        } else if (nextSession.schedulerCredential) {
+          nextSessionWithCredential = {
+            ...nextSession,
+            schedulerCredential: undefined,
+          };
+        }
+        saveDesktopSession(nextSessionWithCredential);
+        setSession(nextSessionWithCredential);
         setDevice(nextDevice);
         setLicense(nextLicense);
         return {
@@ -293,9 +316,10 @@ export function DesktopAuthProvider({
       ...limits,
       apiBaseUrl,
       accessToken: session?.accessToken ?? "",
+      schedulerToken: session?.schedulerCredential?.schedulerToken ?? "",
       deviceFingerprint: getDeviceFingerprint(),
     }).catch(() => undefined);
-  }, [apiBaseUrl, license, session?.accessToken]);
+  }, [apiBaseUrl, license, session?.accessToken, session?.schedulerCredential?.schedulerToken]);
 
   const value = useMemo(
     () => ({
@@ -447,5 +471,13 @@ function isTransientEntitlementError(message: string) {
     message.includes("请求失败：HTTP 5") ||
     message.includes("服务开了点小差") ||
     message.includes("请稍后")
+  );
+}
+
+function hasFreshSchedulerCredential(session: DesktopSession) {
+  const credential = session.schedulerCredential;
+  return Boolean(
+    credential?.schedulerToken &&
+      credential.expiresAt - Date.now() > SCHEDULER_CREDENTIAL_MIN_VALID_MS,
   );
 }

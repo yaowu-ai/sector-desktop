@@ -135,6 +135,7 @@ export interface LicenseEntitlementsPayload {
   aiComment: boolean
   apiBaseUrl: string
   accessToken: string
+  schedulerToken?: string
   deviceFingerprint: string
 }
 

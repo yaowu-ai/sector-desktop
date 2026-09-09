@@ -37,6 +37,7 @@ from browser_providers import account_provider_name, BITBROWSER
 SCHEDULER_LOGIN_CREDENTIALS_ENV = "AM_SCHEDULER_LOGIN_CREDENTIALS"
 DESKTOP_API_BASE_URL_ENV = "AM_DESKTOP_API_BASE_URL"
 DESKTOP_ACCESS_TOKEN_ENV = "AM_DESKTOP_ACCESS_TOKEN"
+SCHEDULER_TOKEN_ENV = "AM_SCHEDULER_TOKEN"
 DEVICE_FINGERPRINT_ENV = "AM_DEVICE_FINGERPRINT"
 ACCOUNT_LOGIN_ENV_KEYS = (
     "AM_LOGIN_ACCOUNT_ID",
@@ -158,7 +159,10 @@ def bitbrowser_responsive():
 
 def reserve_scheduler_task_quota(account_id, platform):
     api_base_url = os.environ.get(DESKTOP_API_BASE_URL_ENV, "").strip().rstrip("/")
-    access_token = os.environ.get(DESKTOP_ACCESS_TOKEN_ENV, "").strip()
+    access_token = (
+        os.environ.get(SCHEDULER_TOKEN_ENV, "").strip()
+        or os.environ.get(DESKTOP_ACCESS_TOKEN_ENV, "").strip()
+    )
     device_fingerprint = os.environ.get(DEVICE_FINGERPRINT_ENV, "").strip()
     if not api_base_url or not access_token or not device_fingerprint:
         return "missing desktop entitlement context"

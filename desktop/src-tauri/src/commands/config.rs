@@ -428,6 +428,7 @@ pub struct LicenseEntitlementsPayload {
     pub ai_comment: bool,
     pub api_base_url: String,
     pub access_token: String,
+    pub scheduler_token: Option<String>,
     pub device_fingerprint: String,
 }
 
@@ -1043,6 +1044,7 @@ pub fn set_license_entitlements(
         ai_comment: payload.ai_comment,
         api_base_url: payload.api_base_url.trim().trim_end_matches('/').to_string(),
         access_token: payload.access_token.trim().to_string(),
+        scheduler_token: payload.scheduler_token.unwrap_or_default().trim().to_string(),
         device_fingerprint: payload.device_fingerprint.trim().to_string(),
     };
     Ok(())

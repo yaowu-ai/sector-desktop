@@ -18,6 +18,7 @@ AI_COMMENT_API_KEY_ENV = "AM_AI_COMMENT_API_KEY"
 DESKTOP_AI_COMMENT_MODE_ENV = "AM_DESKTOP_AI_COMMENT_MODE"
 DESKTOP_API_BASE_URL_ENV = "AM_DESKTOP_API_BASE_URL"
 DESKTOP_ACCESS_TOKEN_ENV = "AM_DESKTOP_ACCESS_TOKEN"
+SCHEDULER_TOKEN_ENV = "AM_SCHEDULER_TOKEN"
 DEVICE_FINGERPRINT_ENV = "AM_DEVICE_FINGERPRINT"
 
 DEFAULT_SYSTEM_PROMPT = (
@@ -205,7 +206,10 @@ def generate_ai_comment_via_desktop_api(
     started: float,
 ) -> dict[str, Any] | None:
     api_base_url = (os.environ.get(DESKTOP_API_BASE_URL_ENV) or "").strip().rstrip("/")
-    access_token = (os.environ.get(DESKTOP_ACCESS_TOKEN_ENV) or "").strip()
+    access_token = (
+        (os.environ.get(SCHEDULER_TOKEN_ENV) or "").strip()
+        or (os.environ.get(DESKTOP_ACCESS_TOKEN_ENV) or "").strip()
+    )
     device_fingerprint = (os.environ.get(DEVICE_FINGERPRINT_ENV) or "").strip()
     force_remote = (os.environ.get(DESKTOP_AI_COMMENT_MODE_ENV) or "").strip().lower() == "remote"
     if not force_remote and not api_base_url and not access_token and not device_fingerprint:
