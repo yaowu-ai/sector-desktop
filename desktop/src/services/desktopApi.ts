@@ -23,11 +23,17 @@ export interface DesktopApiEnvelope<T> {
 export interface DesktopSession {
   accessToken: string
   expiresAt: number
+  schedulerCredential?: DesktopSchedulerCredential
   username: string
   userId: string
   userName: string
   phone: string
   userRole: 1 | 2
+}
+
+export interface DesktopSchedulerCredential {
+  schedulerToken: string
+  expiresAt: number
 }
 
 export interface DesktopAuthResponse {
@@ -39,6 +45,12 @@ export interface DesktopAuthResponse {
     phone: string
     userRole: 1 | 2
   }
+}
+
+export interface DesktopSchedulerCredentialResponse {
+  schedulerToken: string
+  expiresIn: number
+  expiresAt: string
 }
 
 export interface DesktopDeviceResponse {
@@ -238,6 +250,18 @@ export function buildDesktopSession(username: string, response: DesktopAuthRespo
   }
 }
 
+export function buildDesktopSchedulerCredential(
+  response: DesktopSchedulerCredentialResponse,
+): DesktopSchedulerCredential {
+  const serverExpiresAt = Date.parse(response.expiresAt)
+  return {
+    schedulerToken: response.schedulerToken,
+    expiresAt: Number.isFinite(serverExpiresAt)
+      ? serverExpiresAt
+      : Date.now() + response.expiresIn * 1000,
+  }
+}
+
 export function getDeviceFingerprint() {
   const saved = window.localStorage.getItem(DEVICE_FINGERPRINT_STORAGE_KEY)
   if (saved) return saved
@@ -273,6 +297,23 @@ export function desktopRefresh(session: DesktopSession, apiBaseUrl = getDesktopA
     {
       method: 'POST',
       token: session.accessToken,
+    },
+  )
+}
+
+export function issueDesktopSchedulerCredential(
+  session: DesktopSession,
+  apiBaseUrl = getDesktopApiBaseUrl(),
+) {
+  return desktopApiRequest<DesktopSchedulerCredentialResponse>(
+    apiBaseUrl,
+    '/scheduler/credential',
+    {
+      method: 'POST',
+      token: session.accessToken,
+      body: {
+        deviceFingerprint: getDeviceFingerprint(),
+      },
     },
   )
 }

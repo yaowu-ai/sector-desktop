@@ -26,6 +26,7 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 const DESKTOP_AI_COMMENT_MODE_ENV: &str = "AM_DESKTOP_AI_COMMENT_MODE";
 const DESKTOP_API_BASE_URL_ENV: &str = "AM_DESKTOP_API_BASE_URL";
 const DESKTOP_ACCESS_TOKEN_ENV: &str = "AM_DESKTOP_ACCESS_TOKEN";
+const SCHEDULER_TOKEN_ENV: &str = "AM_SCHEDULER_TOKEN";
 const DEVICE_FINGERPRINT_ENV: &str = "AM_DEVICE_FINGERPRINT";
 
 #[derive(Debug, Deserialize)]
@@ -842,24 +843,35 @@ fn ai_comment_env_for_runtime(
         return (env_vars, Vec::new());
     };
     if entitlements.api_base_url.is_empty()
-        || entitlements.access_token.is_empty()
+        || (entitlements.access_token.is_empty() && entitlements.scheduler_token.is_empty())
         || entitlements.device_fingerprint.is_empty()
     {
         return (env_vars, Vec::new());
     }
+    let bearer_token = if entitlements.scheduler_token.is_empty() {
+        entitlements.access_token.clone()
+    } else {
+        entitlements.scheduler_token.clone()
+    };
     env_vars.insert(
         DESKTOP_API_BASE_URL_ENV.to_string(),
         entitlements.api_base_url.clone(),
     );
     env_vars.insert(
         DESKTOP_ACCESS_TOKEN_ENV.to_string(),
-        entitlements.access_token.clone(),
+        bearer_token.clone(),
     );
+    if !entitlements.scheduler_token.is_empty() {
+        env_vars.insert(
+            SCHEDULER_TOKEN_ENV.to_string(),
+            entitlements.scheduler_token.clone(),
+        );
+    }
     env_vars.insert(
         DEVICE_FINGERPRINT_ENV.to_string(),
         entitlements.device_fingerprint.clone(),
     );
-    (env_vars, vec![entitlements.access_token.clone()])
+    (env_vars, vec![entitlements.access_token.clone(), bearer_token])
 }
 
 fn ensure_task_capability_entitled(
@@ -885,7 +897,9 @@ fn reserve_daily_task_quota(
         .lock()
         .map_err(|_| "failed to lock license entitlements".to_string())?
         .clone();
-    if entitlements.access_token.is_empty() || entitlements.device_fingerprint.is_empty() {
+    if (entitlements.access_token.is_empty() && entitlements.scheduler_token.is_empty())
+        || entitlements.device_fingerprint.is_empty()
+    {
         return Err("当前授权信息不完整，无法校验每日任务额度".to_string());
     }
     tauri::async_runtime::block_on(reserve_daily_task_quota_remote(entitlements, task_type))
@@ -896,9 +910,14 @@ async fn reserve_daily_task_quota_remote(
     task_type: &str,
 ) -> Result<(), String> {
     let url = format!("{}/usage/reserve-task", entitlements.api_base_url);
+    let bearer_token = if entitlements.scheduler_token.is_empty() {
+        entitlements.access_token
+    } else {
+        entitlements.scheduler_token
+    };
     let response = reqwest::Client::new()
         .post(url)
-        .bearer_auth(entitlements.access_token)
+        .bearer_auth(bearer_token)
         .json(&json!({
             "deviceFingerprint": entitlements.device_fingerprint,
             "taskType": task_type,

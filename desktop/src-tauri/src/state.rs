@@ -22,6 +22,7 @@ pub struct LicenseEntitlements {
     pub ai_comment: bool,
     pub api_base_url: String,
     pub access_token: String,
+    pub scheduler_token: String,
     pub device_fingerprint: String,
 }
 

@@ -23,6 +23,7 @@ const SCHEDULER_LOGIN_CREDENTIALS_ENV: &str = "AM_SCHEDULER_LOGIN_CREDENTIALS";
 const DESKTOP_AI_COMMENT_MODE_ENV: &str = "AM_DESKTOP_AI_COMMENT_MODE";
 const DESKTOP_API_BASE_URL_ENV: &str = "AM_DESKTOP_API_BASE_URL";
 const DESKTOP_ACCESS_TOKEN_ENV: &str = "AM_DESKTOP_ACCESS_TOKEN";
+const SCHEDULER_TOKEN_ENV: &str = "AM_SCHEDULER_TOKEN";
 const DEVICE_FINGERPRINT_ENV: &str = "AM_DEVICE_FINGERPRINT";
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -241,17 +242,30 @@ fn scheduler_quota_env(
         .map_err(|_| "failed to lock license entitlements".to_string())?
         .clone();
     if entitlements.api_base_url.is_empty()
-        || entitlements.access_token.is_empty()
+        || (entitlements.access_token.is_empty() && entitlements.scheduler_token.is_empty())
         || entitlements.device_fingerprint.is_empty()
     {
         return Err("当前授权信息不完整，无法校验每日任务额度".to_string());
     }
-    Ok(HashMap::from([
+    let api_base_url = entitlements.api_base_url;
+    let access_token = entitlements.access_token;
+    let scheduler_token = entitlements.scheduler_token;
+    let device_fingerprint = entitlements.device_fingerprint;
+    let bearer_token = if scheduler_token.is_empty() {
+        access_token.clone()
+    } else {
+        scheduler_token.clone()
+    };
+    let mut env_vars = HashMap::from([
         (DESKTOP_AI_COMMENT_MODE_ENV.to_string(), "remote".to_string()),
-        (DESKTOP_API_BASE_URL_ENV.to_string(), entitlements.api_base_url),
-        (DESKTOP_ACCESS_TOKEN_ENV.to_string(), entitlements.access_token),
-        (DEVICE_FINGERPRINT_ENV.to_string(), entitlements.device_fingerprint),
-    ]))
+        (DESKTOP_API_BASE_URL_ENV.to_string(), api_base_url),
+        (DESKTOP_ACCESS_TOKEN_ENV.to_string(), bearer_token),
+        (DEVICE_FINGERPRINT_ENV.to_string(), device_fingerprint),
+    ]);
+    if !scheduler_token.is_empty() {
+        env_vars.insert(SCHEDULER_TOKEN_ENV.to_string(), scheduler_token);
+    }
+    Ok(env_vars)
 }
 
 fn scheduler_login_credentials() -> Result<String, String> {
