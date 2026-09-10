@@ -4517,6 +4517,7 @@ accounts:
             chromium_executable: String::new(),
             bitbrowser_api_url: "http://127.0.0.1:54345".to_string(),
             auto_close_profile: true,
+            show_browser_window: true,
             log_poll_interval_seconds: 3,
         }
     }

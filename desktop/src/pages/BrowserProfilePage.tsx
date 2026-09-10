@@ -54,11 +54,13 @@ import {
   diagnoseAccountBrowser,
   getBuiltinChromiumStatus,
   listBrowserProfiles,
+  loadBrowserWindowSettings,
   loadAccounts,
   openBitbrowserDownloadPage,
   openProfile,
   syncAccountsApply,
   syncAccountsDryRun,
+  saveBrowserWindowSettings,
 } from "../services/api";
 import { getPlatformLabel, PLATFORMS } from "../services/platforms";
 import type {
@@ -135,6 +137,8 @@ export function BrowserProfilePage() {
   const [diagnosisResult, setDiagnosisResult] =
     useState<AccountBrowserDiagnosis | null>(null);
   const [cleaningAccountId, setCleaningAccountId] = useState<string>();
+  const [showBrowserWindow, setShowBrowserWindow] = useState(true);
+  const [savingBrowserWindow, setSavingBrowserWindow] = useState(false);
   const browserPreview = useBrowserPreview();
 
   const scopedProfiles = useMemo(
@@ -192,12 +196,14 @@ export function BrowserProfilePage() {
   const refresh = async () => {
     setLoading(true);
     try {
-      const [status, chromium] = await Promise.all([
+      const [status, chromium, windowSettings] = await Promise.all([
         checkBitbrowserApi(),
         getBuiltinChromiumStatus(),
+        loadBrowserWindowSettings(),
       ]);
       setApiStatus(status);
       setChromiumStatus(chromium);
+      setShowBrowserWindow(windowSettings.showBrowserWindow);
       const allAccounts = await loadAccounts(currentPlatform).catch(() => []);
       setAccounts(allAccounts);
       if (status.available) {
@@ -209,6 +215,23 @@ export function BrowserProfilePage() {
       message.error(error instanceof Error ? error.message : String(error));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const updateBrowserWindowSetting = async (nextValue: boolean) => {
+    const previousValue = showBrowserWindow;
+    setShowBrowserWindow(nextValue);
+    setSavingBrowserWindow(true);
+    try {
+      await saveBrowserWindowSettings(nextValue);
+      message.success(
+        nextValue ? "任务浏览器将显示窗口" : "任务浏览器将后台运行",
+      );
+    } catch (error) {
+      setShowBrowserWindow(previousValue);
+      message.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSavingBrowserWindow(false);
     }
   };
 
@@ -619,6 +642,24 @@ export function BrowserProfilePage() {
         </Col>
 
         <Col span={24}>
+          <Card size="small" title="浏览器窗口显示控制">
+            <Space align="center" wrap>
+              <Switch
+                checked={showBrowserWindow}
+                loading={savingBrowserWindow}
+                disabled={loading}
+                checkedChildren="显示"
+                unCheckedChildren="后台"
+                onChange={(checked) => void updateBrowserWindowSetting(checked)}
+              />
+              <Typography.Text type="secondary">
+                关闭不影响任务运行。
+              </Typography.Text>
+            </Space>
+          </Card>
+        </Col>
+
+        <Col span={24}>
           <Tabs
             items={[
               {
@@ -631,10 +672,6 @@ export function BrowserProfilePage() {
                         type="warning"
                         showIcon
                         message="Bit浏览器本地接口不可用"
-                        description={
-                          apiStatus?.error ??
-                          "请确认 Bit浏览器客户端和本地接口已启动。其他标签页不受影响。"
-                        }
                         action={
                           <Button
                             type="link"

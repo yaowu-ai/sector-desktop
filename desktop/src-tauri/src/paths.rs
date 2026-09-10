@@ -35,6 +35,7 @@ pub struct ProjectPaths {
     pub chromium_executable: String,
     pub bitbrowser_api_url: String,
     pub auto_close_profile: bool,
+    pub show_browser_window: bool,
     pub log_poll_interval_seconds: u64,
 }
 
@@ -56,6 +57,7 @@ pub struct LocalAppSettings {
     pub runtime_version: Option<String>,
     pub initialized_app_version: Option<String>,
     pub auto_close_profile: Option<bool>,
+    pub show_browser_window: Option<bool>,
     pub log_poll_interval_seconds: Option<u64>,
 }
 
@@ -276,6 +278,7 @@ pub fn project_paths() -> Result<ProjectPaths, String> {
         chromium_executable: effective_chromium_executable(&settings),
         bitbrowser_api_url: effective_bitbrowser_api_url(&settings),
         auto_close_profile: settings.auto_close_profile.unwrap_or(true),
+        show_browser_window: settings.show_browser_window.unwrap_or(true),
         log_poll_interval_seconds: settings.log_poll_interval_seconds.unwrap_or(3).max(1),
     })
 }

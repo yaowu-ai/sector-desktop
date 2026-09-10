@@ -33,6 +33,7 @@ pub struct SystemSettingsPayload {
     runtime_path: Option<String>,
     runtime_manifest_path: Option<String>,
     auto_close_profile: bool,
+    show_browser_window: Option<bool>,
     log_poll_interval_seconds: u64,
 }
 
@@ -56,6 +57,7 @@ pub struct SystemSettingsSnapshot {
     runtime_version: Option<String>,
     initialized_app_version: Option<String>,
     auto_close_profile: bool,
+    show_browser_window: bool,
     log_poll_interval_seconds: u64,
 }
 
@@ -64,6 +66,18 @@ pub struct SystemSettingsSnapshot {
 pub struct NotifyTestResult {
     notify_type: String,
     message: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserWindowSettingsPayload {
+    show_browser_window: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserWindowSettingsSnapshot {
+    show_browser_window: bool,
 }
 
 #[tauri::command]
@@ -124,10 +138,31 @@ pub fn save_system_settings(
         runtime_version: existing.runtime_version,
         initialized_app_version: existing.initialized_app_version,
         auto_close_profile: Some(payload.auto_close_profile),
+        show_browser_window: payload
+            .show_browser_window
+            .or(existing.show_browser_window),
         log_poll_interval_seconds: Some(payload.log_poll_interval_seconds),
     };
     save_local_app_settings(&settings)?;
     system_settings_snapshot()
+}
+
+#[tauri::command]
+pub fn load_browser_window_settings() -> Result<BrowserWindowSettingsSnapshot, String> {
+    let settings = load_local_app_settings()?;
+    Ok(BrowserWindowSettingsSnapshot {
+        show_browser_window: settings.show_browser_window.unwrap_or(true),
+    })
+}
+
+#[tauri::command]
+pub fn save_browser_window_settings(
+    payload: BrowserWindowSettingsPayload,
+) -> Result<BrowserWindowSettingsSnapshot, String> {
+    let mut settings = load_local_app_settings()?;
+    settings.show_browser_window = Some(payload.show_browser_window);
+    save_local_app_settings(&settings)?;
+    load_browser_window_settings()
 }
 
 #[tauri::command]
@@ -260,6 +295,7 @@ fn system_settings_snapshot() -> Result<SystemSettingsSnapshot, String> {
         runtime_version: paths.runtime_version,
         initialized_app_version: local_settings.initialized_app_version,
         auto_close_profile: paths.auto_close_profile,
+        show_browser_window: paths.show_browser_window,
         log_poll_interval_seconds: paths.log_poll_interval_seconds,
     })
 }

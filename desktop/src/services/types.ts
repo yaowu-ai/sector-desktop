@@ -786,6 +786,7 @@ export interface SystemSettingsPayload {
   runtimePath?: string
   runtimeManifestPath?: string
   autoCloseProfile: boolean
+  showBrowserWindow?: boolean
   logPollIntervalSeconds: number
 }
 
@@ -852,6 +853,10 @@ export interface ConfigSnapshot {
   aiComment: AiCommentSettings
   notify?: NotifySettings
   validation: ValidationResult
+}
+
+export interface BrowserWindowSettings {
+  showBrowserWindow: boolean
 }
 
 export interface ConfigPayload {

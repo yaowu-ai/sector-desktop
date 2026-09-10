@@ -145,12 +145,6 @@ export function HomePage() {
                 value={summary?.bitbrowser.available ? "在线" : "不可用"}
                 valueStyle={{ fontSize: 22 }}
               />
-              <div className="metric-footnote">
-                <StatusTag
-                  status={summary?.bitbrowser.available ? "ok" : "error"}
-                  label={summary?.bitbrowser.apiUrl ?? "未检测"}
-                />
-              </div>
             </Card>
           </Col>
           <Col xs={24} md={12} xl={4}>

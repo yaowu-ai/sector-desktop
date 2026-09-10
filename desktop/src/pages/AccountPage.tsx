@@ -659,6 +659,7 @@ export function AccountPage() {
           <Tooltip title="编辑" placement="top">
             <Button
               size="small"
+              className="desktop-edit-button"
               aria-label="编辑"
               icon={<Edit3 size={15} />}
               onClick={() => openEdit(account)}

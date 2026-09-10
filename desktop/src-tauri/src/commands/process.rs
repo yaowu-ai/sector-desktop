@@ -969,6 +969,10 @@ fn spawn_process_with_env_inner(
         "AM_AUTO_CLOSE_PROFILE".to_string(),
         if paths.auto_close_profile { "1" } else { "0" }.to_string(),
     );
+    env_vars.insert(
+        "AM_SHOW_BROWSER_WINDOW".to_string(),
+        if paths.show_browser_window { "1" } else { "0" }.to_string(),
+    );
     if !paths.chromium_executable.trim().is_empty() {
         env_vars.insert(
             "AM_CHROMIUM_EXECUTABLE".to_string(),
@@ -1992,6 +1996,7 @@ mod tests {
             chromium_executable: String::new(),
             bitbrowser_api_url: "http://127.0.0.1:54345".to_string(),
             auto_close_profile: true,
+            show_browser_window: true,
             log_poll_interval_seconds: 3,
         }
     }

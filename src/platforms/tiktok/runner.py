@@ -4,8 +4,10 @@ import time
 
 from auth_adapters import LoginState, auth_adapter_for_platform
 from browser_providers import (
+    background_browser_enabled,
     bitbrowser_profile_id,
     provider_for_account,
+    set_browser_session_visibility,
     test_cdp_endpoint,
 )
 from core.runtime import (
@@ -167,7 +169,7 @@ def detect_login_state(page):
     return result.logged_in, result.summary()
 
 
-def ensure_tiktok_authenticated(page, account, config, conn):
+def ensure_tiktok_authenticated(page, account, config, conn, session=None):
     account_id = account["id"]
     platform = account.get("platform", "tiktok")
     adapter = auth_adapter_for_platform(platform)
@@ -221,8 +223,12 @@ def ensure_tiktok_authenticated(page, account, config, conn):
             f"{account_id} | AUTH WAIT | state={auth_result.state.value}; manual intervention required",
             platform,
         )
+        if session is not None and background_browser_enabled():
+            set_browser_session_visibility(session, visible=True)
         action = wait_for_auth_intervention_action(account_id)
         if action == "continue":
+            if session is not None and background_browser_enabled():
+                set_browser_session_visibility(session, visible=False)
             session_log(f"{account_id} | AUTH CONTINUE | rechecking login state", platform)
             continue
         if action == "skip":
@@ -290,8 +296,10 @@ def run_session(account, config, conn):
             browser = playwright.chromium.connect_over_cdp(cdp_url)
             ctx = browser.contexts[0]
             page = choose_tiktok_page(ctx)
+            if background_browser_enabled():
+                set_browser_session_visibility(session, visible=False)
 
-            auth_result = ensure_tiktok_authenticated(page, account, config, conn)
+            auth_result = ensure_tiktok_authenticated(page, account, config, conn, session=session)
             login_detail = auth_result.summary()
             if auth_result.state != LoginState.LOGGED_IN:
                 summary["status"] = "skip"
@@ -302,6 +310,8 @@ def run_session(account, config, conn):
                 )
                 browser.close()
                 return summary
+            if background_browser_enabled():
+                set_browser_session_visibility(session, visible=False)
 
             if task_type in {"fyp", "full"}:
                 fyp = run_tiktok_fyp(page, account, plan, conn)
