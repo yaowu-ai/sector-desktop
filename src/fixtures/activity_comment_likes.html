@@ -1,0 +1,44 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Activity test fixture — synthetic screenshot examples</title>
+<button
+  data-e2e="nav-activity"
+  onclick="document.querySelector('#visible-panel').hidden = false"
+>
+  Activity
+</button>
+<div data-e2e="inbox-notifications" hidden>
+  <div data-e2e="inbox-list">
+    <ul>
+      <li><p>liked your comment: Hidden duplicate.</p></li>
+    </ul>
+  </div>
+</div>
+<div id="visible-panel" data-e2e="inbox-notifications" hidden>
+  <button role="tab" aria-selected="true">All activity</button>
+  <div data-e2e="inbox-list" style="height: 160px; overflow: auto">
+    <ul>
+      <li>
+        <p>cutetalking</p>
+        <p>started following you · 1d ago</p>
+      </li>
+      <li>
+        <p>Liliana</p>
+        <p>liked your comment: Nice video. · 2d</p>
+        <p>Ralph Rivera: Nice video.</p>
+      </li>
+      <li>
+        <p>Thomas felix, Getti an...</p>
+        <p>liked your comment: Thanks for sharing. · 2d</p>
+      </li>
+      <li>
+        <p>Other user</p>
+        <p>liked your video · 2d</p>
+      </li>
+      <li>
+        <p>Other user</p>
+        <p>commented: someone liked your comment: Nice video.</p>
+      </li>
+    </ul>
+  </div>
+</div>

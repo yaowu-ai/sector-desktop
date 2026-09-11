@@ -23,9 +23,17 @@ def test_version_json():
     payload = json.loads(result.stdout)
     assert payload["runtimeVersion"]
     assert payload["schemaVersion"] == 1
-    assert {"run", "scheduler", "gmail", "diagnostic", "version"}.issubset(
+    assert {"run", "scheduler", "gmail", "diagnostic", "profile-stats", "version"}.issubset(
         set(payload["supportedCommands"])
     )
+
+
+def test_profile_stats_json():
+    result = run_cli("profile-stats", "--json")
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "ok"
+    assert payload["collector"]["module"] == "profile_stats"
+    assert payload["collector"]["entry"] == "collect_profile_snapshot"
 
 
 def test_diagnostic_json_with_template_config():
@@ -52,6 +60,7 @@ def test_pyinstaller_spec_exists():
 
 def main():
     test_version_json()
+    test_profile_stats_json()
     test_diagnostic_json_with_template_config()
     test_pyinstaller_spec_exists()
     print("runtime smoke ok")

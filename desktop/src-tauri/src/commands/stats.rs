@@ -1,5 +1,5 @@
 use chrono::{Duration, Local};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -230,6 +230,75 @@ pub struct TargetStatsSummary {
     by_handle: Vec<TargetHandleStats>,
 }
 
+#[derive(Debug, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileStatsFilter {
+    platform: Option<String>,
+    account_id: Option<String>,
+    task_run_id: Option<String>,
+    status: Option<String>,
+    start_ts: Option<String>,
+    end_ts: Option<String>,
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileStatsDetailRequest {
+    id: Option<i64>,
+    task_run_id: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileStatsSnapshot {
+    id: i64,
+    platform: String,
+    account_id: String,
+    task_run_id: Option<String>,
+    handle: Option<String>,
+    following: Option<i64>,
+    followers: Option<i64>,
+    likes: Option<i64>,
+    raw_following: Option<String>,
+    raw_followers: Option<String>,
+    raw_likes: Option<String>,
+    approximate_fields_json: Option<String>,
+    liked: Option<i64>,
+    liked_loaded: Option<i64>,
+    liked_complete: Option<bool>,
+    liked_status: Option<String>,
+    activity_has_liked_your_comment: Option<bool>,
+    activity_comment_like_notifications_count: Option<i64>,
+    activity_notifications_scanned: Option<i64>,
+    activity_status: Option<String>,
+    activity_scope: Option<String>,
+    activity_complete: Option<bool>,
+    comment_publish_evidence: Option<String>,
+    activity_matches_json: Option<String>,
+    status: String,
+    error: Option<String>,
+    result_json: Option<String>,
+    collected_at: String,
+    created_at: String,
+}
+
+#[derive(Debug, Serialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileStatsSummary {
+    account_count: usize,
+    collected_account_count: usize,
+    recent24h_count: usize,
+    success_count: usize,
+    partial_success_count: usize,
+    failed_count: usize,
+    comment_evidence_account_count: usize,
+    total_following: i64,
+    total_followers: i64,
+    total_likes: i64,
+    total_liked: i64,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResetTargetWatermarkRequest {
@@ -252,6 +321,7 @@ pub struct SqliteStatus {
     scheduler_job_runs: bool,
     target_engagements: bool,
     target_follows: bool,
+    profile_stats_snapshots: bool,
 }
 
 #[tauri::command]
@@ -266,6 +336,7 @@ pub fn get_sqlite_status() -> Result<SqliteStatus, String> {
             scheduler_job_runs: false,
             target_engagements: false,
             target_follows: false,
+            profile_stats_snapshots: false,
         });
     }
 
@@ -278,7 +349,69 @@ pub fn get_sqlite_status() -> Result<SqliteStatus, String> {
         scheduler_job_runs: table_exists(&conn, "scheduler_job_runs")?,
         target_engagements: table_exists(&conn, "target_engagements")?,
         target_follows: table_exists(&conn, "target_follows")?,
+        profile_stats_snapshots: table_exists(&conn, "profile_stats_snapshots")?,
     })
+}
+
+#[tauri::command]
+pub fn query_profile_stats_latest(
+    filter: ProfileStatsFilter,
+) -> Result<Vec<ProfileStatsSnapshot>, String> {
+    let Some(conn) = open_actions_db_if_exists()? else {
+        return Ok(vec![]);
+    };
+    if !table_exists(&conn, "profile_stats_snapshots")? {
+        return Ok(vec![]);
+    }
+
+    query_profile_stats_latest_rows(&conn, &filter, filter.limit)
+}
+
+#[tauri::command]
+pub fn query_profile_stats_history(
+    filter: ProfileStatsFilter,
+) -> Result<Vec<ProfileStatsSnapshot>, String> {
+    let Some(conn) = open_actions_db_if_exists()? else {
+        return Ok(vec![]);
+    };
+    if !table_exists(&conn, "profile_stats_snapshots")? {
+        return Ok(vec![]);
+    }
+
+    query_profile_stats_history_rows(&conn, &filter)
+}
+
+#[tauri::command]
+pub fn query_profile_stats_detail(
+    request: ProfileStatsDetailRequest,
+) -> Result<Option<ProfileStatsSnapshot>, String> {
+    let Some(conn) = open_actions_db_if_exists()? else {
+        return Ok(None);
+    };
+    if !table_exists(&conn, "profile_stats_snapshots")? {
+        return Ok(None);
+    }
+
+    query_profile_stats_detail_row(&conn, &request)
+}
+
+#[tauri::command]
+pub fn query_profile_stats_summary(filter: ProfileStatsFilter) -> Result<ProfileStatsSummary, String> {
+    let configured_account_count = profile_stats_configured_account_count(&filter)?;
+    let Some(conn) = open_actions_db_if_exists()? else {
+        return Ok(ProfileStatsSummary {
+            account_count: configured_account_count.unwrap_or(0),
+            ..ProfileStatsSummary::default()
+        });
+    };
+    if !table_exists(&conn, "profile_stats_snapshots")? {
+        return Ok(ProfileStatsSummary {
+            account_count: configured_account_count.unwrap_or(0),
+            ..ProfileStatsSummary::default()
+        });
+    }
+
+    query_profile_stats_summary_rows(&conn, &filter, configured_account_count)
 }
 
 #[tauri::command]
@@ -1218,6 +1351,283 @@ fn query_target_follow_rows(
     Ok(result)
 }
 
+const PROFILE_STATS_COLUMNS: &str = "id, platform, account_id, task_run_id, handle,
+    following, followers, likes,
+    raw_following, raw_followers, raw_likes,
+    approximate_fields_json,
+    liked, liked_loaded, liked_complete, liked_status,
+    activity_has_liked_your_comment,
+    activity_comment_like_notifications_count,
+    activity_notifications_scanned,
+    activity_status, activity_scope, activity_complete,
+    comment_publish_evidence, activity_matches_json,
+    status, error, result_json, collected_at, created_at";
+
+fn open_actions_db_if_exists() -> Result<Option<Connection>, String> {
+    let paths = project_paths()?;
+    let db_path = std::path::PathBuf::from(&paths.actions_db_path);
+    if !db_path.exists() {
+        return Ok(None);
+    }
+    Connection::open(&db_path)
+        .map(Some)
+        .map_err(|err| format!("failed to open {}: {}", paths.actions_db_path, err))
+}
+
+fn query_profile_stats_latest_rows(
+    conn: &Connection,
+    filter: &ProfileStatsFilter,
+    limit: Option<usize>,
+) -> Result<Vec<ProfileStatsSnapshot>, String> {
+    let platform = normalized_platform_filter(filter.platform.as_deref())?;
+    let account_id = optional_trim(filter.account_id.as_deref());
+    let task_run_id = optional_trim(filter.task_run_id.as_deref());
+    let status = optional_trim(filter.status.as_deref());
+    let start_ts = optional_trim(filter.start_ts.as_deref());
+    let end_ts = optional_trim(filter.end_ts.as_deref());
+    let limit = limit.unwrap_or(300).clamp(1, 10_000) as i64;
+    let query = format!(
+        "SELECT {}
+             FROM profile_stats_snapshots AS s
+             JOIN (
+                 SELECT platform, account_id, MAX(id) AS id
+                 FROM profile_stats_snapshots
+                 WHERE (?1 IS NULL OR platform = ?1)
+                   AND (?2 IS NULL OR account_id = ?2)
+                   AND (?3 IS NULL OR task_run_id = ?3)
+                   AND (?4 IS NULL OR status = ?4)
+                   AND (?5 IS NULL OR collected_at >= ?5)
+                   AND (?6 IS NULL OR collected_at <= ?6)
+                 GROUP BY platform, account_id
+             ) AS latest ON latest.id = s.id
+             ORDER BY s.collected_at DESC, s.id DESC
+             LIMIT ?7",
+        prefixed_profile_stats_columns("s")
+    );
+    query_profile_stats_rows(
+        conn,
+        &query,
+        params![platform, account_id, task_run_id, status, start_ts, end_ts, limit],
+        "latest profile stats",
+    )
+}
+
+fn query_profile_stats_history_rows(
+    conn: &Connection,
+    filter: &ProfileStatsFilter,
+) -> Result<Vec<ProfileStatsSnapshot>, String> {
+    let platform = normalized_platform_filter(filter.platform.as_deref())?;
+    let account_id = optional_trim(filter.account_id.as_deref());
+    let task_run_id = optional_trim(filter.task_run_id.as_deref());
+    let status = optional_trim(filter.status.as_deref());
+    let start_ts = optional_trim(filter.start_ts.as_deref());
+    let end_ts = optional_trim(filter.end_ts.as_deref());
+    let limit = normalized_limit(filter.limit) as i64;
+    let query = format!(
+        "SELECT {}
+             FROM profile_stats_snapshots
+             WHERE (?1 IS NULL OR platform = ?1)
+               AND (?2 IS NULL OR account_id = ?2)
+               AND (?3 IS NULL OR task_run_id = ?3)
+               AND (?4 IS NULL OR status = ?4)
+               AND (?5 IS NULL OR collected_at >= ?5)
+               AND (?6 IS NULL OR collected_at <= ?6)
+             ORDER BY collected_at DESC, id DESC
+             LIMIT ?7",
+        PROFILE_STATS_COLUMNS
+    );
+    query_profile_stats_rows(
+        conn,
+        &query,
+        params![platform, account_id, task_run_id, status, start_ts, end_ts, limit],
+        "profile stats history",
+    )
+}
+
+fn query_profile_stats_detail_row(
+    conn: &Connection,
+    request: &ProfileStatsDetailRequest,
+) -> Result<Option<ProfileStatsSnapshot>, String> {
+    if let Some(id) = request.id {
+        let query = format!(
+            "SELECT {} FROM profile_stats_snapshots WHERE id = ?1 LIMIT 1",
+            PROFILE_STATS_COLUMNS
+        );
+        return conn
+            .query_row(&query, params![id], map_profile_stats_snapshot)
+            .optional()
+            .map_err(|err| format!("failed to query profile stats detail: {}", err));
+    }
+
+    let task_run_id = optional_trim(request.task_run_id.as_deref())
+        .ok_or_else(|| "profile stats detail requires id or taskRunId".to_string())?;
+    let query = format!(
+        "SELECT {}
+             FROM profile_stats_snapshots
+             WHERE task_run_id = ?1
+             ORDER BY collected_at DESC, id DESC
+             LIMIT 1",
+        PROFILE_STATS_COLUMNS
+    );
+    conn.query_row(&query, params![task_run_id], map_profile_stats_snapshot)
+        .optional()
+        .map_err(|err| format!("failed to query profile stats detail: {}", err))
+}
+
+fn query_profile_stats_summary_rows(
+    conn: &Connection,
+    filter: &ProfileStatsFilter,
+    configured_account_count: Option<usize>,
+) -> Result<ProfileStatsSummary, String> {
+    let latest_rows = query_profile_stats_latest_rows(conn, filter, Some(10_000))?;
+    let platform = normalized_platform_filter(filter.platform.as_deref())?;
+    let account_id = optional_trim(filter.account_id.as_deref());
+    let task_run_id = optional_trim(filter.task_run_id.as_deref());
+    let status = optional_trim(filter.status.as_deref());
+    let start_ts = optional_trim(filter.start_ts.as_deref());
+    let end_ts = optional_trim(filter.end_ts.as_deref());
+    let recent24h_count = conn
+        .query_row(
+            "SELECT COUNT(*)
+                 FROM profile_stats_snapshots
+                 WHERE (?1 IS NULL OR platform = ?1)
+                   AND (?2 IS NULL OR account_id = ?2)
+                   AND (?3 IS NULL OR task_run_id = ?3)
+                   AND (?4 IS NULL OR status = ?4)
+                   AND (?5 IS NULL OR collected_at >= ?5)
+                   AND (?6 IS NULL OR collected_at <= ?6)
+                   AND datetime(collected_at) >= datetime('now', '-1 day')",
+            params![platform, account_id, task_run_id, status, start_ts, end_ts],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+        .max(0) as usize;
+
+    let mut summary = ProfileStatsSummary {
+        account_count: configured_account_count.unwrap_or(latest_rows.len()),
+        collected_account_count: latest_rows.len(),
+        recent24h_count,
+        ..ProfileStatsSummary::default()
+    };
+    for row in latest_rows {
+        match row.status.as_str() {
+            "success" => summary.success_count += 1,
+            "partial_success" | "partial" => summary.partial_success_count += 1,
+            "failed" | "error" => summary.failed_count += 1,
+            _ => {}
+        }
+        if row
+            .comment_publish_evidence
+            .as_deref()
+            .map(|value| value == "observed")
+            .unwrap_or(false)
+            || row.activity_has_liked_your_comment == Some(true)
+        {
+            summary.comment_evidence_account_count += 1;
+        }
+        summary.total_following += row.following.unwrap_or(0).max(0);
+        summary.total_followers += row.followers.unwrap_or(0).max(0);
+        summary.total_likes += row.likes.unwrap_or(0).max(0);
+        summary.total_liked += row.liked.unwrap_or(0).max(0);
+    }
+    Ok(summary)
+}
+
+fn query_profile_stats_rows<P>(
+    conn: &Connection,
+    query: &str,
+    params: P,
+    label: &str,
+) -> Result<Vec<ProfileStatsSnapshot>, String>
+where
+    P: rusqlite::Params,
+{
+    let mut stmt = conn
+        .prepare(query)
+        .map_err(|err| format!("failed to prepare {} query: {}", label, err))?;
+    let rows = stmt
+        .query_map(params, map_profile_stats_snapshot)
+        .map_err(|err| format!("failed to query {}: {}", label, err))?;
+    let mut result = Vec::new();
+    for row in rows {
+        result.push(row.map_err(|err| format!("failed to read {} row: {}", label, err))?);
+    }
+    Ok(result)
+}
+
+fn map_profile_stats_snapshot(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProfileStatsSnapshot> {
+    Ok(ProfileStatsSnapshot {
+        id: row.get(0)?,
+        platform: row.get(1)?,
+        account_id: row.get(2)?,
+        task_run_id: row.get(3)?,
+        handle: row.get(4)?,
+        following: row.get(5)?,
+        followers: row.get(6)?,
+        likes: row.get(7)?,
+        raw_following: row.get(8)?,
+        raw_followers: row.get(9)?,
+        raw_likes: row.get(10)?,
+        approximate_fields_json: row.get(11)?,
+        liked: row.get(12)?,
+        liked_loaded: row.get(13)?,
+        liked_complete: optional_sqlite_bool(row.get(14)?),
+        liked_status: row.get(15)?,
+        activity_has_liked_your_comment: optional_sqlite_bool(row.get(16)?),
+        activity_comment_like_notifications_count: row.get(17)?,
+        activity_notifications_scanned: row.get(18)?,
+        activity_status: row.get(19)?,
+        activity_scope: row.get(20)?,
+        activity_complete: optional_sqlite_bool(row.get(21)?),
+        comment_publish_evidence: row.get(22)?,
+        activity_matches_json: row.get(23)?,
+        status: row.get(24)?,
+        error: row.get(25)?,
+        result_json: row.get(26)?,
+        collected_at: row.get(27)?,
+        created_at: row.get(28)?,
+    })
+}
+
+fn optional_sqlite_bool(value: Option<i64>) -> Option<bool> {
+    value.map(|value| value != 0)
+}
+
+fn prefixed_profile_stats_columns(prefix: &str) -> String {
+    PROFILE_STATS_COLUMNS
+        .split(',')
+        .map(str::trim)
+        .map(|column| format!("{}.{}", prefix, column))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn profile_stats_configured_account_count(
+    filter: &ProfileStatsFilter,
+) -> Result<Option<usize>, String> {
+    let platform = normalized_platform_filter(filter.platform.as_deref())?;
+    let account_id = optional_trim(filter.account_id.as_deref());
+    let config = load_config()?;
+    Ok(Some(
+        config
+            .accounts()
+            .iter()
+            .filter(|account| account.enabled())
+            .filter(|account| {
+                platform
+                    .as_deref()
+                    .map(|platform| account.platform() == platform)
+                    .unwrap_or(account.platform() == "tiktok")
+            })
+            .filter(|account| {
+                account_id
+                    .map(|account_id| account.id() == account_id)
+                    .unwrap_or(true)
+            })
+            .count(),
+    ))
+}
+
 fn table_exists(conn: &Connection, table_name: &str) -> Result<bool, String> {
     conn.query_row(
         "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
@@ -1664,5 +2074,180 @@ mod tests {
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].video_id, "100");
         assert_eq!(rows[1].title, "(2)Watch trending videos for you | TikTok");
+    }
+
+    #[test]
+    fn sqlite_helpers_query_profile_stats_snapshots() {
+        let conn = Connection::open_in_memory().expect("in-memory sqlite should open");
+        create_profile_stats_test_table(&conn);
+
+        let latest = query_profile_stats_latest_rows(
+            &conn,
+            &ProfileStatsFilter {
+                platform: Some("tiktok".to_string()),
+                ..ProfileStatsFilter::default()
+            },
+            Some(50),
+        )
+        .expect("latest profile stats should query");
+        assert_eq!(latest.len(), 2);
+        assert_eq!(latest[0].account_id, "acct_2");
+        assert_eq!(latest[0].status, "success");
+        assert_eq!(latest[0].activity_has_liked_your_comment, Some(true));
+        assert_eq!(latest[1].account_id, "acct_1");
+        assert_eq!(latest[1].status, "failed");
+
+        let history = query_profile_stats_history_rows(
+            &conn,
+            &ProfileStatsFilter {
+                platform: Some("tiktok".to_string()),
+                account_id: Some("acct_1".to_string()),
+                start_ts: Some("2099-01-01T00:00:00+00:00".to_string()),
+                end_ts: Some("2099-01-02T00:00:00+00:00".to_string()),
+                ..ProfileStatsFilter::default()
+            },
+        )
+        .expect("profile stats history should query");
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].task_run_id.as_deref(), Some("task-2"));
+        assert_eq!(history[1].task_run_id.as_deref(), Some("task-1"));
+
+        let detail = query_profile_stats_detail_row(
+            &conn,
+            &ProfileStatsDetailRequest {
+                id: None,
+                task_run_id: Some("task-2".to_string()),
+            },
+        )
+        .expect("profile stats detail should query")
+        .expect("profile stats detail should exist");
+        assert_eq!(detail.id, 2);
+        assert_eq!(detail.error.as_deref(), Some("profile_unavailable"));
+    }
+
+    #[test]
+    fn sqlite_helpers_summarize_profile_stats_latest_rows() {
+        let conn = Connection::open_in_memory().expect("in-memory sqlite should open");
+        create_profile_stats_test_table(&conn);
+
+        let summary = query_profile_stats_summary_rows(
+            &conn,
+            &ProfileStatsFilter {
+                platform: Some("tiktok".to_string()),
+                ..ProfileStatsFilter::default()
+            },
+            Some(3),
+        )
+        .expect("profile stats summary should query");
+
+        assert_eq!(summary.account_count, 3);
+        assert_eq!(summary.collected_account_count, 2);
+        assert_eq!(summary.success_count, 1);
+        assert_eq!(summary.failed_count, 1);
+        assert_eq!(summary.comment_evidence_account_count, 1);
+        assert_eq!(summary.total_following, 5);
+        assert_eq!(summary.total_followers, 29);
+        assert_eq!(summary.total_likes, 38);
+        assert_eq!(summary.total_liked, 41);
+    }
+
+    fn create_profile_stats_test_table(conn: &Connection) {
+        conn.execute_batch(
+            r#"
+            CREATE TABLE profile_stats_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                platform TEXT NOT NULL,
+                account_id TEXT NOT NULL,
+                task_run_id TEXT,
+                handle TEXT,
+                following INTEGER,
+                followers INTEGER,
+                likes INTEGER,
+                raw_following TEXT,
+                raw_followers TEXT,
+                raw_likes TEXT,
+                approximate_fields_json TEXT,
+                liked INTEGER,
+                liked_loaded INTEGER,
+                liked_complete INTEGER,
+                liked_status TEXT,
+                activity_has_liked_your_comment INTEGER,
+                activity_comment_like_notifications_count INTEGER,
+                activity_notifications_scanned INTEGER,
+                activity_status TEXT,
+                activity_scope TEXT,
+                activity_complete INTEGER,
+                comment_publish_evidence TEXT,
+                activity_matches_json TEXT,
+                status TEXT NOT NULL,
+                error TEXT,
+                result_json TEXT,
+                collected_at TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            INSERT INTO profile_stats_snapshots (
+                platform, account_id, task_run_id, handle,
+                following, followers, likes,
+                raw_following, raw_followers, raw_likes,
+                approximate_fields_json,
+                liked, liked_loaded, liked_complete, liked_status,
+                activity_has_liked_your_comment,
+                activity_comment_like_notifications_count,
+                activity_notifications_scanned,
+                activity_status, activity_scope, activity_complete,
+                comment_publish_evidence, activity_matches_json,
+                status, error, result_json, collected_at, created_at
+            ) VALUES
+            (
+                'tiktok', 'acct_1', 'task-1', 'alpha',
+                1, 5, 7,
+                '1', '5', '7',
+                '[]',
+                1, 1, 1, 'complete',
+                0, 0, 3,
+                'loaded_list_stable', 'loaded_notifications', 0,
+                NULL, '[]',
+                'success', NULL, '{}',
+                '2099-01-01T00:00:00+00:00', '2099-01-01T00:00:01+00:00'
+            ),
+            (
+                'tiktok', 'acct_1', 'task-2', 'alpha',
+                2, 9, 8,
+                '2', '9', '8',
+                '[]',
+                1, 1, 0, 'partial',
+                0, 0, 2,
+                'failed', 'loaded_notifications', 0,
+                NULL, '[]',
+                'failed', 'profile_unavailable', '{}',
+                '2099-01-01T01:00:00+00:00', '2099-01-01T01:00:01+00:00'
+            ),
+            (
+                'tiktok', 'acct_2', 'task-3', 'beta',
+                3, 20, 30,
+                '3', '20', '30',
+                '[]',
+                40, 40, 1, 'complete',
+                1, 2, 5,
+                'loaded_list_stable', 'loaded_notifications', 0,
+                'observed', '[{"action":"liked your comment"}]',
+                'success', NULL, '{}',
+                '2099-01-01T02:00:00+00:00', '2099-01-01T02:00:01+00:00'
+            ),
+            (
+                'instagram', 'ig_1', 'task-4', 'gamma',
+                3, 100, 100,
+                '3', '100', '100',
+                '[]',
+                100, 100, 1, 'complete',
+                1, 2, 5,
+                'loaded_list_stable', 'loaded_notifications', 0,
+                'observed', '[]',
+                'success', NULL, '{}',
+                '2099-01-01T03:00:00+00:00', '2099-01-01T03:00:01+00:00'
+            );
+            "#,
+        )
+        .expect("test profile stats schema should be created");
     }
 }

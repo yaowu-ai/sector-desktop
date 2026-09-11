@@ -29,11 +29,37 @@ try {
   if ($LASTEXITCODE -ne 0) {
     throw "runtime manifest generation failed with exit code $LASTEXITCODE"
   }
+  $runtimeExeName = if ($IsWindows -or $env:OS -eq "Windows_NT") {
+    "account-matrix-runtime.exe"
+  } else {
+    "account-matrix-runtime"
+  }
+  $runtimeExe = Join-Path $runtimeDir $runtimeExeName
+  if (-not (Test-Path -LiteralPath $runtimeExe)) {
+    throw "runtime executable missing: $runtimeExe"
+  }
+  $manifestPath = Join-Path $runtimeDir "runtime-manifest.json"
+  $manifest = Get-Content $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+  if ($manifest.supportedCommands -notcontains "profile-stats") {
+    throw "runtime manifest missing profile-stats command"
+  }
+  $profileStatsRaw = & $runtimeExe profile-stats --json
+  if ($LASTEXITCODE -ne 0) {
+    throw "runtime profile-stats smoke failed with exit code $LASTEXITCODE"
+  }
+  $profileStats = $profileStatsRaw | ConvertFrom-Json
+  if ($profileStats.status -ne "ok") {
+    throw "runtime profile-stats smoke returned status $($profileStats.status)"
+  }
 
   if ($CopyToTauriResources) {
     $target = Join-Path $repo "desktop/src-tauri/resources/runtime"
     New-Item -ItemType Directory -Force -Path $target | Out-Null
     Copy-Item -Path (Join-Path $runtimeDir "*") -Destination $target -Recurse -Force
+    $targetExe = Join-Path $target $runtimeExeName
+    if (-not (Test-Path -LiteralPath $targetExe)) {
+      throw "Tauri runtime resource missing executable: $targetExe"
+    }
   }
 } finally {
   Pop-Location

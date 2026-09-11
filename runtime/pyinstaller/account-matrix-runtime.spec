@@ -22,6 +22,8 @@ LOCAL_HIDDENIMPORTS = [
     "notify",
     "patchright_runtime",
     "platform_config",
+    "profile_activity",
+    "profile_stats",
     "runtime_config",
     "scheduler",
     "stats",

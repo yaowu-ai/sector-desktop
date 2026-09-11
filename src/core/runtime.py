@@ -48,6 +48,23 @@ FYP_VIDEO_TEXT_LIMITS = {
     "raw_source": 80,
 }
 
+PROFILE_SNAPSHOT_TEXT_LIMITS = {
+    "task_run_id": 128,
+    "account_id": 128,
+    "handle": 120,
+    "raw_following": 64,
+    "raw_followers": 64,
+    "raw_likes": 64,
+    "liked_status": 64,
+    "activity_status": 64,
+    "activity_scope": 64,
+    "comment_publish_evidence": 64,
+    "status": 32,
+    "error": 1000,
+    "collected_at": 64,
+    "json": 12000,
+}
+
 PROXY_URL_CREDENTIAL_RE = re.compile(
     r"\b((?:https?|socks5)://[^:\s/@]+:)([^@\s]+)(@[^\s]+)",
     re.IGNORECASE,
@@ -192,6 +209,47 @@ def initialize_db_schema(conn):
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_fyp_video_views_video_id
         ON fyp_video_views(platform, video_id)
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS profile_stats_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            platform TEXT NOT NULL,
+            account_id TEXT NOT NULL,
+            task_run_id TEXT,
+            handle TEXT,
+            following INTEGER,
+            followers INTEGER,
+            likes INTEGER,
+            raw_following TEXT,
+            raw_followers TEXT,
+            raw_likes TEXT,
+            approximate_fields_json TEXT,
+            liked INTEGER,
+            liked_loaded INTEGER,
+            liked_complete INTEGER,
+            liked_status TEXT,
+            activity_has_liked_your_comment INTEGER,
+            activity_comment_like_notifications_count INTEGER,
+            activity_notifications_scanned INTEGER,
+            activity_status TEXT,
+            activity_scope TEXT,
+            activity_complete INTEGER,
+            comment_publish_evidence TEXT,
+            activity_matches_json TEXT,
+            status TEXT NOT NULL,
+            error TEXT,
+            result_json TEXT,
+            collected_at TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_profile_stats_account_ts
+        ON profile_stats_snapshots(platform, account_id, collected_at)
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_profile_stats_task_run
+        ON profile_stats_snapshots(task_run_id)
     """)
     ensure_ins_runtime_schema(conn)
     ensure_platform_column(conn, "action_log")
@@ -506,6 +564,85 @@ def record_fyp_video_view(conn, platform, account_id, record):
         return False
 
 
+def save_profile_snapshot(conn, snapshot, task_run_id=None):
+    """Persist one TikTok profile collection snapshot.
+
+    Unknown values stay NULL. The full snapshot is kept as bounded redacted JSON
+    for later detail display, while common query fields are stored as columns.
+    """
+    if not isinstance(snapshot, dict):
+        raise ValueError("profile snapshot must be a dict")
+    platform = require_platform(snapshot.get("platform") or "tiktok")
+    account_id = bounded_profile_snapshot_text(
+        snapshot.get("account_id"),
+        "account_id",
+    )
+    if not account_id:
+        raise ValueError("profile snapshot account_id is required")
+
+    raw = snapshot.get("raw") or {}
+    activity = snapshot.get("activity") or {}
+    status = bounded_profile_snapshot_text(snapshot.get("status"), "status") or "unknown"
+    now = datetime.now(timezone.utc).isoformat()
+    collected_at = (
+        bounded_profile_snapshot_text(snapshot.get("collected_at"), "collected_at")
+        or now
+    )
+    effective_task_run_id = task_run_id or snapshot.get("task_run_id")
+    cur = conn.execute(
+        """
+        INSERT INTO profile_stats_snapshots (
+            platform, account_id, task_run_id, handle,
+            following, followers, likes,
+            raw_following, raw_followers, raw_likes,
+            approximate_fields_json,
+            liked, liked_loaded, liked_complete, liked_status,
+            activity_has_liked_your_comment,
+            activity_comment_like_notifications_count,
+            activity_notifications_scanned,
+            activity_status, activity_scope, activity_complete,
+            comment_publish_evidence, activity_matches_json,
+            status, error, result_json, collected_at, created_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """,
+        (
+            platform,
+            account_id,
+            bounded_profile_snapshot_text(effective_task_run_id, "task_run_id"),
+            bounded_profile_snapshot_text(snapshot.get("handle"), "handle"),
+            normalized_optional_int(snapshot.get("following")),
+            normalized_optional_int(snapshot.get("followers")),
+            normalized_optional_int(snapshot.get("likes")),
+            bounded_profile_snapshot_text(raw.get("following"), "raw_following"),
+            bounded_profile_snapshot_text(raw.get("followers"), "raw_followers"),
+            bounded_profile_snapshot_text(raw.get("likes"), "raw_likes"),
+            bounded_profile_snapshot_json(snapshot.get("approximate_fields") or []),
+            normalized_optional_int(snapshot.get("liked")),
+            normalized_optional_int(snapshot.get("liked_loaded")),
+            normalized_optional_bool(snapshot.get("liked_complete")),
+            bounded_profile_snapshot_text(snapshot.get("liked_status"), "liked_status"),
+            normalized_optional_bool(activity.get("has_liked_your_comment")),
+            normalized_optional_int(activity.get("comment_like_notifications_count")),
+            normalized_optional_int(activity.get("notifications_scanned")),
+            bounded_profile_snapshot_text(activity.get("status"), "activity_status"),
+            bounded_profile_snapshot_text(activity.get("scope"), "activity_scope"),
+            normalized_optional_bool(activity.get("complete")),
+            bounded_profile_snapshot_text(
+                activity.get("comment_publish_evidence"),
+                "comment_publish_evidence",
+            ),
+            bounded_profile_snapshot_json(activity.get("matches") or []),
+            status,
+            bounded_profile_snapshot_text(snapshot.get("error"), "error"),
+            bounded_profile_snapshot_json(snapshot),
+            collected_at,
+            now,
+        ),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
 def find_existing_fyp_video_view(
     conn,
     platform,
@@ -618,6 +755,63 @@ def bounded_fyp_video_text(value, field):
 def normalized_optional_float(value):
     if value is None or value == "":
         return None
+
+
+def normalized_optional_int(value):
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def normalized_optional_bool(value):
+    if value is None:
+        return None
+    return int(bool(value))
+
+
+def bounded_profile_snapshot_text(value, field):
+    if value is None:
+        return None
+    text = redact_runtime_text(str(value))
+    text = "".join(ch if ch >= " " or ch in "\n\t" else " " for ch in text)
+    text = re.sub(r"\s+", " ", text).strip()
+    if not text:
+        return None
+    limit = PROFILE_SNAPSHOT_TEXT_LIMITS.get(field)
+    if limit and len(text) > limit:
+        return text[:limit]
+    return text
+
+
+def bounded_profile_snapshot_json(value):
+    safe_value = redacted_profile_snapshot_value(value)
+    text = json.dumps(safe_value, ensure_ascii=False, default=str)
+    limit = PROFILE_SNAPSHOT_TEXT_LIMITS["json"]
+    if len(text) > limit:
+        return json.dumps(
+            {
+                "truncated": True,
+                "summary": text[:limit],
+            },
+            ensure_ascii=False,
+        )
+    return text
+
+
+def redacted_profile_snapshot_value(value):
+    if isinstance(value, dict):
+        return {
+            str(key): redacted_profile_snapshot_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [redacted_profile_snapshot_value(item) for item in value]
+    if isinstance(value, str):
+        return redact_runtime_text(value)
+    return value
     try:
         return float(value)
     except (TypeError, ValueError):

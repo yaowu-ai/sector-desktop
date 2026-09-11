@@ -40,6 +40,10 @@ import type {
   ProcessLogChunk,
   ProcessStartResult,
   ProcessStatus,
+  ProfileStatsDetailRequest,
+  ProfileStatsFilter,
+  ProfileStatsSnapshot,
+  ProfileStatsSummary,
   ProfileOperationResult,
   ProfileStatus,
   ProxyCheckRequest,
@@ -219,6 +223,22 @@ export function queryActionLogs(filter: ActionLogFilter) {
 
 export function queryFypVideoViews(filter: FypVideoViewFilter) {
   return invoke<FypVideoViewRecord[]>('query_fyp_video_views', { filter })
+}
+
+export function queryProfileStatsLatest(filter: ProfileStatsFilter = { platform: 'tiktok' }) {
+  return invoke<ProfileStatsSnapshot[]>('query_profile_stats_latest', { filter })
+}
+
+export function queryProfileStatsHistory(filter: ProfileStatsFilter = { platform: 'tiktok' }) {
+  return invoke<ProfileStatsSnapshot[]>('query_profile_stats_history', { filter })
+}
+
+export function queryProfileStatsDetail(request: ProfileStatsDetailRequest) {
+  return invoke<ProfileStatsSnapshot | null>('query_profile_stats_detail', { request })
+}
+
+export function queryProfileStatsSummary(filter: ProfileStatsFilter = { platform: 'tiktok' }) {
+  return invoke<ProfileStatsSummary>('query_profile_stats_summary', { filter })
 }
 
 export function querySchedulerJobRuns(filter: SchedulerJobRunFilter) {
