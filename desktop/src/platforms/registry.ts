@@ -162,7 +162,7 @@ export const PLATFORM_CAPABILITIES: PlatformCapabilityDefinition[] = [
   },
   {
     key: 'profileStats',
-    label: '账号数据',
+    label: '成果看板',
     description: 'TikTok 养号任务结束后自动采集的账号主页和互动证据快照',
   },
   {

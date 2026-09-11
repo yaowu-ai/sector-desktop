@@ -52,16 +52,8 @@ import type {
 const { RangePicker } = DatePicker;
 
 type TimeRange = [Dayjs, Dayjs] | null;
-type ProfileStatsStatusFilter =
-  | "all"
-  | "success"
-  | "partial_success"
-  | "failed"
-  | "uncollected";
-
 interface FilterState {
   accountId?: string;
-  status: ProfileStatsStatusFilter;
   timeRange: TimeRange;
 }
 
@@ -79,10 +71,17 @@ interface ActivityMatchRow {
   text?: string;
 }
 
+interface TablePageState {
+  current: number;
+  pageSize: number;
+}
+
 const DEFAULT_FILTERS: FilterState = {
-  status: "all",
   timeRange: null,
 };
+
+const DEFAULT_TABLE_PAGE_SIZE = 12;
+const TABLE_PAGE_SIZE_OPTIONS = [10, 12, 20, 50, 100];
 
 const EMPTY_SUMMARY: ProfileStatsSummary = {
   accountCount: 0,
@@ -115,6 +114,11 @@ export function ProfileStatsPage() {
   const [loading, setLoading] = useState(true);
   const [detailSnapshot, setDetailSnapshot] =
     useState<ProfileStatsSnapshot | null>(null);
+  const [collectionPagination, setCollectionPagination] =
+    useState<TablePageState>({
+      current: 1,
+      pageSize: DEFAULT_TABLE_PAGE_SIZE,
+    });
 
   const platformAccounts = useMemo(
     () => accounts.filter((account) => account.platform === currentPlatform),
@@ -138,13 +142,6 @@ export function ProfileStatsPage() {
       ),
     [currentPlatform, filters, latestSnapshots, platformAccounts],
   );
-  const displayedHistory = useMemo(
-    () =>
-      historySnapshots.filter((snapshot) =>
-        snapshotMatchesStatus(snapshot, filters.status),
-      ),
-    [filters.status, historySnapshots],
-  );
   const detailHistory = useMemo(
     () =>
       detailSnapshot
@@ -163,13 +160,10 @@ export function ProfileStatsPage() {
         loadConfig(),
         getSqliteStatus(),
         queryProfileStatsLatest({ ...queryFilter, limit: 10000 }),
-        sourceFilters.status === "uncollected"
-          ? Promise.resolve([])
-          : queryProfileStatsHistory({
-              ...queryFilter,
-              status: toBackendHistoryStatus(sourceFilters.status),
-              limit: 500,
-            }),
+        queryProfileStatsHistory({
+          ...queryFilter,
+          limit: 500,
+        }),
         queryProfileStatsSummary({ platform: currentPlatform }),
       ]);
       setAccounts(config.accounts);
@@ -187,6 +181,14 @@ export function ProfileStatsPage() {
   useEffect(() => {
     void refresh(DEFAULT_FILTERS);
   }, [currentPlatform]);
+
+  useEffect(() => {
+    setCollectionPagination((current) => ({ ...current, current: 1 }));
+  }, [
+    filters.accountId,
+    filters.timeRange,
+    latestRows.length,
+  ]);
 
   const updateFilter = <K extends keyof FilterState>(
     key: K,
@@ -216,8 +218,14 @@ export function ProfileStatsPage() {
   }, []);
 
   const latestColumns = useMemo(
-    () => buildLatestColumns((snapshot) => void openDetail(snapshot)),
-    [openDetail],
+    () => [
+      buildSequenceColumn(collectionPagination),
+      ...buildLatestColumns(
+        (snapshot) => void openDetail(snapshot),
+        latestRows,
+      ),
+    ],
+    [collectionPagination, latestRows, openDetail],
   );
 
   const storeStatus = getProfileStoreStatus(sqliteStatus);
@@ -226,7 +234,7 @@ export function ProfileStatsPage() {
   return (
     <>
       <PageHeader
-        title="账号数据"
+        title="成果看板"
         description="只读展示 TikTok 养号任务完成后自动采集的账号快照。"
         extra={
           <Space>
@@ -249,7 +257,7 @@ export function ProfileStatsPage() {
             <Alert
               showIcon
               type="info"
-              message="账号数据记录库尚未初始化"
+              message="成果看板记录库尚未初始化"
               description="首次完成 TikTok 养号任务后会自动生成采集快照；当前暂无数据。"
               style={{ marginBottom: 16 }}
             />
@@ -258,7 +266,7 @@ export function ProfileStatsPage() {
             <Alert
               showIcon
               type="info"
-              message="账号数据快照表尚未创建"
+              message="成果看板快照表尚未创建"
               description="完成一次新版 TikTok 养号任务后会自动创建并写入快照。"
               style={{ marginBottom: 16 }}
             />
@@ -280,20 +288,6 @@ export function ProfileStatsPage() {
                   options={accountOptions}
                   style={{ width: 220 }}
                   onChange={(value) => updateFilter("accountId", value)}
-                />
-                <Select
-                  value={filters.status}
-                  options={[
-                    { value: "all", label: "全部状态" },
-                    { value: "success", label: "采集成功" },
-                    { value: "partial_success", label: "部分成功" },
-                    { value: "failed", label: "采集失败" },
-                    { value: "uncollected", label: "未采集" },
-                  ]}
-                  style={{ width: 150 }}
-                  onChange={(value) =>
-                    updateFilter("status", value as ProfileStatsStatusFilter)
-                  }
                 />
                 <RangePicker
                   showTime
@@ -374,7 +368,7 @@ export function ProfileStatsPage() {
         </Col>
 
         <Col span={24}>
-          <Card title="最新数据">
+          <Card title="采集详情">
             <Table
               rowKey="accountId"
               loading={loading}
@@ -382,37 +376,18 @@ export function ProfileStatsPage() {
               dataSource={latestRows}
               locale={{
                 emptyText: (
-                  <Empty description="暂无账号数据。完成 TikTok 养号任务后会自动采集。" />
+                  <Empty description="暂无采集详情。完成 TikTok 养号任务后会自动采集。" />
                 ),
               }}
               pagination={{
-                defaultPageSize: 12,
+                current: collectionPagination.current,
+                pageSize: collectionPagination.pageSize,
                 showSizeChanger: true,
-                pageSizeOptions: [10, 12, 20, 50, 100],
+                pageSizeOptions: TABLE_PAGE_SIZE_OPTIONS,
+                onChange: (current, pageSize) =>
+                  setCollectionPagination({ current, pageSize }),
               }}
               scroll={{ x: 1280 }}
-            />
-          </Card>
-        </Col>
-
-        <Col span={24}>
-          <Card title="历史记录">
-            <Table
-              rowKey="id"
-              loading={loading}
-              columns={historyColumns}
-              dataSource={displayedHistory}
-              locale={{
-                emptyText: (
-                  <Empty description="暂无历史快照。每次正常养号任务完成后会写入一条记录。" />
-                ),
-              }}
-              pagination={{
-                defaultPageSize: 12,
-                showSizeChanger: true,
-                pageSizeOptions: [10, 12, 20, 50, 100],
-              }}
-              scroll={{ x: 1260 }}
             />
           </Card>
         </Col>
@@ -421,6 +396,7 @@ export function ProfileStatsPage() {
       <ProfileStatsDetailDrawer
         snapshot={detailSnapshot}
         history={detailHistory}
+        onView={(nextSnapshot) => void openDetail(nextSnapshot)}
         onClose={() => setDetailSnapshot(null)}
       />
     </>
@@ -455,10 +431,12 @@ function SummaryCard({
 function ProfileStatsDetailDrawer({
   snapshot,
   history,
+  onView,
   onClose,
 }: {
   snapshot: ProfileStatsSnapshot | null;
   history: ProfileStatsSnapshot[];
+  onView(snapshot: ProfileStatsSnapshot): void;
   onClose(): void;
 }) {
   const matches = useMemo(
@@ -539,7 +517,7 @@ function ProfileStatsDetailDrawer({
             <Table
               size="small"
               rowKey="id"
-              columns={historyColumns}
+              columns={buildHistoryColumns(onView)}
               dataSource={history}
               pagination={{ pageSize: 6 }}
               scroll={{ x: 1260 }}
@@ -551,9 +529,28 @@ function ProfileStatsDetailDrawer({
   );
 }
 
+function buildSequenceColumn(page: TablePageState) {
+  return {
+    title: "序号",
+    width: 70,
+    fixed: "left" as const,
+    align: "center" as const,
+    render: (_: unknown, __: unknown, index: number) =>
+      (page.current - 1) * page.pageSize + index + 1,
+  };
+}
+
 function buildLatestColumns(
   onView: (snapshot: ProfileStatsSnapshot) => void,
+  rows: LatestProfileRow[],
 ): ColumnsType<LatestProfileRow> {
+  const notificationFilters = Array.from(
+    new Set(rows.map((row) => getNotificationFilterValue(row.snapshot))),
+  ).map((value) => ({
+    text: value,
+    value,
+  }));
+
   return [
     {
       title: "账号",
@@ -576,43 +573,83 @@ function buildLatestColumns(
     {
       title: "关注数",
       width: 110,
+      sorter: (left, right) =>
+        compareOptionalNumbers(
+          left.snapshot?.following,
+          right.snapshot?.following,
+        ),
       render: (_, row) => formatNumber(row.snapshot?.following),
     },
     {
       title: "粉丝数",
       width: 110,
+      sorter: (left, right) =>
+        compareOptionalNumbers(
+          left.snapshot?.followers,
+          right.snapshot?.followers,
+        ),
       render: (_, row) => formatNumber(row.snapshot?.followers),
     },
     {
       title: "主页获赞",
       width: 100,
+      sorter: (left, right) =>
+        compareOptionalNumbers(left.snapshot?.likes, right.snapshot?.likes),
       render: (_, row) => formatNumber(row.snapshot?.likes),
     },
     {
       title: "点赞视频",
       width: 100,
+      sorter: (left, right) =>
+        compareOptionalNumbers(left.snapshot?.liked, right.snapshot?.liked),
       render: (_, row) => formatNumber(row.snapshot?.liked),
     },
     {
       title: "评论获赞证据",
       width: 140,
+      filters: [
+        { text: "有证据", value: "有证据" },
+        { text: "未观察到", value: "未观察到" },
+        { text: "未采集", value: "未采集" },
+      ],
+      onFilter: (value, row) =>
+        getCommentEvidenceFilterValue(row.snapshot) === String(value),
       render: (_, row) =>
         row.snapshot ? formatCommentEvidence(row.snapshot) : "-",
     },
     {
       title: "已点赞完整性",
       width: 130,
+      filters: [
+        { text: "完整", value: "完整" },
+        { text: "不完整", value: "不完整" },
+        { text: "未知", value: "未知" },
+        { text: "未采集", value: "未采集" },
+      ],
+      onFilter: (value, row) =>
+        getLikedCompletenessFilterValue(row.snapshot) === String(value),
       render: (_, row) =>
         row.snapshot ? formatLikedCompleteness(row.snapshot) : "-",
     },
     {
       title: "通知状态",
       width: 150,
+      filters: notificationFilters,
+      onFilter: (value, row) =>
+        getNotificationFilterValue(row.snapshot) === String(value),
       render: (_, row) => row.snapshot?.activityStatus ?? "-",
     },
     {
       title: "采集状态",
       width: 130,
+      filters: [
+        { text: "成功", value: "成功" },
+        { text: "部分成功", value: "部分成功" },
+        { text: "失败", value: "失败" },
+        { text: "未采集", value: "未采集" },
+      ],
+      onFilter: (value, row) =>
+        getCollectionStatusFilterValue(row.snapshot) === String(value),
       render: (_, row) =>
         row.snapshot ? (
           formatCollectionStatus(row.snapshot.status, row.snapshot.error)
@@ -657,61 +694,93 @@ function buildLatestColumns(
   ];
 }
 
-const historyColumns: ColumnsType<ProfileStatsSnapshot> = [
-  { title: "账号", dataIndex: "accountId", width: 150, fixed: "left" },
-  {
-    title: "主页名",
-    width: 150,
-    render: (_, row) => (row.handle ? `@${row.handle}` : "-"),
-  },
-  {
-    title: "粉丝数",
-    width: 110,
-    render: (_, row) => formatNumber(row.followers),
-  },
-  {
-    title: "主页获赞",
-    width: 100,
-    render: (_, row) => formatNumber(row.likes),
-  },
-  {
-    title: "点赞视频",
-    width: 100,
-    render: (_, row) => formatNumber(row.liked),
-  },
-  {
-    title: "评论获赞证据",
-    width: 140,
-    render: (_, row) => formatCommentEvidence(row),
-  },
-  {
-    title: "已点赞完整性",
-    width: 130,
-    render: (_, row) => formatLikedCompleteness(row),
-  },
-  {
-    title: "采集状态",
-    width: 130,
-    render: (_, row) => formatCollectionStatus(row.status, row.error),
-  },
-  {
-    title: "采集时间",
-    width: 180,
-    render: (_, row) => formatDateTime(row.collectedAt),
-  },
-  {
-    title: "关联任务",
-    dataIndex: "taskRunId",
-    width: 180,
-    render: (value) => value ?? "-",
-  },
-  {
-    title: "失败原因",
-    dataIndex: "error",
-    width: 220,
-    render: (value) => value ?? "-",
-  },
-];
+function buildHistoryColumns(
+  onView: (snapshot: ProfileStatsSnapshot) => void,
+): ColumnsType<ProfileStatsSnapshot> {
+  return [
+    { title: "账号", dataIndex: "accountId", width: 150, fixed: "left" },
+    {
+      title: "主页名",
+      width: 150,
+      render: (_, row) => (row.handle ? `@${row.handle}` : "-"),
+    },
+    {
+      title: "关注数",
+      width: 110,
+      render: (_, row) => formatNumber(row.following),
+    },
+    {
+      title: "粉丝数",
+      width: 110,
+      render: (_, row) => formatNumber(row.followers),
+    },
+    {
+      title: "主页获赞",
+      width: 100,
+      render: (_, row) => formatNumber(row.likes),
+    },
+    {
+      title: "点赞视频",
+      width: 100,
+      render: (_, row) => formatNumber(row.liked),
+    },
+    {
+      title: "评论获赞证据",
+      width: 140,
+      render: (_, row) => formatCommentEvidence(row),
+    },
+    {
+      title: "已点赞完整性",
+      width: 130,
+      render: (_, row) => formatLikedCompleteness(row),
+    },
+    {
+      title: "通知状态",
+      width: 150,
+      render: (_, row) => row.activityStatus ?? "-",
+    },
+    {
+      title: "采集状态",
+      width: 130,
+      render: (_, row) => formatCollectionStatus(row.status, row.error),
+    },
+    {
+      title: "采集时间",
+      width: 180,
+      render: (_, row) => formatDateTime(row.collectedAt),
+    },
+    {
+      title: "关联任务",
+      dataIndex: "taskRunId",
+      width: 180,
+      render: (value) => value ?? "-",
+    },
+    {
+      title: "失败原因",
+      dataIndex: "error",
+      width: 220,
+      render: (value) => value ?? "-",
+    },
+    {
+      title: "操作",
+      fixed: "right",
+      width: 132,
+      align: "center",
+      render: (_, row) => (
+        <div style={{ padding: "0 8px" }}>
+          <Button
+            size="small"
+            icon={<Eye size={14} />}
+            style={{ minWidth: 92 }}
+            onClick={() => onView(row)}
+          >
+            查看详情
+          </Button>
+        </div>
+      ),
+    },
+  ];
+}
 
 const activityMatchColumns: ColumnsType<ActivityMatchRow> = [
   {
@@ -757,13 +826,6 @@ function buildLatestRows(
 
   return rows
     .filter((row) => !filters.accountId || row.accountId === filters.accountId)
-    .filter((row) => {
-      if (filters.status === "all") return true;
-      if (filters.status === "uncollected") return !row.snapshot;
-      return row.snapshot
-        ? snapshotMatchesStatus(row.snapshot, filters.status)
-        : false;
-    })
     .sort((left, right) => {
       const leftTs = left.snapshot?.collectedAt ?? "";
       const rightTs = right.snapshot?.collectedAt ?? "";
@@ -772,23 +834,6 @@ function buildLatestRows(
         left.accountId.localeCompare(right.accountId)
       );
     });
-}
-
-function snapshotMatchesStatus(
-  snapshot: ProfileStatsSnapshot,
-  status: ProfileStatsStatusFilter,
-) {
-  if (status === "all") return true;
-  if (status === "uncollected") return false;
-  if (status === "partial_success") {
-    return (
-      snapshot.status === "partial_success" || snapshot.status === "partial"
-    );
-  }
-  if (status === "failed") {
-    return snapshot.status === "failed" || snapshot.status === "error";
-  }
-  return snapshot.status === status;
 }
 
 function toProfileStatsFilter(
@@ -803,11 +848,44 @@ function toProfileStatsFilter(
   };
 }
 
-function toBackendHistoryStatus(status: ProfileStatsStatusFilter) {
-  if (status === "success" || status === "failed") {
-    return status;
+function compareOptionalNumbers(left?: number, right?: number) {
+  if (left === undefined || left === null) {
+    return right === undefined || right === null ? 0 : 1;
   }
-  return undefined;
+  if (right === undefined || right === null) return -1;
+  return left - right;
+}
+
+function getCommentEvidenceFilterValue(snapshot?: ProfileStatsSnapshot) {
+  if (!snapshot) return "未采集";
+  return snapshot &&
+    (snapshot.commentPublishEvidence === "observed" ||
+      snapshot.activityHasLikedYourComment)
+    ? "有证据"
+    : "未观察到";
+}
+
+function getLikedCompletenessFilterValue(snapshot?: ProfileStatsSnapshot) {
+  if (!snapshot) return "未采集";
+  if (snapshot?.likedComplete === true) return "完整";
+  if (snapshot?.likedComplete === false) return "不完整";
+  return "未知";
+}
+
+function getNotificationFilterValue(snapshot?: ProfileStatsSnapshot) {
+  return snapshot ? snapshot.activityStatus || "未知" : "未采集";
+}
+
+function getCollectionStatusFilterValue(snapshot?: ProfileStatsSnapshot) {
+  if (!snapshot) return "未采集";
+  if (snapshot.status === "success") return "成功";
+  if (snapshot.status === "partial_success" || snapshot.status === "partial") {
+    return "部分成功";
+  }
+  if (snapshot.status === "failed" || snapshot.status === "error") {
+    return "失败";
+  }
+  return "未知";
 }
 
 function formatNumber(value?: number) {
