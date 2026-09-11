@@ -7,6 +7,7 @@ import {
   Chrome,
   ClipboardList,
   CreditCard,
+  Database,
   FileText,
   Gauge,
   Headphones,
@@ -35,6 +36,7 @@ import { LicenseDevicePage } from '../pages/LicenseDevicePage'
 import { NotificationsPage } from '../pages/NotificationsPage'
 import { PlatformPage } from '../pages/PlatformPage'
 import { PlanCenterPage } from '../pages/PlanCenterPage'
+import { ProfileStatsPage } from '../pages/ProfileStatsPage'
 import { ProfilePage } from '../pages/ProfilePage'
 import { SchedulerPage } from '../pages/SchedulerPage'
 import { SessionLogPage } from '../pages/SessionLogPage'
@@ -77,6 +79,14 @@ export const platformSettingsRoute: AppRoute = {
 
 export const routes: AppRoute[] = [
   { key: 'home', label: '首页', icon: Home, element: <HomePage />, scope: 'all_platforms' },
+  {
+    key: 'profile-stats',
+    label: '账号数据',
+    icon: Database,
+    element: <ProfileStatsPage />,
+    scope: 'current_platform',
+    capability: 'profileStats',
+  },
   {
     key: 'accounts',
     label: '账号管理',

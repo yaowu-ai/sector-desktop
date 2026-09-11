@@ -24,6 +24,7 @@ const CUSTOMER_ROUTE_KEYS = new Set([
   'comments',
   'records',
   'stats',
+  'profile-stats',
   'gmail',
 ])
 

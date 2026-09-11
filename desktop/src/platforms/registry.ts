@@ -15,6 +15,7 @@ const SUPPORTED_CAPABILITIES: Record<PlatformCapability, CapabilityStatus> = {
   comments: 'supported',
   records: 'supported',
   stats: 'supported',
+  profileStats: 'supported',
   gmailSetup: 'supported',
   diagnostics: 'supported',
 }
@@ -28,6 +29,7 @@ const RESERVED_CAPABILITIES: Record<PlatformCapability, CapabilityStatus> = {
   comments: 'supported',
   records: 'supported',
   stats: 'supported',
+  profileStats: 'not_supported',
   gmailSetup: 'reserved',
   diagnostics: 'supported',
 }
@@ -35,6 +37,7 @@ const RESERVED_CAPABILITIES: Record<PlatformCapability, CapabilityStatus> = {
 const INSTAGRAM_CAPABILITIES: Record<PlatformCapability, CapabilityStatus> = {
   ...SUPPORTED_CAPABILITIES,
   targetEngagement: 'reserved',
+  profileStats: 'not_supported',
   gmailSetup: 'reserved',
 }
 
@@ -47,6 +50,7 @@ const NOT_SUPPORTED_CAPABILITIES: Record<PlatformCapability, CapabilityStatus> =
   comments: 'not_supported',
   records: 'not_supported',
   stats: 'not_supported',
+  profileStats: 'not_supported',
   gmailSetup: 'not_supported',
   diagnostics: 'not_supported',
 }
@@ -155,6 +159,11 @@ export const PLATFORM_CAPABILITIES: PlatformCapabilityDefinition[] = [
     key: 'stats',
     label: '统计报表',
     description: '养号、目标互动和全平台汇总统计',
+  },
+  {
+    key: 'profileStats',
+    label: '账号数据',
+    description: 'TikTok 养号任务结束后自动采集的账号主页和互动证据快照',
   },
   {
     key: 'gmailSetup',

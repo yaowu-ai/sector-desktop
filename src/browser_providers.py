@@ -157,6 +157,55 @@ PROVIDER_CAPABILITIES = {
 CDP_STARTUP_HINT = (
     "A Chromium debugging endpoint such as http://127.0.0.1:<port> is required."
 )
+BACKGROUND_BROWSER_ARG = "--start-minimized"
+
+
+def show_browser_window_enabled() -> bool:
+    value = os.environ.get("AM_SHOW_BROWSER_WINDOW", "1").strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
+def background_browser_enabled() -> bool:
+    if show_browser_window_enabled():
+        return False
+    # Registration is intentionally kept visible because it is an interactive
+    # workflow and is outside the task-window display preference.
+    return os.environ.get("AM_TASK_TYPE", "").strip().lower() != "tiktok_register"
+
+
+def browser_launch_args() -> list[str]:
+    return [BACKGROUND_BROWSER_ARG] if background_browser_enabled() else []
+
+
+def set_browser_process_visibility(pid: Optional[int], visible: bool) -> bool:
+    """Best-effort native window control; never makes task execution fail."""
+    if not pid or os.name != "nt":
+        return False
+
+    try:
+        import ctypes
+
+        user32 = ctypes.windll.user32
+        target_pid = int(pid)
+        show_command = 9 if visible else 0  # SW_RESTORE / SW_HIDE
+        callback_type = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+
+        @callback_type
+        def callback(hwnd, _lparam):
+            window_pid = ctypes.c_ulong()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(window_pid))
+            if window_pid.value == target_pid:
+                user32.ShowWindow(hwnd, show_command)
+            return True
+
+        user32.EnumWindows(callback, 0)
+        return True
+    except Exception:
+        return False
+
+
+def set_browser_session_visibility(session: BrowserSession, visible: bool) -> bool:
+    return set_browser_process_visibility(session.process_id, visible)
 
 
 class BitBrowserProvider:
@@ -199,14 +248,32 @@ class BitBrowserProvider:
         profile_id = bitbrowser_profile_id(account)
         client = BitBrowserClient(bitbrowser_api_url(config))
         already_open = client.is_open(profile_id)
-        cdp_endpoint = client.open_browser(profile_id)
-        return BrowserSession(
+        launch_args = browser_launch_args()
+        try:
+            cdp_endpoint = client.open_browser(profile_id, args=launch_args)
+        except Exception:
+            if not launch_args:
+                raise
+            # A provider/version may reject Chromium launch args. The task must
+            # continue with a visible browser instead of failing on this option.
+            cdp_endpoint = client.open_browser(profile_id)
+        process_id = None
+        try:
+            process_id = client.browser_pid(profile_id)
+        except Exception:
+            # PID lookup is only needed for optional window restoration.
+            pass
+        session = BrowserSession(
             provider=self.name,
             account_id=account_id,
             profile_id=profile_id,
             cdp_endpoint=cdp_endpoint,
             already_open=already_open,
+            process_id=process_id,
         )
+        if background_browser_enabled():
+            set_browser_session_visibility(session, visible=False)
+        return session
 
     def close_session(self, session: BrowserSession, config: Mapping[str, Any]) -> None:
         if session.profile_id:
@@ -296,6 +363,8 @@ class BuiltinChromiumProvider:
             "--disable-popup-blocking",
             "about:blank",
         ]
+        if background_browser_enabled():
+            command.insert(-1, BACKGROUND_BROWSER_ARG)
         proxy = builtin_proxy_config(account)
         if proxy:
             parsed_proxy = parse_builtin_proxy(proxy)
@@ -323,6 +392,8 @@ class BuiltinChromiumProvider:
             raise RuntimeError(f"failed to start builtin_chromium: {startup_context}; error={exc}") from exc
 
         record_builtin_session(account, process.pid, cdp_endpoint, user_data, executable, cdp_version)
+        if background_browser_enabled():
+            set_browser_process_visibility(process.pid, visible=False)
         return BrowserSession(
             provider=self.name,
             account_id=account_id,

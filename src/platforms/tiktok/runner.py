@@ -4,8 +4,10 @@ import time
 
 from auth_adapters import LoginState, auth_adapter_for_platform
 from browser_providers import (
+    background_browser_enabled,
     bitbrowser_profile_id,
     provider_for_account,
+    set_browser_session_visibility,
     test_cdp_endpoint,
 )
 from core.runtime import (
@@ -15,10 +17,12 @@ from core.runtime import (
     emit_auth_event,
     log_action,
     redact_runtime_text,
+    save_profile_snapshot,
     session_log,
     wait_for_auth_intervention_action,
 )
 from patchright_runtime import start_sync_playwright
+from profile_stats import collect_profile_snapshot
 from platforms.base import PlatformRunner
 from platforms.registration.base import RegistrationStatus
 from platforms.registration.registry import adapter_for_platform
@@ -167,7 +171,7 @@ def detect_login_state(page):
     return result.logged_in, result.summary()
 
 
-def ensure_tiktok_authenticated(page, account, config, conn):
+def ensure_tiktok_authenticated(page, account, config, conn, session=None):
     account_id = account["id"]
     platform = account.get("platform", "tiktok")
     adapter = auth_adapter_for_platform(platform)
@@ -221,8 +225,12 @@ def ensure_tiktok_authenticated(page, account, config, conn):
             f"{account_id} | AUTH WAIT | state={auth_result.state.value}; manual intervention required",
             platform,
         )
+        if session is not None and background_browser_enabled():
+            set_browser_session_visibility(session, visible=True)
         action = wait_for_auth_intervention_action(account_id)
         if action == "continue":
+            if session is not None and background_browser_enabled():
+                set_browser_session_visibility(session, visible=False)
             session_log(f"{account_id} | AUTH CONTINUE | rechecking login state", platform)
             continue
         if action == "skip":
@@ -258,6 +266,11 @@ def run_session(account, config, conn):
         "duration_target_min": round(duration, 1),
         "duration_actual_min": 0.0,
         "error": None,
+        "profile_collection_status": None,
+        "profile_collection_error": None,
+        "profile_snapshot": None,
+        "profile_snapshot_id": None,
+        "profile_snapshot_save_error": None,
     }
 
     provider = provider_for_account(account, config)
@@ -290,8 +303,10 @@ def run_session(account, config, conn):
             browser = playwright.chromium.connect_over_cdp(cdp_url)
             ctx = browser.contexts[0]
             page = choose_tiktok_page(ctx)
+            if background_browser_enabled():
+                set_browser_session_visibility(session, visible=False)
 
-            auth_result = ensure_tiktok_authenticated(page, account, config, conn)
+            auth_result = ensure_tiktok_authenticated(page, account, config, conn, session=session)
             login_detail = auth_result.summary()
             if auth_result.state != LoginState.LOGGED_IN:
                 summary["status"] = "skip"
@@ -302,6 +317,8 @@ def run_session(account, config, conn):
                 )
                 browser.close()
                 return summary
+            if background_browser_enabled():
+                set_browser_session_visibility(session, visible=False)
 
             if task_type in {"fyp", "full"}:
                 fyp = run_tiktok_fyp(page, account, plan, conn)
@@ -316,6 +333,7 @@ def run_session(account, config, conn):
                 summary["target_follows"] = target["follows"]
 
             summary["status"] = "ok"
+            collect_profile_after_task(browser, account, summary, conn)
 
             browser.close()
         finally:
@@ -348,6 +366,65 @@ def run_session(account, config, conn):
             session_log(f"{account_id} | CLOSE SKIP | AM_AUTO_CLOSE_PROFILE=0", platform)
 
     return summary
+
+
+def collect_profile_after_task(browser, account, summary, conn=None):
+    """Collect profile data after successful TikTok work without owning cleanup."""
+    account_id = account["id"]
+    platform = account.get("platform", "tiktok")
+    session_log(f"{account_id} | PROFILE COLLECT | start", platform)
+    try:
+        snapshot = collect_profile_snapshot(browser, account)
+    except Exception as exc:
+        snapshot = {
+            "account_id": account_id,
+            "platform": platform,
+            "status": "failed",
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+    status = snapshot.get("status") or "unknown"
+    error = snapshot.get("error")
+    summary["profile_snapshot"] = snapshot
+    summary["profile_collection_status"] = status
+    summary["profile_collection_error"] = error
+    if conn is not None:
+        try:
+            summary["profile_snapshot_id"] = save_profile_snapshot(
+                conn,
+                snapshot,
+                task_run_id=summary.get("task_run_id"),
+            )
+            summary["profile_snapshot_save_error"] = None
+        except Exception as exc:
+            summary["profile_snapshot_save_error"] = f"{type(exc).__name__}: {exc}"
+            session_log(
+                f"{account_id} | PROFILE COLLECT SAVE | failed: "
+                f"{redact_runtime_text(summary['profile_snapshot_save_error'])}",
+                platform,
+            )
+
+    if status == "success":
+        session_log(profile_collection_success_detail(account_id, snapshot), platform)
+    else:
+        detail = redact_runtime_text(error or "unknown error")
+        session_log(f"{account_id} | PROFILE COLLECT | {status}: {detail}", platform)
+    return snapshot
+
+
+def profile_collection_success_detail(account_id, snapshot):
+    handle = snapshot.get("handle") or "unknown"
+    following = snapshot.get("following")
+    followers = snapshot.get("followers")
+    likes = snapshot.get("likes")
+    liked = snapshot.get("liked")
+    activity = snapshot.get("activity") or {}
+    evidence = activity.get("comment_publish_evidence", "unknown")
+    return (
+        f"{account_id} | PROFILE COLLECT | success handle=@{handle} "
+        f"following={following} followers={followers} likes={likes} "
+        f"liked={liked} comment_evidence={evidence}"
+    )
 
 
 def run_tiktok_registration(account, config, conn):

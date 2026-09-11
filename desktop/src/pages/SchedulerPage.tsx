@@ -965,7 +965,11 @@ function accountColumns(
                 </Tag>
               ))
             : "-"}
-          <Button size="small" onClick={() => onEditActiveHours(row)}>
+          <Button
+            size="small"
+            className="desktop-edit-button"
+            onClick={() => onEditActiveHours(row)}
+          >
             编辑
           </Button>
         </Space>

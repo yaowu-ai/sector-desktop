@@ -62,19 +62,19 @@ data/                     运行时生成（已 gitignore）
 ```yaml
 defaults:
   daily_actions:
-    fyp_browse_minutes: [2, 5]     # 单次 FYP 浏览时长范围（分钟）
-    like_probability: 0.35         # 每个视频点赞概率
-    follows_per_session: [0, 1]    # 每 session 关注数上限
+    fyp_browse_minutes: [2, 5] # 单次 FYP 浏览时长范围（分钟）
+    like_probability: 0.35 # 每个视频点赞概率
+    follows_per_session: [0, 1] # 每 session 关注数上限
     comment:
       enabled: true
-      comments_per_session: [1, 2]   # 每 session 评论数上限（最多 1~2 条）
-      min_video_comments: 1000       # 仅评论“评论数 > 此值”的视频
-      probability: 0.25              # 命中候选视频后，单视频尝试评论的概率
+      comments_per_session: [1, 2] # 每 session 评论数上限（最多 1~2 条）
+      min_video_comments: 1000 # 仅评论“评论数 > 此值”的视频
+      probability: 0.25 # 命中候选视频后，单视频尝试评论的概率
   active_hours: [[9, 12], [19, 23]]
   timezone: America/New_York
 
 scheduler:
-  fires_per_day: 3                 # 每天在 active_hours 内随机触发次数
+  fires_per_day: 3 # 每天在 active_hours 内随机触发次数
 
 accounts:
   - id: tiktok_1
@@ -146,6 +146,66 @@ python test_comment.py                  # 找 >1000 评论的视频并试发
 python test_comment.py --min 100 --no-post   # 调低门槛、只定位不发评论
 ```
 
+### 读取 TikTok 主页统计
+
+`src/profile_stats.py` 读取主页的 Following（关注）、Followers（粉丝）、Likes（获赞），
+与 `stats.py` 的本地动作日志统计不同。沿用项目的 Patchright + CDP，输出 JSON。
+
+```bash
+# 在项目根目录运行；连接已提供 CDP 的 Chrome 或比特浏览器
+.venv/bin/python src/profile_stats.py --cdp http://127.0.0.1:9222
+
+# 或按完整窗口名称复用比特浏览器 API（窗口未打开时会打开）
+.venv/bin/python src/profile_stats.py --browser-name tiktok_2
+
+# 保存 JSON；诊断信息输出到 stderr，失败退出码为 1
+.venv/bin/python src/profile_stats.py --cdp http://127.0.0.1:9222 > profile_stats.json
+```
+
+默认统计所连接浏览器中**当前登录的 TikTok 账号**：优先从已有 TikTok 页面侧栏
+Profile（个人资料）入口识别用户名，再在同一会话新建临时标签直接读取账号主页并核对登录身份，
+最后关闭临时标签。只有已有页面无法识别账号时才访问 TikTok 首页；首页被拒绝时，
+可先手动打开已登录账号主页，再运行脚本。不会用当前浏览的主页 URL 猜测登录账号。
+即使现有标签正在浏览别人的主页，也不会将对方当成登录账号。未登录、无法识别、
+多个浏览器会话或读取期间账号变化时会报错，不会回退到固定账号。
+如需统计指定账号，可显式增加 `--handle mabilqadri`；该模式也使用临时标签。
+默认等待 30 秒，可用 `--timeout 60` 调整。用户已有的标签和浏览器保持打开。
+主页需显示英文统计；新建标签使用 `lang=en-GB`，已有标签请手动切换为英语。
+没有读到完整统计会报错，不会把加载失败当成 0。显示为 `1.2K` 等缩写时，
+数值换算为 1200，同时在 `raw` 保留原文，在 `approximate_fields` 标记该字段，不能视为精确人数。
+
+同时统计 **Liked 页签中已点赞的视频数量**（`liked`），与主页获赞数 `likes` 不同。
+脚本点击 Liked，滚动加载，并观察页面自身发出的列表响应，按视频 ID 去重。
+只有从首批开始连续读到 `hasMore=false` 时才返回 `liked` 总数及 `liked_complete=true`。
+未读完、超时、私密列表或请求失败时，`liked` 为 `null`，`liked_loaded` 为已读数量，
+`liked_status` 说明状态；其他主页统计仍返回。可增加 `--timeout` 等待较长列表。
+统计范围是 TikTok 当前可返回的点赞视频，不含已删除或不可访问的历史内容。
+
+默认当前登录账号模式还会打开侧栏 **Activity → All activity**，检查通知正文中的
+`liked your comment`，返回 `activity`：
+
+- `has_liked_your_comment`：已扫描消息中是否发现评论获赞；读取失败或未加载到消息时为 `null`。
+- `comment_like_notifications_count` / `matches`：匹配的通知条数和消息文本。
+- `notifications_scanned`：已扫描的去重消息数；相同完整文本的通知合并，多人点赞的合并通知算一条。
+- `status`：`loaded_list_stable` 表示滚动后列表暂时稳定；`timeout` 或 `activity_ui_unavailable` 表示读取受限。
+- `scope=loaded_notifications`：统计仅覆盖本次加载的消息，不宣称覆盖全部历史通知。
+- `comment_publish_evidence`：发现时为 `observed`，否则为 `not_confirmed`，**没有获赞通知不等于评论发送失败**。
+
+这只能说明某些评论曾发布并获赞，不能确认每条自动评论，也不能证明评论当前仍可见。
+脚本不发送消息；打开 Activity 可能由 TikTok 自动标记通知已读。
+显式传入 `--handle` 时不检查 Activity（返回 `skipped_explicit_handle`），避免将登录者的消息算到其他账号。
+正例测试夹具位于 `src/fixtures/activity_comment_likes.html`，使用截图文案构造，不是真实账号消息。
+
+普通 Chrome 已登录并不代表开启了 CDP。`--cdp` 需要浏览器实际提供的调试地址，
+不会自动连接任意已打开的 Chrome，也不会复制登录凭据或重启你的浏览器。
+比特浏览器用户可以直接使用 `--browser-name`。
+
+例如主页显示 58 / 33 / 175 时，JSON 包含：
+
+```json
+{ "following": 58, "followers": 33, "likes": 175 }
+```
+
 > 评论池在 `config/comments.txt`，每行一条。养号阶段仅评论“评论数 > `min_video_comments`”
 > 的高流量视频，每 session 最多 1~2 条，降低被判垃圾评论的风险。
 
@@ -157,15 +217,15 @@ python test_comment.py --min 100 --no-post   # 调低门槛、只定位不发评
 ```yaml
 target_accounts:
   enabled: true
-  handles: [brand_account_1, brand_account_2, brand_account_3]   # 目标官方号
-  participants: [tiktok_example_6, ..., tiktok_example_15]   # 执行号（10 个）
-  first_run_latest_n: 1       # 无记录时只处理最新 1 条
-  max_videos_per_run: 3       # 单次单目标最多处理几条新视频
+  handles: [brand_account_1, brand_account_2, brand_account_3] # 目标官方号
+  participants: [tiktok_example_6, ..., tiktok_example_15] # 执行号（10 个）
+  first_run_latest_n: 1 # 无记录时只处理最新 1 条
+  max_videos_per_run: 3 # 单次单目标最多处理几条新视频
   like_probability: 0.9
-  comment_probability: 0.5    # 不强制全员评论，打散抱团
+  comment_probability: 0.5 # 不强制全员评论，打散抱团
   comments_file: comments_brand.txt
-  follow: true                # 关注目标号（每号对每个目标只关一次）
-  follow_probability: 0.5     # 遇到未关注的目标按此概率关注（分散到不同天）
+  follow: true # 关注目标号（每号对每个目标只关一次）
+  follow_probability: 0.5 # 遇到未关注的目标按此概率关注（分散到不同天）
 ```
 
 **关注目标号**：参与号还会关注这几个品牌官方号——每号对每个目标**只关一次**
@@ -204,8 +264,8 @@ python scheduler.py
 - `ip_group`：同一个 IP 的两个号填相同字母（A~J），**仅用于启动校验**——若同 IP 的
   两个号被排进重叠的 `active_hours`，scheduler 启动时会告警。
 - `active_hours`：决定账号属于哪个班次。
-> 默认 `accounts.yaml` 已是 20 号 / 2 班次模板，仅 `tiktok_1` 启用；填好各号的
-> `bitbrowser_profile_id` 并把 `enabled` 改 `true` 即可逐个上线。
+  > 默认 `accounts.yaml` 已是 20 号 / 2 班次模板，仅 `tiktok_1` 启用；填好各号的
+  > `bitbrowser_profile_id` 并把 `enabled` 改 `true` 即可逐个上线。
 
 ## 通知（可选）
 

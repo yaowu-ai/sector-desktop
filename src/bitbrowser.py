@@ -6,10 +6,13 @@ class BitBrowserClient:
     def __init__(self, api_url="http://127.0.0.1:54345"):
         self.api_url = api_url.rstrip("/")
 
-    def open_browser(self, profile_id, timeout=90):
+    def open_browser(self, profile_id, timeout=90, args=None):
+        payload = {"id": profile_id}
+        if args:
+            payload["args"] = list(args)
         resp = requests.post(
             f"{self.api_url}/browser/open",
-            json={"id": profile_id},
+            json=payload,
             timeout=timeout,
         )
         resp.raise_for_status()
@@ -28,6 +31,22 @@ class BitBrowserClient:
         if not cdp.startswith(("http://", "https://", "ws://", "wss://")):
             cdp = f"http://{cdp}"
         return cdp
+
+    def browser_pid(self, profile_id):
+        """Return the live browser PID when BitBrowser exposes it."""
+        resp = requests.post(
+            f"{self.api_url}/browser/pids",
+            json={"ids": [profile_id]},
+            timeout=5,
+        )
+        resp.raise_for_status()
+        value = resp.json().get("data", {}).get(profile_id)
+        if isinstance(value, dict):
+            value = value.get("pid") or value.get("processId")
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
 
     def check_proxy(self, proxy_type, host, port, username="", password="",
                     check_exists=True, timeout=30):

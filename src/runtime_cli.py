@@ -14,7 +14,15 @@ import yaml
 
 RUNTIME_VERSION = "0.1.0"
 SCHEMA_VERSION = 1
-SUPPORTED_COMMANDS = ["run", "scheduler", "gmail", "diagnostic", "ai-comment", "version"]
+SUPPORTED_COMMANDS = [
+    "run",
+    "scheduler",
+    "gmail",
+    "diagnostic",
+    "ai-comment",
+    "profile-stats",
+    "version",
+]
 
 
 def main(argv=None):
@@ -55,6 +63,14 @@ def build_parser():
 
     ai_comment_parser = subparsers.add_parser("ai-comment", help="Generate or test an AI comment")
     ai_comment_parser.set_defaults(func=cmd_ai_comment)
+
+    profile_stats_parser = subparsers.add_parser(
+        "profile-stats",
+        help="Check TikTok profile collector availability",
+    )
+    add_config_and_data_args(profile_stats_parser)
+    profile_stats_parser.add_argument("--json", action="store_true", help="Print JSON")
+    profile_stats_parser.set_defaults(func=cmd_profile_stats)
 
     version_parser = subparsers.add_parser("version", help="Print runtime version")
     version_parser.add_argument("--json", action="store_true", help="Print JSON")
@@ -131,6 +147,18 @@ def cmd_ai_comment(_args):
     result["model"] = str(config.get("model") or "")
     print_json(result)
     return 0
+
+
+def cmd_profile_stats(args):
+    apply_runtime_env(args)
+    payload = build_profile_stats_payload()
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=True, indent=2))
+    else:
+        print(f"profile-stats: {payload['status']}")
+        for check in payload["checks"]:
+            print(f"{check['name']}: {check['status']} - {check['detail']}")
+    return 0 if payload["status"] == "ok" else 1
 
 
 def print_json(payload):
@@ -218,6 +246,12 @@ def build_diagnostic_payload(config_path=None):
         patchright_check["status"] == "ok",
         patchright_check["detail"],
     )
+    profile_collector = check_profile_collector()
+    add_check(
+        "profileCollector",
+        profile_collector["status"] == "ok",
+        profile_collector["detail"],
+    )
 
     account_count = 0
     enabled_accounts = 0
@@ -288,6 +322,58 @@ def check_patchright_driver():
         return patchright_driver_check()
     except Exception as exc:
         return {
+            "status": "error",
+            "detail": f"{type(exc).__name__}: {exc}",
+        }
+
+
+def build_profile_stats_payload():
+    check = check_profile_collector()
+    return {
+        "status": check["status"],
+        "checkedAt": datetime.now(timezone.utc).isoformat(),
+        "version": version_payload(),
+        "collector": {
+            "module": "profile_stats",
+            "entry": "collect_profile_snapshot",
+        },
+        "checks": [check],
+    }
+
+
+def check_profile_collector():
+    try:
+        import profile_activity
+        import profile_stats
+
+        parsed = profile_stats.parse_stats("1 Following 2 Followers 3 Likes")
+        activity = profile_activity.activity_result(
+            {
+                "one": {
+                    "text": "liked your comment: Hi",
+                    "paragraphs": ["liked your comment: Hi"],
+                }
+            },
+            "loaded_list_stable",
+        )
+        required = [
+            getattr(profile_stats, "collect_profile_snapshot", None),
+            getattr(profile_stats, "collect", None),
+            getattr(profile_stats, "read_liked", None),
+            getattr(profile_activity, "read_activity", None),
+        ]
+        if not all(callable(item) for item in required):
+            raise RuntimeError("collector entry points are incomplete")
+        if parsed.get("followers") != 2 or not activity.get("has_liked_your_comment"):
+            raise RuntimeError("collector parser smoke test failed")
+        return {
+            "name": "profileCollector",
+            "status": "ok",
+            "detail": "profile_stats/profile_activity imports and parser smoke checks passed",
+        }
+    except Exception as exc:
+        return {
+            "name": "profileCollector",
             "status": "error",
             "detail": f"{type(exc).__name__}: {exc}",
         }

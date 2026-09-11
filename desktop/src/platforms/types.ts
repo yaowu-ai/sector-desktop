@@ -11,6 +11,7 @@ export type PlatformCapability =
   | 'comments'
   | 'records'
   | 'stats'
+  | 'profileStats'
   | 'gmailSetup'
   | 'diagnostics'
 

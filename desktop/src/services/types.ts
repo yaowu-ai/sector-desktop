@@ -385,6 +385,67 @@ export interface FypStatsSummary {
   total: FypStatsTotal
 }
 
+export interface ProfileStatsFilter {
+  platform?: Platform | 'all'
+  accountId?: string
+  taskRunId?: string
+  status?: string
+  startTs?: string
+  endTs?: string
+  limit?: number
+}
+
+export interface ProfileStatsDetailRequest {
+  id?: number
+  taskRunId?: string
+}
+
+export interface ProfileStatsSnapshot {
+  id: number
+  platform: Platform
+  accountId: string
+  taskRunId?: string
+  handle?: string
+  following?: number
+  followers?: number
+  likes?: number
+  rawFollowing?: string
+  rawFollowers?: string
+  rawLikes?: string
+  approximateFieldsJson?: string
+  liked?: number
+  likedLoaded?: number
+  likedComplete?: boolean
+  likedStatus?: string
+  activityHasLikedYourComment?: boolean
+  activityCommentLikeNotificationsCount?: number
+  activityNotificationsScanned?: number
+  activityStatus?: string
+  activityScope?: string
+  activityComplete?: boolean
+  commentPublishEvidence?: string
+  activityMatchesJson?: string
+  status: string
+  error?: string
+  resultJson?: string
+  collectedAt: string
+  createdAt: string
+}
+
+export interface ProfileStatsSummary {
+  accountCount: number
+  collectedAccountCount: number
+  recent24hCount: number
+  successCount: number
+  partialSuccessCount: number
+  failedCount: number
+  commentEvidenceAccountCount: number
+  totalFollowing: number
+  totalFollowers: number
+  totalLikes: number
+  totalLiked: number
+}
+
 export interface ResetTargetWatermarkRequest {
   accountId?: string
   handle?: string
@@ -786,6 +847,7 @@ export interface SystemSettingsPayload {
   runtimePath?: string
   runtimeManifestPath?: string
   autoCloseProfile: boolean
+  showBrowserWindow?: boolean
   logPollIntervalSeconds: number
 }
 
@@ -823,6 +885,7 @@ export interface SqliteStatus {
   schedulerJobRuns: boolean
   targetEngagements: boolean
   targetFollows: boolean
+  profileStatsSnapshots: boolean
 }
 
 export interface SchedulerSettings {
@@ -852,6 +915,10 @@ export interface ConfigSnapshot {
   aiComment: AiCommentSettings
   notify?: NotifySettings
   validation: ValidationResult
+}
+
+export interface BrowserWindowSettings {
+  showBrowserWindow: boolean
 }
 
 export interface ConfigPayload {

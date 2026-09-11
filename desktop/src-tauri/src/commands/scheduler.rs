@@ -194,6 +194,10 @@ pub fn start_scheduler(state: State<'_, AppState>) -> Result<SchedulerStartResul
             "AM_AUTO_CLOSE_PROFILE",
             if paths.auto_close_profile { "1" } else { "0" },
         )
+        .env(
+            "AM_SHOW_BROWSER_WINDOW",
+            if paths.show_browser_window { "1" } else { "0" },
+        )
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     hide_console_window(&mut command_builder);

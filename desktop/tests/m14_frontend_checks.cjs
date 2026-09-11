@@ -71,6 +71,12 @@ assertIncludes(taskPage, "taskType: kind === 'fyp' ? 'fyp' : 'target_engagement'
 const targetPage = read('desktop/src/pages/TargetEngagementPage.tsx')
 assertIncludes(targetPage, "taskType: 'target_engagement'")
 
+const browserPage = read('desktop/src/pages/BrowserProfilePage.tsx')
+assertIncludes(browserPage, 'loadBrowserWindowSettings', 'browser page should load task window preference')
+assertIncludes(browserPage, 'saveBrowserWindowSettings', 'browser page should save task window preference')
+assertIncludes(browserPage, '任务执行时显示浏览器窗口', 'browser page should expose the task window switch')
+assertIncludes(browserPage, '切换不会影响正在运行的任务', 'browser window switch should explain runtime safety')
+
 const runner = read('src/platforms/tiktok/runner.py')
 const registerBranch = runner.indexOf('if task_type == "tiktok_register":')
 const fypBranch = runner.indexOf('run_tiktok_fyp(page, account, plan, conn)')
