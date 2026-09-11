@@ -13,6 +13,7 @@ import {
   Headphones,
   Home,
   Info,
+  LayoutDashboard,
   Mail,
   MessageSquareText,
   Bell,
@@ -81,8 +82,8 @@ export const routes: AppRoute[] = [
   { key: 'home', label: '首页', icon: Home, element: <HomePage />, scope: 'all_platforms' },
   {
     key: 'profile-stats',
-    label: '账号数据',
-    icon: Database,
+    label: '成果看板',
+    icon: LayoutDashboard,
     element: <ProfileStatsPage />,
     scope: 'current_platform',
     capability: 'profileStats',
