@@ -1,4 +1,4 @@
-import {
+﻿import {
   Alert,
   Button,
   Card,
@@ -35,11 +35,11 @@ import {
   UserPlus,
 } from "lucide-react";
 
-import { confirmDanger } from "../components/ConfirmDanger";
-import { AccountBrowserEnvironment } from "../components/AccountBrowserEnvironment";
-import { PageHeader } from "../components/PageHeader";
-import { ProcessOutputPanel } from "../components/ProcessOutputPanel";
-import { StatusTag } from "../components/StatusTag";
+import { confirmDanger } from "../../../components/ConfirmDanger";
+import { AccountBrowserEnvironment } from "../../../components/AccountBrowserEnvironment";
+import { PageHeader } from "../../../components/PageHeader";
+import { ProcessOutputPanel } from "../../../components/ProcessOutputPanel";
+import { StatusTag } from "../../../components/StatusTag";
 import {
   loadConfig,
   queryAccountLogs,
@@ -52,17 +52,16 @@ import {
   checkBitbrowserApi,
   openBitbrowserDownloadPage,
   getCurrentRunStatus,
-  runTikTokRegister,
-  runTikTokRegisterBatch,
-} from "../services/api";
-import { usePlatformContext } from "../app/PlatformContext";
-import { useDesktopAuth } from "../app/DesktopAuthContext";
-import { readDesktopLicenseLimits } from "../services/desktopApi";
+} from "../../../services/api";
+import { runTikTokRegister, runTikTokRegisterBatch } from "../services";
+import { usePlatformContext } from "../../../app/PlatformContext";
+import { useDesktopAuth } from "../../../app/DesktopAuthContext";
+import { readDesktopLicenseLimits } from "../../../services/desktopApi";
 import {
   getPlatformLabel,
   isExecutablePlatform,
   PLATFORMS,
-} from "../services/platforms";
+} from "../..";
 import type {
   Account,
   AccountLastStatus,
@@ -74,7 +73,7 @@ import type {
   LoginCredentialStatus,
   BrowserProfile,
   ProcessStatus,
-} from "../services/types";
+} from "../../../services/types";
 
 interface AccountFormValues {
   id: string;
@@ -677,10 +676,10 @@ export function AccountPage() {
             placement="top"
           >
             <span>
-              <Button
-                size="small"
-                aria-label="自动登录"
-                icon={<UserPlus size={15} />}
+                <Button
+                  size="small"
+                  aria-label="注册"
+                  icon={<UserPlus size={15} />}
                 onClick={() => void registerAccount(account)}
                 loading={registeringAccountId === account.id}
                 disabled={Boolean(
@@ -796,6 +795,7 @@ export function AccountPage() {
                   >
                     <span>
                       <Button
+                        aria-label="批量注册"
                         icon={<UserPlus size={15} />}
                         disabled={Boolean(
                           batchRegisterDisabledReason(
@@ -1967,3 +1967,4 @@ function statusColor(status: string) {
   }
   return "default";
 }
+

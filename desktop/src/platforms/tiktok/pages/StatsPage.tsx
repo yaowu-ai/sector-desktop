@@ -1,4 +1,4 @@
-import {
+﻿import {
   Alert,
   Button,
   Card,
@@ -27,16 +27,16 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import { useDesktopAuth } from "../app/DesktopAuthContext";
-import { PageHeader } from "../components/PageHeader";
-import { PlatformScopeFilter } from "../components/PlatformScopeFilter";
+import { usePlatformContext } from "../../../app/PlatformContext";
+import { useDesktopAuth } from "../../../app/DesktopAuthContext";
+import { PageHeader } from "../../../components/PageHeader";
 import {
   getSqliteStatus,
   loadConfig,
   queryFypStats,
   queryTargetStats,
-} from "../services/api";
-import { readDesktopLicenseLimits } from "../services/desktopApi";
+} from "../../../services/api";
+import { readDesktopLicenseLimits } from "../../../services/desktopApi";
 import type {
   Account,
   FypAccountStats,
@@ -48,15 +48,14 @@ import type {
   TargetAccountStats,
   TargetHandleStats,
   TargetStatsSummary,
-} from "../services/types";
-import type { PlatformFilterValue } from "../app/pageScope";
+} from "../../../services/types";
+import { getPlatformLabel } from "../..";
 
 const { RangePicker } = DatePicker;
 
 type TimeRange = [Dayjs, Dayjs] | null;
 
 interface FilterState {
-  platform: PlatformFilterValue;
   accountId?: string;
   taskType?: "fyp" | "target";
   scope: StatsScope;
@@ -65,7 +64,6 @@ interface FilterState {
 }
 
 const DEFAULT_FILTERS: FilterState = {
-  platform: "all",
   scope: "all",
   days: 7,
   timeRange: null,
@@ -95,6 +93,7 @@ const EMPTY_TARGET_STATS: TargetStatsSummary = {
 };
 
 export function StatsPage() {
+  const { currentPlatform, currentPlatformDefinition } = usePlatformContext();
   const { license } = useDesktopAuth();
   const licenseLimits = readDesktopLicenseLimits(license);
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
@@ -112,20 +111,21 @@ export function StatsPage() {
   const accountOptions = useMemo(
     () =>
       accounts
-        .filter((account) => accountMatchesPlatform(account, filters.platform))
+        .filter((account) => account.platform === currentPlatform)
         .map((account) => ({
           value: account.id,
           label: account.id,
         })),
-    [accounts, filters.platform],
+    [accounts, currentPlatform],
   );
   const displayedFypStats = useMemo(
-    () => filterFypStats(fypStats, filters, accountPlatformMap),
-    [accountPlatformMap, filters, fypStats],
+    () => filterFypStats(fypStats, filters, accountPlatformMap, currentPlatform),
+    [accountPlatformMap, currentPlatform, filters, fypStats],
   );
   const displayedTargetStats = useMemo(
-    () => filterTargetStats(targetStats, filters, accountPlatformMap),
-    [accountPlatformMap, filters, targetStats],
+    () =>
+      filterTargetStats(targetStats, filters, accountPlatformMap, currentPlatform),
+    [accountPlatformMap, currentPlatform, filters, targetStats],
   );
   const targetTotal = useMemo(
     () => summarizeTargetAccounts(displayedTargetStats.byAccount),
@@ -133,7 +133,7 @@ export function StatsPage() {
   );
 
   const refresh = async (sourceFilters = filters) => {
-    const request = toScopeRequest(sourceFilters);
+    const request = toScopeRequest(sourceFilters, currentPlatform);
     if (
       sourceFilters.scope === "custom" &&
       (!request.startTs || !request.endTs)
@@ -151,7 +151,9 @@ export function StatsPage() {
           queryFypStats(request),
           queryTargetStats(request),
         ]);
-      setAccounts(snapshot.accounts);
+      setAccounts(
+        snapshot.accounts.filter((account) => account.platform === currentPlatform),
+      );
       setSqliteStatus(sqlite);
       setFypStats(nextFypStats);
       setTargetStats(nextTargetStats);
@@ -164,7 +166,7 @@ export function StatsPage() {
 
   useEffect(() => {
     void refresh(DEFAULT_FILTERS);
-  }, []);
+  }, [currentPlatform]);
 
   const updateFilter = <K extends keyof FilterState>(
     key: K,
@@ -173,7 +175,6 @@ export function StatsPage() {
     setFilters((current) => ({
       ...current,
       [key]: value,
-      ...(key === "platform" ? { accountId: undefined } : {}),
     }));
   };
 
@@ -197,7 +198,7 @@ export function StatsPage() {
     <>
       <PageHeader
         title="统计报表"
-        description="汇总普通养号和目标号互动统计。"
+        description={`汇总 ${currentPlatformDefinition.localeName} 的普通养号和目标号互动统计。`}
         extra={
           <Space>
             <Button
@@ -245,10 +246,8 @@ export function StatsPage() {
                     updateFilter("scope", value as StatsScope)
                   }
                 />
-                <PlatformScopeFilter
-                  value={filters.platform}
-                  onChange={(value) => updateFilter("platform", value)}
-                />
+                <Typography.Text type="secondary">平台</Typography.Text>
+                <Tag color="blue">{getPlatformLabel(currentPlatform)}</Tag>
                 <Select
                   allowClear
                   showSearch
@@ -541,11 +540,14 @@ const targetHandleColumns: ColumnsType<TargetHandleStats> = [
   },
 ];
 
-function toScopeRequest(filters: FilterState): StatsScopeRequest {
+function toScopeRequest(
+  filters: FilterState,
+  platform: Platform,
+): StatsScopeRequest {
   if (filters.scope === "recent_days") {
     return {
       scope: filters.scope,
-      platform: filters.platform,
+      platform,
       accountId: filters.accountId,
       days: Math.trunc(filters.days || 7),
     };
@@ -554,7 +556,7 @@ function toScopeRequest(filters: FilterState): StatsScopeRequest {
     const [startTs, endTs] = toTimeBounds(filters.timeRange);
     return {
       scope: filters.scope,
-      platform: filters.platform,
+      platform,
       accountId: filters.accountId,
       startTs,
       endTs,
@@ -562,7 +564,7 @@ function toScopeRequest(filters: FilterState): StatsScopeRequest {
   }
   return {
     scope: filters.scope,
-    platform: filters.platform,
+    platform,
     accountId: filters.accountId,
   };
 }
@@ -593,6 +595,7 @@ function filterFypStats(
   stats: FypStatsSummary,
   filters: FilterState,
   accountPlatformMap: Map<string, Platform>,
+  platform: Platform,
 ): FypStatsSummary {
   if (filters.taskType === "target") {
     return { ...EMPTY_FYP_STATS, scope: stats.scope, label: stats.label };
@@ -602,7 +605,7 @@ function filterFypStats(
     (row) =>
       accountIdMatchesPlatform(
         row.accountId,
-        filters.platform,
+        platform,
         accountPlatformMap,
       ) &&
       (!filters.accountId || row.accountId === filters.accountId),
@@ -632,6 +635,7 @@ function filterTargetStats(
   stats: TargetStatsSummary,
   filters: FilterState,
   accountPlatformMap: Map<string, Platform>,
+  platform: Platform,
 ): TargetStatsSummary {
   if (filters.taskType === "fyp") {
     return { ...EMPTY_TARGET_STATS, scope: stats.scope, label: stats.label };
@@ -641,7 +645,7 @@ function filterTargetStats(
     (row) =>
       accountIdMatchesPlatform(
         row.accountId,
-        filters.platform,
+        platform,
         accountPlatformMap,
       ) &&
       (!filters.accountId || row.accountId === filters.accountId),
@@ -663,22 +667,12 @@ function filterTargetStats(
   };
 }
 
-function accountMatchesPlatform(
-  account: { platform: Platform },
-  platformFilter: PlatformFilterValue,
-) {
-  return platformFilter === "all" || account.platform === platformFilter;
-}
-
 function accountIdMatchesPlatform(
   accountId: string,
-  platformFilter: PlatformFilterValue,
+  currentPlatform: Platform,
   accountPlatformMap: Map<string, Platform>,
 ) {
-  if (platformFilter === "all") {
-    return true;
-  }
-  return inferPlatform(accountId, accountPlatformMap) === platformFilter;
+  return inferPlatform(accountId, accountPlatformMap) === currentPlatform;
 }
 
 function inferPlatform(
@@ -822,3 +816,4 @@ function timestampForFile() {
 function formatError(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
+

@@ -1,5 +1,5 @@
 import type { AppRoute } from './routes'
-import type { PlatformDefinition } from '../platforms/types'
+import type { PlatformDefinition } from '../platforms'
 
 export const DESKTOP_USER_ROLES = {
   technician: 1,

@@ -1,4 +1,4 @@
-import {
+﻿import {
   Button,
   Card,
   Col,
@@ -19,24 +19,23 @@ import {
 import { Play, RefreshCw, Save, Users } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { PageHeader } from "../components/PageHeader";
-import { ProcessOutputPanel } from "../components/ProcessOutputPanel";
-import { AccountBrowserEnvironment } from "../components/AccountBrowserEnvironment";
-import { usePlatformContext } from "../app/PlatformContext";
+import { PageHeader } from "../../../components/PageHeader";
+import { ProcessOutputPanel } from "../../../components/ProcessOutputPanel";
+import { AccountBrowserEnvironment } from "../../../components/AccountBrowserEnvironment";
+import { usePlatformContext } from "../../../app/PlatformContext";
 import {
   getCurrentRunStatus,
   loadConfig,
-  runPlatformTask,
-  saveFypSettings,
-} from "../services/api";
-import { getPlatformLabel, isExecutablePlatform } from "../services/platforms";
+} from "../../../services/api";
+import { runPlatformTask, saveFypSettings } from "../services";
+import { getPlatformLabel, isExecutablePlatform } from "../..";
 import type {
   Account,
   ConfigSnapshot,
   FypSettings,
   ProcessStatus,
   RunStatus,
-} from "../services/types";
+} from "../../../services/types";
 
 type AccountMode = "all" | "single" | "selected";
 
@@ -768,3 +767,4 @@ function formatPercent(value: number) {
 function formatError(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
+

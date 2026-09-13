@@ -8,8 +8,8 @@ import {
   type ReactNode,
 } from 'react'
 
-import { getPlatformDefinition, PLATFORMS } from '../platforms/registry'
-import type { Platform, PlatformDefinition } from '../platforms/types'
+import { getPlatformDefinition, PLATFORMS } from '../platforms'
+import type { Platform, PlatformDefinition } from '../platforms'
 
 export const PLATFORM_STORAGE_KEY = 'account-matrix-current-platform'
 export const DEFAULT_PLATFORM: Platform = 'tiktok'

@@ -1,4 +1,4 @@
-import {
+﻿import {
   Button,
   Card,
   Col,
@@ -20,33 +20,30 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import { PageHeader } from "../components/PageHeader";
-import { PlatformScopeFilter } from "../components/PlatformScopeFilter";
-import { StatusTag } from "../components/StatusTag";
+import { usePlatformContext } from "../../../app/PlatformContext";
+import { PageHeader } from "../../../components/PageHeader";
+import { StatusTag } from "../../../components/StatusTag";
 import {
   getHomeSummary,
   getProjectPaths,
   loadAccounts,
-} from "../services/api";
+} from "../../../services/api";
 import {
   getPlatformLabel,
   isExecutablePlatform,
-} from "../services/platforms";
+} from "../..";
 import type {
   AccountSummary,
   HomeSummary,
-  Platform,
   ProjectPaths,
-} from "../services/types";
-import type { PlatformFilterValue } from "../app/pageScope";
+} from "../../../services/types";
 
 const { RangePicker } = DatePicker;
 
 type TimeRange = [Dayjs, Dayjs] | null;
 
 export function HomePage() {
-  const [platformFilter, setPlatformFilter] =
-    useState<PlatformFilterValue>("all");
+  const { currentPlatform, currentPlatformDefinition } = usePlatformContext();
   const [timeRange, setTimeRange] = useState<TimeRange>(null);
   const [paths, setPaths] = useState<ProjectPaths | null>(null);
   const [summary, setSummary] = useState<HomeSummary | null>(null);
@@ -55,10 +52,8 @@ export function HomePage() {
 
   const filteredAccounts = useMemo(
     () =>
-      accounts.filter((account) =>
-        accountMatchesPlatform(account, platformFilter),
-      ),
-    [accounts, platformFilter],
+      accounts.filter((account) => account.platform === currentPlatform),
+    [accounts, currentPlatform],
   );
   const executableEnabledAccounts = useMemo(
     () =>
@@ -73,7 +68,7 @@ export function HomePage() {
       const [nextPaths, nextAccounts, nextSummary] = await Promise.all([
         getProjectPaths(),
         loadAccounts(),
-        getHomeSummary(),
+        getHomeSummary(currentPlatform),
       ]);
       setPaths(nextPaths);
       setAccounts(nextAccounts);
@@ -87,13 +82,13 @@ export function HomePage() {
 
   useEffect(() => {
     void refresh();
-  }, []);
+  }, [currentPlatform]);
 
   return (
     <div>
       <PageHeader
         title="首页"
-        description="运营概览和平台账号状态。"
+        description={`${currentPlatformDefinition.localeName} 运营概览和账号状态。`}
         extra={
           <Button
             icon={<RefreshCw size={16} />}
@@ -110,20 +105,13 @@ export function HomePage() {
           <Col span={24}>
             <Card>
               <Space wrap size={12}>
-                <PlatformScopeFilter
-                  value={platformFilter}
-                  onChange={setPlatformFilter}
-                />
+                <Typography.Text type="secondary">平台</Typography.Text>
+                <Tag color="blue">{getPlatformLabel(currentPlatform)}</Tag>
                 <RangePicker
                   showTime
                   value={timeRange}
                   onChange={(value) => setTimeRange(value as TimeRange)}
                 />
-                <Tag color="blue">
-                  {platformFilter === "all"
-                    ? "全部平台"
-                    : getPlatformLabel(platformFilter)}
-                </Tag>
                 {timeRange ? (
                   <Tag>{formatTimeRange(timeRange)}</Tag>
                 ) : (
@@ -220,13 +208,6 @@ function MetricCard({
   );
 }
 
-function accountMatchesPlatform(
-  account: { platform: Platform },
-  platformFilter: PlatformFilterValue,
-) {
-  return platformFilter === "all" || account.platform === platformFilter;
-}
-
 function formatTimeRange(timeRange: TimeRange) {
   if (!timeRange) {
     return "全部时间";
@@ -243,3 +224,4 @@ function formatRuntimeMode(mode?: ProjectPaths["runtimeMode"]) {
   }
   return "未检测";
 }
+

@@ -1,4 +1,4 @@
-import {
+﻿import {
   Button,
   Card,
   Col,
@@ -30,15 +30,17 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 
-import { confirmDanger } from "../components/ConfirmDanger";
-import { PageHeader } from "../components/PageHeader";
-import { ProcessOutputPanel } from "../components/ProcessOutputPanel";
-import { StatusTag } from "../components/StatusTag";
-import { AccountBrowserEnvironment } from "../components/AccountBrowserEnvironment";
-import { useDesktopAuth } from "../app/DesktopAuthContext";
-import { usePlatformContext } from "../app/PlatformContext";
+import { confirmDanger } from "../../../components/ConfirmDanger";
+import { PageHeader } from "../../../components/PageHeader";
+import { ProcessOutputPanel } from "../../../components/ProcessOutputPanel";
+import { StatusTag } from "../../../components/StatusTag";
+import { AccountBrowserEnvironment } from "../../../components/AccountBrowserEnvironment";
+import { useDesktopAuth } from "../../../app/DesktopAuthContext";
+import { usePlatformContext } from "../../../app/PlatformContext";
 import {
   loadConfig,
+} from "../../../services/api";
+import {
   loadCommentPools,
   queryTargetStats,
   queryTargetWatermarks,
@@ -46,9 +48,9 @@ import {
   runPlatformTask,
   saveCommentPools,
   saveTargetEngagementSettings,
-} from "../services/api";
-import { readDesktopLicenseLimits } from "../services/desktopApi";
-import { getPlatformLabel, isExecutablePlatform } from "../services/platforms";
+} from "../services";
+import { readDesktopLicenseLimits } from "../../../services/desktopApi";
+import { getPlatformLabel, isExecutablePlatform } from "../..";
 import type {
   Account,
   ConfigSnapshot,
@@ -57,7 +59,7 @@ import type {
   TargetHandleStats,
   TargetStatsSummary,
   TargetWatermark,
-} from "../services/types";
+} from "../../../services/types";
 
 const DEFAULT_TARGET_SETTINGS: TargetEngagementSettings = {
   enabled: false,
@@ -851,3 +853,4 @@ function formatPercent(value: number) {
 function formatError(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
+

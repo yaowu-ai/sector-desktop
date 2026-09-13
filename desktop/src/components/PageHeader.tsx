@@ -30,8 +30,5 @@ function formatScopedTitle(title: string, scope: string | undefined, platformLab
   if (scope === 'current_platform') {
     return `${platformLabel} / ${title}`
   }
-  if (scope === 'all_platforms') {
-    return `全部平台 / ${title}`
-  }
   return title
 }

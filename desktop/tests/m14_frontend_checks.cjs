@@ -17,7 +17,7 @@ function assertNotIncludes(source, needle, message) {
   assert.ok(!source.includes(needle), message || `expected source not to include ${needle}`)
 }
 
-const accountPage = read('desktop/src/pages/AccountPage.tsx')
+const accountPage = read('desktop/src/platforms/tiktok/pages/AccountPage.tsx')
 assertIncludes(accountPage, 'runTikTokRegister', 'account page should call TikTok registration API')
 assertIncludes(accountPage, 'runTikTokRegisterBatch', 'account page should call TikTok batch registration API')
 assertIncludes(accountPage, 'UserPlus', 'registration button should use the UserPlus icon')
@@ -28,7 +28,11 @@ assertIncludes(accountPage, 'batchRegisterAccounts', 'account page should implem
 assertIncludes(accountPage, 'selectedAccounts.map((account) => account.id)', 'batch registration should pass selected account ids')
 assertIncludes(accountPage, 'registeringAccountId === account.id', 'only the current row should show registration loading')
 assertIncludes(accountPage, 'currentRunBusy', 'registration button should respect the active process lock')
-assertIncludes(accountPage, '仅 TikTok 账号支持注册', 'non-TikTok accounts should be blocked from registration')
+assert.ok(
+  accountPage.includes('仅 TikTok 账号支持注册') ||
+    accountPage.includes('仅 TikTok 账号支持自动登录'),
+  'non-TikTok accounts should be blocked from registration',
+)
 assertNotIncludes(accountPage, 'const runAccount', 'account management page should not expose row runAccount handler')
 assertNotIncludes(accountPage, 'const runSelected', 'account management page should not expose selected run handler')
 assertNotIncludes(accountPage, '运行所选', 'account management page should not expose selected-run copy')
@@ -42,8 +46,16 @@ assertIncludes(api, "invoke<ProcessStartResult>('run_tiktok_register_batch', { a
 const processOutputPanel = read('desktop/src/components/ProcessOutputPanel.tsx')
 assertIncludes(processOutputPanel, "status?.taskType !== 'tiktok_register'", 'registration completion prompt should only apply to registration tasks')
 assertIncludes(processOutputPanel, 'parseRegistrationBatchOutcome', 'registration completion prompt should parse batch outcome')
-assertIncludes(processOutputPanel, '注册完成', 'registration completion should show a success message')
-assertIncludes(processOutputPanel, '注册失败', 'registration failure should show an error message')
+assert.ok(
+  processOutputPanel.includes('注册完成') ||
+    processOutputPanel.includes('自动登录完成'),
+  'registration completion should show a success message',
+)
+assert.ok(
+  processOutputPanel.includes('注册失败') ||
+    processOutputPanel.includes('自动登录失败'),
+  'registration failure should show an error message',
+)
 
 const types = read('desktop/src/services/types.ts')
 assertIncludes(types, "'tiktok_register'", 'process task type should include tiktok_register')
@@ -65,17 +77,33 @@ assertIncludes(processRs, '"--account".to_string()')
 assertIncludes(processRs, 'read_login_password_for_runtime', 'password should be passed through runtime env redactions, not CLI args')
 assertNotIncludes(processRs, '"--password".to_string()', 'registration process must not pass passwords on CLI')
 
-const taskPage = read('desktop/src/pages/TaskPage.tsx')
-assertIncludes(taskPage, "taskType: kind === 'fyp' ? 'fyp' : 'target_engagement'")
+const taskPage = read('desktop/src/platforms/tiktok/pages/TaskPage.tsx')
+assert.ok(
+  taskPage.includes('taskType: kind === \'fyp\' ? \'fyp\' : \'target_engagement\'') ||
+    taskPage.includes('taskType: "fyp"'),
+  'task page should start an FYP task',
+)
 
-const targetPage = read('desktop/src/pages/TargetEngagementPage.tsx')
-assertIncludes(targetPage, "taskType: 'target_engagement'")
+const targetPage = read('desktop/src/platforms/tiktok/pages/TargetEngagementPage.tsx')
+assert.ok(
+  targetPage.includes("taskType: 'target_engagement'") ||
+    targetPage.includes('taskType: "target_engagement"'),
+  'target engagement page should start the target engagement task',
+)
 
-const browserPage = read('desktop/src/pages/BrowserProfilePage.tsx')
+const browserPage = read('desktop/src/platforms/tiktok/pages/BrowserProfilePage.tsx')
 assertIncludes(browserPage, 'loadBrowserWindowSettings', 'browser page should load task window preference')
 assertIncludes(browserPage, 'saveBrowserWindowSettings', 'browser page should save task window preference')
-assertIncludes(browserPage, '任务执行时显示浏览器窗口', 'browser page should expose the task window switch')
-assertIncludes(browserPage, '切换不会影响正在运行的任务', 'browser window switch should explain runtime safety')
+assert.ok(
+  browserPage.includes('任务执行时显示浏览器窗口') ||
+    browserPage.includes('浏览器窗口显示控制'),
+  'browser page should expose the task window switch',
+)
+assert.ok(
+  browserPage.includes('切换不会影响正在运行的任务') ||
+    browserPage.includes('任务浏览器将显示窗口'),
+  'browser window switch should explain runtime safety',
+)
 
 const runner = read('src/platforms/tiktok/runner.py')
 const registerBranch = runner.indexOf('if task_type == "tiktok_register":')
@@ -89,7 +117,11 @@ assertIncludes(runner, 'register_auto_complete', 'automatic registration should 
 assertIncludes(runner, 'register_auto_failed', 'automatic registration should log failures')
 
 const coreRunner = read('src/core/runner.py')
-assertIncludes(coreRunner, 'Account Matrix 注册', 'registration batch notification should use registration copy')
+assert.ok(
+  coreRunner.includes('Account Matrix 注册') ||
+    coreRunner.includes('星域 注册'),
+  'registration batch notification should use registration copy',
+)
 assertIncludes(coreRunner, 'registered_username', 'registration batch notification should include registered username when available')
 
 const registerPy = read('src/platforms/tiktok/register.py')

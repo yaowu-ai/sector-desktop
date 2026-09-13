@@ -1,4 +1,4 @@
-import {
+﻿import {
   Alert,
   Button,
   Card,
@@ -31,28 +31,30 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { confirmDanger } from "../components/ConfirmDanger";
-import { PageHeader } from "../components/PageHeader";
-import { StatusTag } from "../components/StatusTag";
-import { useDesktopAuth } from "../app/DesktopAuthContext";
-import { usePlatformContext } from "../app/PlatformContext";
+import { confirmDanger } from "../../../components/ConfirmDanger";
+import { PageHeader } from "../../../components/PageHeader";
+import { StatusTag } from "../../../components/StatusTag";
+import { useDesktopAuth } from "../../../app/DesktopAuthContext";
+import { usePlatformContext } from "../../../app/PlatformContext";
 import {
   checkBitbrowserApi,
   clearRunLock,
   getSchedulerHealth,
   getSchedulerProcessStatus,
   loadConfig,
+} from "../../../services/api";
+import {
   querySchedulerJobRuns,
   saveSchedulerSettings,
   startScheduler,
   stopScheduler,
-} from "../services/api";
-import { readDesktopLicenseLimits } from "../services/desktopApi";
+} from "../services";
+import { readDesktopLicenseLimits } from "../../../services/desktopApi";
 import {
   getAutomaticExecutionDisabledReason,
   getPlatformLabel,
   isExecutablePlatform,
-} from "../services/platforms";
+} from "../..";
 import type {
   Account,
   ApiStatus,
@@ -63,7 +65,7 @@ import type {
   SchedulerJob,
   SchedulerJobRunRecord,
   SchedulerProcessStatus,
-} from "../services/types";
+} from "../../../services/types";
 
 interface SchedulerRow {
   id: string;
@@ -1193,3 +1195,4 @@ function formatSchedulerHealthError(error: string) {
 function formatError(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
+

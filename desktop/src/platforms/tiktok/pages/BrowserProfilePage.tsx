@@ -37,13 +37,13 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 
-import { BrowserPreviewModal } from "../components/BrowserPreviewModal";
-import { confirmDanger } from "../components/ConfirmDanger";
-import { EmptyState } from "../components/EmptyState";
-import { PageHeader } from "../components/PageHeader";
-import { StatusTag } from "../components/StatusTag";
-import { usePlatformContext } from "../app/PlatformContext";
-import { useBrowserPreview } from "../hooks/useBrowserPreview";
+import { BrowserPreviewModal } from "../../../components/BrowserPreviewModal";
+import { confirmDanger } from "../../../components/ConfirmDanger";
+import { EmptyState } from "../../../components/EmptyState";
+import { PageHeader } from "../../../components/PageHeader";
+import { StatusTag } from "../../../components/StatusTag";
+import { usePlatformContext } from "../../../app/PlatformContext";
+import { useBrowserPreview } from "../../../hooks/useBrowserPreview";
 import {
   checkBitbrowserApi,
   checkProxy,
@@ -61,8 +61,8 @@ import {
   syncAccountsApply,
   syncAccountsDryRun,
   saveBrowserWindowSettings,
-} from "../services/api";
-import { getPlatformLabel, PLATFORMS } from "../services/platforms";
+} from "../../../services/api";
+import { getPlatformLabel, PLATFORMS } from "../..";
 import type {
   AccountSummary,
   AccountBrowserDiagnosis,
@@ -78,7 +78,7 @@ import type {
   ProxyCheckResult,
   SyncAccountsRequest,
   SyncPreview,
-} from "../services/types";
+} from "../../../services/types";
 
 type ProxyType = "http" | "https" | "socks5";
 
@@ -2041,3 +2041,4 @@ function validateProxyFormat(_: unknown, value?: string) {
   }
   return Promise.resolve();
 }
+

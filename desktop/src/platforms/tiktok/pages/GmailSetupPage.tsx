@@ -1,4 +1,4 @@
-import {
+﻿import {
   Alert,
   Button,
   Card,
@@ -19,17 +19,17 @@ import {
 import { FolderOpen, KeyRound, Mail, Play, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { PageHeader } from "../components/PageHeader";
-import { ProcessOutputPanel } from "../components/ProcessOutputPanel";
-import { StatusTag } from "../components/StatusTag";
-import { usePlatformContext } from "../app/PlatformContext";
+import { PageHeader } from "../../../components/PageHeader";
+import { ProcessOutputPanel } from "../../../components/ProcessOutputPanel";
+import { StatusTag } from "../../../components/StatusTag";
+import { usePlatformContext } from "../../../app/PlatformContext";
 import {
   getCurrentRunStatus,
   getStderrChunk,
   getStdoutChunk,
-  runGmailSetup,
-} from "../services/api";
-import type { GmailSetupRequest, ProcessStatus } from "../services/types";
+} from "../../../services/api";
+import { runGmailSetup } from "../services";
+import type { GmailSetupRequest, ProcessStatus } from "../../../services/types";
 
 type Mode = "single" | "batch";
 
@@ -581,3 +581,4 @@ function maskPath(path: string) {
 function formatError(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
+

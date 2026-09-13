@@ -4,8 +4,8 @@ import { useEffect, useMemo } from 'react'
 
 import { usePlatformContext } from '../app/PlatformContext'
 import { filterPlatformsByRole, type DesktopUserRole } from '../app/routePermissions'
-import { PLATFORMS } from '../platforms/registry'
-import type { Platform } from '../platforms/types'
+import { PLATFORMS } from '../platforms'
+import type { Platform } from '../platforms'
 
 interface PlatformSelectorProps {
   onOpenSettings: () => void

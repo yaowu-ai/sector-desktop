@@ -1,14 +1,14 @@
-import { Button, Card, DatePicker, Empty, Input, Modal, Select, Space, Tabs, Tag, Typography, message } from 'antd'
+﻿import { Button, Card, DatePicker, Empty, Input, Modal, Select, Space, Tabs, Tag, Typography, message } from 'antd'
 import type { Dayjs } from 'dayjs'
 import { FilterX, PlayCircle, RefreshCw, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
-import { PageHeader } from '../components/PageHeader'
-import { PlatformScopeFilter } from '../components/PlatformScopeFilter'
-import { LogBlock } from '../components/LogViewer'
-import { clearSessionLog, loadConfig, tailSessionLog } from '../services/api'
-import type { Account, Platform } from '../services/types'
-import type { PlatformFilterValue } from '../app/pageScope'
+import { usePlatformContext } from '../../../app/PlatformContext'
+import { PageHeader } from '../../../components/PageHeader'
+import { LogBlock } from '../../../components/LogViewer'
+import { clearSessionLog, loadConfig, tailSessionLog } from '../../../services/api'
+import type { Account, Platform } from '../../../services/types'
+import { getPlatformLabel } from '../..'
 
 const { RangePicker } = DatePicker
 
@@ -49,8 +49,8 @@ interface SessionLogEntry {
 }
 
 export function SessionLogPage() {
+  const { currentPlatform, currentPlatformDefinition } = usePlatformContext()
   const [accounts, setAccounts] = useState<Account[]>([])
-  const [platformFilter, setPlatformFilter] = useState<PlatformFilterValue>('all')
   const [accountId, setAccountId] = useState<string>()
   const [taskType, setTaskType] = useState<string>()
   const [status, setStatus] = useState<string>()
@@ -68,11 +68,11 @@ export function SessionLogPage() {
   )
   const accountOptions = useMemo(
     () =>
-      accounts.filter((account) => accountMatchesPlatform(account, platformFilter)).map((account) => ({
+      accounts.filter((account) => account.platform === currentPlatform).map((account) => ({
         value: account.id,
         label: account.id,
       })),
-    [accounts, platformFilter],
+    [accounts, currentPlatform],
   )
   const filteredSessionLog = useMemo(
     () =>
@@ -80,23 +80,23 @@ export function SessionLogPage() {
         .split(/\r?\n/)
         .filter((line) =>
           sessionLogLineMatches(line, {
-            platformFilter,
             accountId,
             taskType,
             status,
             keyword,
             timeRange,
+            platform: currentPlatform,
             accountPlatformMap,
           }),
         )
         .join('\n'),
-    [accountId, accountPlatformMap, keyword, platformFilter, sessionLog, status, taskType, timeRange],
+    [accountId, accountPlatformMap, currentPlatform, keyword, sessionLog, status, taskType, timeRange],
   )
   const filteredSessionLogEntries = useMemo(
     () =>
       parseSessionLogEntries(sessionLog).filter((entry) =>
         sessionLogEntryMatches(entry, {
-          platformFilter,
+          platform: currentPlatform,
           accountId,
           taskType,
           status,
@@ -105,7 +105,7 @@ export function SessionLogPage() {
           accountPlatformMap,
         }),
       ),
-    [accountId, accountPlatformMap, keyword, platformFilter, sessionLog, status, taskType, timeRange],
+    [accountId, accountPlatformMap, currentPlatform, keyword, sessionLog, status, taskType, timeRange],
   )
 
   const refreshLog = useCallback(async () => {
@@ -123,7 +123,7 @@ export function SessionLogPage() {
     try {
       const chunk = await tailSessionLog(0)
       const snapshot = await loadConfig()
-      setAccounts(snapshot.accounts)
+      setAccounts(snapshot.accounts.filter((account) => account.platform === currentPlatform))
       setLogExists(chunk.exists)
       setLogOffset(chunk.nextOffset)
       setSessionLog((chunk.content ?? '').slice(-MAX_LOG_LENGTH))
@@ -159,17 +159,11 @@ export function SessionLogPage() {
   }
 
   const resetFilters = () => {
-    setPlatformFilter('all')
     setAccountId(undefined)
     setTaskType(undefined)
     setStatus(undefined)
     setKeyword('')
     setTimeRange(null)
-  }
-
-  const updatePlatformFilter = (value: PlatformFilterValue) => {
-    setPlatformFilter(value)
-    setAccountId(undefined)
   }
 
   const goToTasks = () => {
@@ -179,7 +173,7 @@ export function SessionLogPage() {
 
   useEffect(() => {
     void reloadLog()
-  }, [])
+  }, [currentPlatform])
 
   useEffect(() => {
     const id = window.setInterval(() => {
@@ -192,7 +186,7 @@ export function SessionLogPage() {
     <div className="session-log-page">
       <PageHeader
         title="Session 日志"
-        description="集中查看 sessions.log 原始运行日志。"
+        description={`集中查看 ${currentPlatformDefinition.localeName} 的 sessions.log 原始运行日志。`}
         extra={
           <Space>
             <Button icon={<RefreshCw size={16} />} loading={refreshing} onClick={() => void reloadLog()}>
@@ -210,7 +204,8 @@ export function SessionLogPage() {
 
       <Card className="shell-alert">
         <Space wrap size={12}>
-          <PlatformScopeFilter value={platformFilter} onChange={updatePlatformFilter} />
+          <Typography.Text type="secondary">平台</Typography.Text>
+          <Tag color="blue">{getPlatformLabel(currentPlatform)}</Tag>
           <Select
             allowClear
             showSearch
@@ -400,10 +395,6 @@ function formatError(error: unknown) {
   return error instanceof Error ? error.message : String(error)
 }
 
-function accountMatchesPlatform(account: { platform: Platform }, platformFilter: PlatformFilterValue) {
-  return platformFilter === 'all' || account.platform === platformFilter
-}
-
 const SESSION_LOG_ENTRY_RE = /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \| ([^|]+) \| (.*)$/
 const SESSION_LOG_SEVERITY_META: Record<SessionLogSeverity, { label: string; color: string }> = {
   success: { label: '正常', color: 'green' },
@@ -496,7 +487,7 @@ function classifySessionLogSeverity(value: string): SessionLogSeverity {
 function sessionLogLineMatches(
   line: string,
   filters: {
-    platformFilter: PlatformFilterValue
+    platform: Platform
     accountId?: string
     taskType?: string
     status?: string
@@ -521,7 +512,7 @@ function sessionLogLineMatches(
   if (filters.keyword.trim() && !normalized.includes(filters.keyword.trim().toLowerCase())) {
     return false
   }
-  if (filters.platformFilter !== 'all' && !lineMatchesPlatform(line, filters.platformFilter, filters.accountPlatformMap)) {
+  if (!lineMatchesPlatform(line, filters.platform, filters.accountPlatformMap)) {
     return false
   }
   if (filters.timeRange && !lineMatchesTimeRange(line, filters.timeRange)) {
@@ -533,7 +524,7 @@ function sessionLogLineMatches(
 function sessionLogEntryMatches(
   entry: SessionLogEntry,
   filters: {
-    platformFilter: PlatformFilterValue
+    platform: Platform
     accountId?: string
     taskType?: string
     status?: string
@@ -556,7 +547,7 @@ function sessionLogEntryMatches(
   if (filters.keyword.trim() && !normalized.includes(filters.keyword.trim().toLowerCase())) {
     return false
   }
-  if (filters.platformFilter !== 'all' && !lineMatchesPlatform(raw, filters.platformFilter, filters.accountPlatformMap)) {
+  if (!lineMatchesPlatform(raw, filters.platform, filters.accountPlatformMap)) {
     return false
   }
   if (filters.timeRange && !lineMatchesTimeRange(raw, filters.timeRange)) {
@@ -582,15 +573,15 @@ function entryMatchesStatus(entry: SessionLogEntry, status: string) {
 
 function lineMatchesPlatform(
   line: string,
-  platformFilter: Platform,
+  currentPlatform: Platform,
   accountPlatformMap: Map<string, Platform>,
 ) {
   const normalized = line.toLowerCase()
-  if (normalized.includes(platformFilter)) {
+  if (normalized.includes(currentPlatform)) {
     return true
   }
   for (const [accountId, platform] of accountPlatformMap) {
-    if (platform === platformFilter && line.includes(accountId)) {
+    if (platform === currentPlatform && line.includes(accountId)) {
       return true
     }
   }
@@ -605,3 +596,4 @@ function lineMatchesTimeRange(line: string, timeRange: [Dayjs, Dayjs]) {
   const time = new Date(timestamp.replace(' ', 'T')).getTime()
   return time >= timeRange[0].valueOf() && time <= timeRange[1].valueOf()
 }
+

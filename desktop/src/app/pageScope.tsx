@@ -1,27 +1,14 @@
 import { createContext, useContext, type ReactNode } from 'react'
 
-import type { Platform, PlatformCapability } from '../platforms/types'
+import type { PlatformCapability } from '../platforms'
 
-export type PageScope = 'current_platform' | 'all_platforms' | 'system'
-export type PlatformFilterValue = Platform | 'all'
-
-export const DEFAULT_PLATFORM_FILTER: PlatformFilterValue = 'all'
-
-export function resolveRoutePlatformFilter(
-  scope: PageScope,
-  currentPlatform: Platform,
-  platformFilter: PlatformFilterValue,
-): PlatformFilterValue {
-  return scope === 'current_platform' ? currentPlatform : platformFilter
-}
+export type PageScope = 'current_platform' | 'system'
 
 export interface PageScopeContextValue {
   routeKey: string
   routeLabel: string
   scope: PageScope
   capability?: PlatformCapability
-  platformFilter: PlatformFilterValue
-  setPlatformFilter(value: PlatformFilterValue): void
 }
 
 const PageScopeContext = createContext<PageScopeContextValue | null>(null)

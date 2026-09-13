@@ -2,23 +2,27 @@ export {
   EMPTY_PLATFORM_CAPABILITIES,
   PLATFORM_CAPABILITIES,
   PLATFORM_IDS,
+  PLATFORM_MODULES,
   PLATFORM_REGISTRY,
   PLATFORMS,
   getAutomaticExecutionDisabledReason,
   getCapabilityStatus,
   getCapabilityStatusLabel,
   getPlatformDefinition,
+  getPlatformModule,
   getPlatformLabel,
   getUnsupportedCapabilityReason,
   isExecutablePlatform,
   isPlatform,
   supportsCapability,
-} from '../platforms/registry'
+} from './registry'
 export type {
   CapabilityStatus,
+  Platform,
   PlatformCapability,
   PlatformCapabilityDefinition,
   PlatformDefaultConfig,
   PlatformDefinition,
+  PlatformModuleManifest,
   PlatformStatus,
-} from '../platforms/types'
+} from './types'

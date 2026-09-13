@@ -1,0 +1,32 @@
+import type { PlatformDefaultConfig } from '../types'
+
+export const instagramDefaultConfig: PlatformDefaultConfig = {
+  instagramWarmup: {
+    duration: 15,
+    likeProb: 0.06,
+    saveProb: 0.02,
+    commentProb: 0.5,
+    activeHours: '7-9,12-14,18-23',
+    sessionsPerDay: '1-3',
+    restDayProb: 0.15,
+    minSessionGapMinutes: 90,
+    onePerWindow: false,
+    durationJitter: '0.5-1.5',
+    maxLikesPerDay: 20,
+    maxSavesPerDay: 10,
+    maxFollowsPerDay: 3,
+    maxLikesPerSession: 0,
+    maxCommentsPerDay: 5,
+    maxCommentsPerSession: 1,
+    blockCooldownHours: 24,
+    roundSkipProb: 0.15,
+    requireProxy: true,
+    noLike: false,
+    noSave: false,
+    noComment: false,
+    noFollow: false,
+    noStories: false,
+    noReels: false,
+    noExplore: false,
+  },
+}

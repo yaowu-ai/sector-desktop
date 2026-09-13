@@ -1,4 +1,4 @@
-import {
+﻿import {
   Alert,
   Button,
   Card,
@@ -30,16 +30,18 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
-import { usePageScopeContext } from "../app/pageScope";
-import { PageHeader } from "../components/PageHeader";
+import { usePlatformContext } from "../../../app/PlatformContext";
+import { PageHeader } from "../../../components/PageHeader";
 import {
   getSqliteStatus,
   loadConfig,
+} from "../../../services/api";
+import {
   queryProfileStatsDetail,
   queryProfileStatsHistory,
   queryProfileStatsLatest,
   queryProfileStatsSummary,
-} from "../services/api";
+} from "../services";
 import type {
   Account,
   Platform,
@@ -47,7 +49,7 @@ import type {
   ProfileStatsSnapshot,
   ProfileStatsSummary,
   SqliteStatus,
-} from "../services/types";
+} from "../../../services/types";
 
 const { RangePicker } = DatePicker;
 
@@ -98,9 +100,7 @@ const EMPTY_SUMMARY: ProfileStatsSummary = {
 };
 
 export function ProfileStatsPage() {
-  const pageScope = usePageScopeContext();
-  const currentPlatform =
-    pageScope.platformFilter === "all" ? "tiktok" : pageScope.platformFilter;
+  const { currentPlatform } = usePlatformContext();
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [sqliteStatus, setSqliteStatus] = useState<SqliteStatus | null>(null);
@@ -1137,3 +1137,4 @@ function getProfileStoreStatus(status: SqliteStatus | null) {
 function formatError(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
+

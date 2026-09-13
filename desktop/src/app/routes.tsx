@@ -24,29 +24,31 @@ import {
   UserRound,
 } from 'lucide-react'
 
-import { AccountPage } from '../pages/AccountPage'
 import { AboutPage } from '../pages/AboutPage'
-import { BrowserProfilePage } from '../pages/BrowserProfilePage'
-import { CommentPoolPage } from '../pages/CommentPoolPage'
 import { ContactSupportPage } from '../pages/ContactSupportPage'
 import { DiagnosticPage } from '../pages/DiagnosticPage'
-import { ExecutionRecordPage } from '../pages/ExecutionRecordPage'
-import { GmailSetupPage } from '../pages/GmailSetupPage'
-import { HomePage } from '../pages/HomePage'
 import { LicenseDevicePage } from '../pages/LicenseDevicePage'
 import { NotificationsPage } from '../pages/NotificationsPage'
 import { PlatformPage } from '../pages/PlatformPage'
 import { PlanCenterPage } from '../pages/PlanCenterPage'
-import { ProfileStatsPage } from '../pages/ProfileStatsPage'
 import { ProfilePage } from '../pages/ProfilePage'
-import { SchedulerPage } from '../pages/SchedulerPage'
-import { SessionLogPage } from '../pages/SessionLogPage'
 import { SettingsPage } from '../pages/SettingsPage'
-import { StatsPage } from '../pages/StatsPage'
-import { TargetEngagementPage } from '../pages/TargetEngagementPage'
-import { TaskPage } from '../pages/TaskPage'
+import {
+  AccountPage,
+  BrowserProfilePage,
+  CommentPoolPage,
+  ExecutionRecordPage,
+  GmailSetupPage,
+  HomePage,
+  ProfileStatsPage,
+  SchedulerPage,
+  SessionLogPage,
+  StatsPage,
+  TargetEngagementPage,
+  TaskPage,
+} from '../platforms/tiktok/pages'
 import type { PageScope } from './pageScope'
-import type { PlatformCapability } from '../platforms/types'
+import type { PlatformCapability } from '../platforms'
 
 export interface AppMenuGroup {
   key: string
@@ -79,7 +81,13 @@ export const platformSettingsRoute: AppRoute = {
 }
 
 export const routes: AppRoute[] = [
-  { key: 'home', label: '首页', icon: Home, element: <HomePage />, scope: 'all_platforms' },
+  {
+    key: 'home',
+    label: '首页',
+    icon: Home,
+    element: <HomePage />,
+    scope: 'current_platform',
+  },
   {
     key: 'profile-stats',
     label: '成果展示',
@@ -141,7 +149,7 @@ export const routes: AppRoute[] = [
     label: '执行记录',
     icon: ClipboardList,
     element: <ExecutionRecordPage />,
-    scope: 'all_platforms',
+    scope: 'current_platform',
     capability: 'records',
   },
   {
@@ -149,7 +157,7 @@ export const routes: AppRoute[] = [
     label: 'Session 日志',
     icon: FileText,
     element: <SessionLogPage />,
-    scope: 'all_platforms',
+    scope: 'current_platform',
     capability: 'records',
   },
   {
@@ -157,7 +165,7 @@ export const routes: AppRoute[] = [
     label: '统计报表',
     icon: BarChart3,
     element: <StatsPage />,
-    scope: 'all_platforms',
+    scope: 'current_platform',
     capability: 'stats',
   },
   {
@@ -209,7 +217,14 @@ export const routes: AppRoute[] = [
     menuGroup: personalCenterMenuGroup,
   },
   { key: 'about', label: '关于软件', icon: Info, element: <AboutPage />, scope: 'system' },
-  { key: 'diagnostic', label: '诊断工具', icon: Gauge, element: <DiagnosticPage />, scope: 'system' },
+  {
+    key: 'diagnostic',
+    label: '诊断工具',
+    icon: Gauge,
+    element: <DiagnosticPage />,
+    scope: 'current_platform',
+    capability: 'diagnostics',
+  },
   { key: 'settings', label: '系统设置', icon: Settings, element: <SettingsPage />, scope: 'system' },
 ]
 

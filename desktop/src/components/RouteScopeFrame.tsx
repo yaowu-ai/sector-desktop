@@ -1,19 +1,16 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { type ReactNode } from 'react'
 
 import { usePlatformContext } from '../app/PlatformContext'
 import {
-  DEFAULT_PLATFORM_FILTER,
   PageScopeProvider,
-  resolveRoutePlatformFilter,
   type PageScope,
-  type PlatformFilterValue,
 } from '../app/pageScope'
 import {
   getCapabilityStatus,
   getUnsupportedCapabilityReason,
   supportsCapability,
-} from '../platforms/registry'
-import type { PlatformCapability } from '../platforms/types'
+} from '../platforms'
+import type { PlatformCapability } from '../platforms'
 import { UnsupportedCapabilityState } from './UnsupportedCapabilityState'
 
 interface RouteScopeFrameProps {
@@ -32,23 +29,12 @@ export function RouteScopeFrame({
   children,
 }: RouteScopeFrameProps) {
   const { currentPlatform } = usePlatformContext()
-  const [platformFilter, setPlatformFilter] = useState<PlatformFilterValue>(DEFAULT_PLATFORM_FILTER)
-
-  useEffect(() => {
-    setPlatformFilter(DEFAULT_PLATFORM_FILTER)
-  }, [routeKey])
-
-  const contextValue = useMemo(
-    () => ({
-      routeKey,
-      routeLabel,
-      scope,
-      capability,
-      platformFilter: resolveRoutePlatformFilter(scope, currentPlatform, platformFilter),
-      setPlatformFilter,
-    }),
-    [capability, currentPlatform, platformFilter, routeKey, routeLabel, scope],
-  )
+  const contextValue = {
+    routeKey,
+    routeLabel,
+    scope,
+    capability,
+  }
 
   if (scope === 'current_platform' && capability) {
     const capabilityStatus = getCapabilityStatus(currentPlatform, capability)

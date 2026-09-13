@@ -1,4 +1,4 @@
-import {
+﻿import {
   Alert,
   Button,
   Card,
@@ -30,26 +30,25 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { PageHeader } from "../components/PageHeader";
-import { useDesktopAuth } from "../app/DesktopAuthContext";
-import { usePlatformContext } from "../app/PlatformContext";
+import { PageHeader } from "../../../components/PageHeader";
+import { useDesktopAuth } from "../../../app/DesktopAuthContext";
+import { usePlatformContext } from "../../../app/PlatformContext";
 import {
   loadAiCommentSettings,
-  loadCommentPools,
   saveAiCommentSettings,
-  saveCommentPools,
-} from "../services/api";
+} from "../../../services/api";
+import { loadCommentPools, saveCommentPools } from "../services";
 import {
   desktopLicenseAllowsAiComment,
   generateDesktopAiComment,
-} from "../services/desktopApi";
+} from "../../../services/desktopApi";
 import type {
   AiCommentGenerationResult,
   AiCommentSettings,
   CommentPool,
   CommentPoolsSnapshot,
   SaveCommentPoolsResult,
-} from "../services/types";
+} from "../../../services/types";
 
 type PoolKey = "general" | "brand";
 
@@ -1032,3 +1031,4 @@ function emptyDraft(): PoolDraft {
 function formatError(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
+

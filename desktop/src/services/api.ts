@@ -385,8 +385,8 @@ export function clearSessionLog() {
   return invoke<ClearLogResult>('clear_session_log')
 }
 
-export function getHomeSummary() {
-  return invoke<HomeSummary>('get_home_summary')
+export function getHomeSummary(platform: Platform = 'tiktok') {
+  return invoke<HomeSummary>('get_home_summary', { platform })
 }
 
 export function getSqliteStatus() {

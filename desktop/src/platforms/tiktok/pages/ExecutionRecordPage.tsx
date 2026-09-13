@@ -1,4 +1,4 @@
-import {
+﻿import {
   Alert,
   Button,
   Card,
@@ -20,8 +20,8 @@ import type { Dayjs } from "dayjs";
 import { Copy, Database, FilterX, PlayCircle, RefreshCw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import { PageHeader } from "../components/PageHeader";
-import { PlatformScopeFilter } from "../components/PlatformScopeFilter";
+import { usePlatformContext } from "../../../app/PlatformContext";
+import { PageHeader } from "../../../components/PageHeader";
 import {
   getSqliteStatus,
   loadConfig,
@@ -29,7 +29,7 @@ import {
   queryFypVideoViews,
   queryTargetEngagements,
   queryTargetFollows,
-} from "../services/api";
+} from "../../../services/api";
 import type {
   Account,
   ActionLog,
@@ -41,15 +41,14 @@ import type {
   TargetFollowRecord,
   TargetRecordFilter,
   SqliteStatus,
-} from "../services/types";
-import type { PlatformFilterValue } from "../app/pageScope";
+} from "../../../services/types";
+import { getPlatformLabel } from "../..";
 
 const { RangePicker } = DatePicker;
 
 type TimeRange = [Dayjs, Dayjs] | null;
 
 interface FilterState {
-  platform: PlatformFilterValue;
   accountId?: string;
   action?: string;
   status?: string;
@@ -60,7 +59,6 @@ interface FilterState {
 }
 
 const DEFAULT_FILTERS: FilterState = {
-  platform: "all",
   timeRange: null,
 };
 
@@ -127,6 +125,7 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 export function ExecutionRecordPage() {
+  const { currentPlatform, currentPlatformDefinition } = usePlatformContext();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [sqliteStatus, setSqliteStatus] = useState<SqliteStatus | null>(null);
   const [actionLogs, setActionLogs] = useState<ActionLog[]>([]);
@@ -161,54 +160,57 @@ export function ExecutionRecordPage() {
   const accountOptions = useMemo(
     () =>
       accounts
-        .filter((account) => accountMatchesPlatform(account, filters.platform))
+        .filter((account) => account.platform === currentPlatform)
         .map((account) => ({
           value: account.id,
           label: account.id,
         })),
-    [accounts, filters.platform],
+    [accounts, currentPlatform],
   );
   const filteredActionLogs = useMemo(
     () =>
       actionLogs.filter((row) =>
         accountIdMatchesPlatform(
           row.accountId,
-          filters.platform,
+          currentPlatform,
           accountPlatformMap,
         ),
       ),
-    [accountPlatformMap, actionLogs, filters.platform],
+    [accountPlatformMap, actionLogs, currentPlatform],
   );
   const filteredTargetEngagements = useMemo(
     () =>
       targetEngagements.filter((row) =>
         accountIdMatchesPlatform(
           row.ourAccount,
-          filters.platform,
+          currentPlatform,
           accountPlatformMap,
         ),
       ),
-    [accountPlatformMap, filters.platform, targetEngagements],
+    [accountPlatformMap, currentPlatform, targetEngagements],
   );
   const filteredTargetFollows = useMemo(
     () =>
       targetFollows.filter((row) =>
         accountIdMatchesPlatform(
           row.ourAccount,
-          filters.platform,
+          currentPlatform,
           accountPlatformMap,
         ),
       ),
-    [accountPlatformMap, filters.platform, targetFollows],
+    [accountPlatformMap, currentPlatform, targetFollows],
   );
 
   const refresh = async (sourceFilters = filters) => {
     setLoading(true);
     try {
       const snapshot = await loadConfig();
-      const actionFilter = toActionFilter(sourceFilters);
-      const fypVideoFilter = toFypVideoViewFilter(sourceFilters);
-      const targetFilter = toTargetFilter(sourceFilters);
+      const actionFilter = toActionFilter(sourceFilters, currentPlatform);
+      const fypVideoFilter = toFypVideoViewFilter(
+        sourceFilters,
+        currentPlatform,
+      );
+      const targetFilter = toTargetFilter(sourceFilters, currentPlatform);
       const [
         sqlite,
         nextActionLogs,
@@ -222,7 +224,9 @@ export function ExecutionRecordPage() {
         queryTargetEngagements(targetFilter),
         queryTargetFollows(targetFilter),
       ]);
-      setAccounts(snapshot.accounts);
+      setAccounts(
+        snapshot.accounts.filter((account) => account.platform === currentPlatform),
+      );
       setSqliteStatus(sqlite);
       setActionLogs(nextActionLogs);
       setFypVideoViews(nextFypVideoViews);
@@ -237,7 +241,7 @@ export function ExecutionRecordPage() {
 
   useEffect(() => {
     void refresh(DEFAULT_FILTERS);
-  }, []);
+  }, [currentPlatform]);
 
   const updateFilter = <K extends keyof FilterState>(
     key: K,
@@ -246,7 +250,6 @@ export function ExecutionRecordPage() {
     setFilters((current) => ({
       ...current,
       [key]: value,
-      ...(key === "platform" ? { accountId: undefined } : {}),
     }));
   };
 
@@ -273,7 +276,7 @@ export function ExecutionRecordPage() {
     <>
       <PageHeader
         title="执行记录"
-        description="查询养号动作、目标互动和目标关注记录。"
+        description={`查询 ${currentPlatformDefinition.localeName} 的养号动作、目标互动和目标关注记录。`}
         extra={
           <Space>
             <Button icon={<FilterX size={16} />} onClick={resetFilters}>
@@ -324,10 +327,8 @@ export function ExecutionRecordPage() {
           <Card>
             <Space direction="vertical" size={14} className="full-width">
               <Space wrap size={12}>
-                <PlatformScopeFilter
-                  value={filters.platform}
-                  onChange={(value) => updateFilter("platform", value)}
-                />
+                <Typography.Text type="secondary">平台</Typography.Text>
+                <Tag color="blue">{getPlatformLabel(currentPlatform)}</Tag>
                 <Select
                   allowClear
                   showSearch
@@ -782,10 +783,13 @@ function BooleanTag({ value }: { value: boolean }) {
   return <Tag color={value ? "green" : "default"}>{value ? "是" : "否"}</Tag>;
 }
 
-function toActionFilter(filters: FilterState): ActionLogFilter {
+function toActionFilter(
+  filters: FilterState,
+  platform: Platform,
+): ActionLogFilter {
   const [startTs, endTs] = toTimeBounds(filters.timeRange);
   return compactFilter({
-    platform: filters.platform,
+    platform,
     accountId: filters.accountId,
     action: filters.action,
     status: filters.status,
@@ -795,10 +799,13 @@ function toActionFilter(filters: FilterState): ActionLogFilter {
   });
 }
 
-function toFypVideoViewFilter(filters: FilterState): FypVideoViewFilter {
+function toFypVideoViewFilter(
+  filters: FilterState,
+  platform: Platform,
+): FypVideoViewFilter {
   const [startTs, endTs] = toTimeBounds(filters.timeRange);
   return compactFilter({
-    platform: filters.platform,
+    platform,
     accountId: filters.accountId,
     startTs,
     endTs,
@@ -809,10 +816,13 @@ function toFypVideoViewFilter(filters: FilterState): FypVideoViewFilter {
   });
 }
 
-function toTargetFilter(filters: FilterState): TargetRecordFilter {
+function toTargetFilter(
+  filters: FilterState,
+  platform: Platform,
+): TargetRecordFilter {
   const [startTs, endTs] = toTimeBounds(filters.timeRange);
   return compactFilter({
-    platform: filters.platform,
+    platform,
     accountId: filters.accountId,
     startTs,
     endTs,
@@ -868,22 +878,12 @@ function formatStatusLabel(status: string) {
   return (STATUS_LABELS[status.toLowerCase()] ?? status) || "-";
 }
 
-function accountMatchesPlatform(
-  account: { platform: Platform },
-  platformFilter: PlatformFilterValue,
-) {
-  return platformFilter === "all" || account.platform === platformFilter;
-}
-
 function accountIdMatchesPlatform(
   accountId: string,
-  platformFilter: PlatformFilterValue,
+  currentPlatform: Platform,
   accountPlatformMap: Map<string, Platform>,
 ) {
-  if (platformFilter === "all") {
-    return true;
-  }
-  return inferPlatform(accountId, accountPlatformMap) === platformFilter;
+  return inferPlatform(accountId, accountPlatformMap) === currentPlatform;
 }
 
 function inferPlatform(
@@ -973,3 +973,4 @@ async function copyText(text: string, successMessage = "详情已复制") {
 function formatError(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
+
