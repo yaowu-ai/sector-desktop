@@ -1,277 +1,132 @@
-# account-matrix
+# 星域
 
-TikTok 多账号养号自动化脚本。在云电脑上通过比特浏览器（指纹隔离）+ 住宅 IP 模拟真人行为，
-对账号执行 FYP 浏览 / 点赞 / 关注等动作，支持定时调度与动作统计。
+星域是一个 TikTok 多账号运营工作台，提供 PC 桌面端和 Python 脚本两套入口，用于管理账号、浏览器环境、FYP 养号任务、目标号互动、自动调度、评论素材和执行统计。
 
-> 项目背景与整体方案见 [`tiktok_matrix_proposal_v1.md`](./tiktok_matrix_proposal_v1.md)。
-> 规模目标：2 → 10 → 1000+ 账号。
+当前真实自动执行能力只支持 TikTok。产品结构已预留 Instagram、WhatsApp、抖音等平台，但这些平台暂不作为生产自动化入口。
 
-## 架构
+## 资源
 
+- [星域官网](https://sector.mechlabs.cn/)
+- [星域管理后台](https://sector.mechlabs.cn/dashboard)
+- [Gitlab仓库地址](https://gitlab.yaowutech.cn/g-group/frontend/h-ai-labs/h-sector)
+- [GitHub仓库地址](https://github.com/yaowu-ai/sector-desktop)
+
+## 快速开始
+
+### PC 桌面端
+
+生产使用优先选择 Windows 安装版，不需要安装 Python，也不依赖源码仓库。
+
+桌面端有三种常用入口：
+
+```powershell
+# 本地开发模式启动，不生成安装包
+.\desktop-dev.ps1
+
+# 测试环境安装包：前端按 test 模式构建
+.\desktop-build.ps1 -BuildMode test
+
+# 生产环境安装包：默认模式，包含 production 环境校验
+.\desktop-build.ps1
 ```
-云电脑 (Windows)
-├── 梯子 (Clash, TUN 模式)        — 内网穿透到 IPRoyal 住宅 IP
-├── BitBrowser 比特浏览器           — 指纹隔离，每号一个 profile + 一个住宅 IP
-│   └── 本地 API :54345           — open/close/pids
-└── account-matrix (本仓库)
-    ├── patchright                — 反检测版 Playwright，connect_over_cdp 接管浏览器
-    ├── main.py                   — 单次批量执行所有启用账号
-    └── scheduler.py              — FastAPI + APScheduler 定时调度
+
+`desktop-build.ps1` 的 `-BuildMode` 支持 `test` / `prod` / `production`，其中 `prod` 是 `production` 的别名；默认值为 `production`。生产包构建要求提供 `VITE_DESKTOP_API_BASE_URL` 和有效的 `VITE_LICENSE_PUBLIC_KEY`。
+
+如需指定打包使用的 Python 解释器：
+
+```powershell
+.\desktop-build.ps1 -Python ".runtime-build-venv\Scripts\python.exe"
 ```
 
-一个账号动作执行完即关闭浏览器，再执行下一个；文件锁保证**同一时间只操作一个账号**。
+### Python 脚本
+
+适用于开发、诊断或没有桌面端环境的场景。
+
+```powershell
+# 安装依赖（Python 3.13）
+pip install -r requirements.txt
+
+# 运行所有启用的 TikTok 账号
+python src/main.py --platform tiktok
+
+# 只运行一个账号
+python src/main.py --platform tiktok --account tiktok_1
+
+# 启动自动调度服务
+python src/scheduler.py
+
+# 查看统计
+python src/stats.py
+python src/stats.py --today
+python src/stats.py --days 7
+python src/stats.py --target
+```
+
+命令行 runtime 也可通过以下入口使用：
+
+```powershell
+python src/runtime_cli.py version --json
+python src/runtime_cli.py diagnostic --json
+python src/runtime_cli.py run --platform tiktok
+```
+
+## 核心配置
+
+配置源为 `config/accounts.yaml`。首次使用可复制 `config/accounts.example.yaml`。
+
+主要配置：
+
+- `platforms.tiktok.warmup`：FYP 浏览时长、点赞概率、关注数量和评论策略。
+- `platforms.tiktok.target_engagement`：目标官方号、参与账号、互动概率和关注策略。
+- `platforms.tiktok.scheduler`：每日触发次数和运行时间段。
+- `accounts`：账号启用状态、平台、浏览器 profile、IP 分组和班次。
+- `notify`：批次结束通知，支持 ServerChan / Bark / Webhook，默认关闭。
+
+评论素材：
+
+- `config/comments.txt`：通用评论池。
+- `config/comments_brand.txt`：品牌互动评论池。
 
 ## 目录结构
 
-```
-config/accounts.yaml      账号与行为配置（唯一配置源）
-config/comments.txt       FYP 默认评论池（每行一条，可自由增删）
-config/comments_brand.txt 品牌向评论池（目标号互动用）
-src/
-  main.py                 入口：批量/单账号执行，PID 文件锁，SQLite 动作日志
-  scheduler.py            定时调度服务（FastAPI lifespan + AsyncIOScheduler）
-  bitbrowser.py           BitBrowser 本地 API 客户端
-  actions.py              养号动作：fyp_browse / try_like / try_follow / try_comment
-  target_engage.py        目标号互动：抓新视频 + 点赞/评论自家品牌官方号
-  human_mouse.py          贝塞尔曲线模拟真人鼠标移动
-  notify.py               批次结束推送（ServerChan / Bark / Webhook）
-  stats.py                动作统计：按账号汇总浏览/点赞/关注/评论次数
-  test_like.py            点赞动作诊断脚本
-  test_comment.py         评论动作诊断脚本（dump 选择器 + 试发评论）
-data/                     运行时生成（已 gitignore）
-  actions.db              SQLite 动作日志
-  sessions.log            可读的会话日志
-  run.lock                PID 锁文件
+```text
+config/                配置文件与评论素材
+src/                   Python 自动化脚本和 runtime CLI
+desktop/               PC 桌面端
+runtime/               安装版运行时
+data/                  运行数据（日志、数据库、锁文件）
+docs/                  产品文档
 ```
 
-## 环境准备
+## 常用维护命令
 
-仅在**云电脑**上运行，本机不登录 TikTok / 不开 BitBrowser。
+```powershell
+# 创建绑定代理的 BitBrowser 窗口
+python src/create_browser.py --name tiktok_2 --proxy "host:port:user:password"
 
-1. 云电脑装好 Clash（TUN 模式）、BitBrowser，并在 BitBrowser 里为账号配好住宅 IP 代理后再生成指纹。
-2. Python 3.13，安装依赖：
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. BitBrowser 应用保持开启（脚本依赖其本地 API `127.0.0.1:54345`）。
+# 批量读取代理文件创建窗口
+python src/create_browser.py --file config/private/proxies/ip_0630
 
-## 配置
+# Gmail 初始化
+python src/gmail_setup.py --browser-name tiktok_25 --email account@gmail.com
 
-编辑 `config/accounts.yaml`：
+# 读取 TikTok 主页统计
+python src/profile_stats.py --browser-name tiktok_2
 
-```yaml
-defaults:
-  daily_actions:
-    fyp_browse_minutes: [2, 5] # 单次 FYP 浏览时长范围（分钟）
-    like_probability: 0.35 # 每个视频点赞概率
-    follows_per_session: [0, 1] # 每 session 关注数上限
-    comment:
-      enabled: true
-      comments_per_session: [1, 2] # 每 session 评论数上限（最多 1~2 条）
-      min_video_comments: 1000 # 仅评论“评论数 > 此值”的视频
-      probability: 0.25 # 命中候选视频后，单视频尝试评论的概率
-  active_hours: [[9, 12], [19, 23]]
-  timezone: America/New_York
+# 点赞诊断
+python src/test_like.py
 
-scheduler:
-  fires_per_day: 3 # 每天在 active_hours 内随机触发次数
-
-accounts:
-  - id: tiktok_1
-    enabled: true
-    bitbrowser_profile_id: "比特浏览器的 profile ID"
-    notes: "测试号 #1"
+# 评论诊断
+python src/test_comment.py
 ```
 
-新增账号 = 在 `accounts:` 下加一项；临时停用某号设 `enabled: false`。
+各脚本支持的完整参数、异常语义和边界条件请直接运行脚本查看 `--help`，或阅读源码内说明。
 
-## 使用
+## 运行注意事项
 
-```bash
-cd src
-
-# 单次执行所有启用账号（账号间随机间隔 30-120s）
-python main.py
-
-# 只跑某一个账号
-python main.py --account tiktok_1
-
-# 创建绑定固定代理的比特浏览器窗口（默认 socks5）
-python create_browser.py --name tiktok_2 \
-  --proxy "192.0.2.10:12324:用户名:密码"
-
-# HTTP 代理；省略 --proxy 会隐藏输入，避免密码进入 shell 历史
-python create_browser.py --name tiktok_2 --type http
-
-# 批量读取代理文件；自动读取现有 tiktok_N 窗口的最大编号并从 N+1 创建
-# 默认允许多个窗口复用已使用的代理；如需跳过则增加 --skip-used
-# 文件每行格式：host:port:用户名:密码（空行和 # 注释会忽略）
-python create_browser.py --file ../config/private/proxies/ip_0630
-
-# 打开 BitBrowser、进入 Google 登录、填写邮箱并点击 Next（停留在密码页）
-python gmail_setup.py --browser-name tiktok_25 --email account@gmail.com
-
-# 填写并提交密码；推荐隐藏输入，避免密码进入命令历史
-# 自动接受 Workspace 首次登录的 I understand 条款页
-# 登录完成后自动点击 Google Account 的 Google password
-# 遇到两步验证或其他安全挑战时会停留在对应页面
-python gmail_setup.py --browser-name tiktok_25 --email account@gmail.com --ask-password
-
-# I understand 默认等待 60 秒；超时后直接继续 Google password 流程
-python gmail_setup.py --browser-name tiktok_25 --email account@gmail.com \
-  --ask-password --terms-timeout 60
-
-# 未指定新密码时使用脚本内置的统一新密码并提交修改
-python gmail_setup.py --browser-name tiktok_25 --email account@gmail.com \
-  --ask-password
-
-# 批量读取邮箱文件；从指定窗口名开始逐个登录/改密，操作完自动关闭再打开下一个
-# 文件每行格式：账号----密码----可忽略备注（空行和 # 注释会忽略）
-# 例：第 1 行跑 tiktok_25，第 2 行跑 tiktok_26
-python gmail_setup.py --file ../config/private/mails/mail_0702 \
-  --browser-name tiktok_25
-
-# 查看统计
-python stats.py            # 全部（FYP 浏览/点赞/关注/评论）
-python stats.py --today    # 今天
-python stats.py --days 7   # 近 7 天
-python stats.py --target           # 目标号互动汇总（按号 + 按目标）
-python stats.py --target --today   # 今天的目标号互动（可配合 --today/--days）
-
-# 点赞动作诊断（浏览器已打开时也可用）
-python test_like.py
-
-# 评论动作诊断：找高评论视频、dump 选择器 HTML、试发评论
-python test_comment.py                  # 找 >1000 评论的视频并试发
-python test_comment.py --min 100 --no-post   # 调低门槛、只定位不发评论
-```
-
-### 读取 TikTok 主页统计
-
-`src/profile_stats.py` 读取主页的 Following（关注）、Followers（粉丝）、Likes（获赞），
-与 `stats.py` 的本地动作日志统计不同。沿用项目的 Patchright + CDP，输出 JSON。
-
-```bash
-# 在项目根目录运行；连接已提供 CDP 的 Chrome 或比特浏览器
-.venv/bin/python src/profile_stats.py --cdp http://127.0.0.1:9222
-
-# 或按完整窗口名称复用比特浏览器 API（窗口未打开时会打开）
-.venv/bin/python src/profile_stats.py --browser-name tiktok_2
-
-# 保存 JSON；诊断信息输出到 stderr，失败退出码为 1
-.venv/bin/python src/profile_stats.py --cdp http://127.0.0.1:9222 > profile_stats.json
-```
-
-默认统计所连接浏览器中**当前登录的 TikTok 账号**：优先从已有 TikTok 页面侧栏
-Profile（个人资料）入口识别用户名，再在同一会话新建临时标签直接读取账号主页并核对登录身份，
-最后关闭临时标签。只有已有页面无法识别账号时才访问 TikTok 首页；首页被拒绝时，
-可先手动打开已登录账号主页，再运行脚本。不会用当前浏览的主页 URL 猜测登录账号。
-即使现有标签正在浏览别人的主页，也不会将对方当成登录账号。未登录、无法识别、
-多个浏览器会话或读取期间账号变化时会报错，不会回退到固定账号。
-如需统计指定账号，可显式增加 `--handle mabilqadri`；该模式也使用临时标签。
-默认等待 30 秒，可用 `--timeout 60` 调整。用户已有的标签和浏览器保持打开。
-主页需显示英文统计；新建标签使用 `lang=en-GB`，已有标签请手动切换为英语。
-没有读到完整统计会报错，不会把加载失败当成 0。显示为 `1.2K` 等缩写时，
-数值换算为 1200，同时在 `raw` 保留原文，在 `approximate_fields` 标记该字段，不能视为精确人数。
-
-同时统计 **Liked 页签中已点赞的视频数量**（`liked`），与主页获赞数 `likes` 不同。
-脚本点击 Liked，滚动加载，并观察页面自身发出的列表响应，按视频 ID 去重。
-只有从首批开始连续读到 `hasMore=false` 时才返回 `liked` 总数及 `liked_complete=true`。
-未读完、超时、私密列表或请求失败时，`liked` 为 `null`，`liked_loaded` 为已读数量，
-`liked_status` 说明状态；其他主页统计仍返回。可增加 `--timeout` 等待较长列表。
-统计范围是 TikTok 当前可返回的点赞视频，不含已删除或不可访问的历史内容。
-
-默认当前登录账号模式还会打开侧栏 **Activity → All activity**，检查通知正文中的
-`liked your comment`，返回 `activity`：
-
-- `has_liked_your_comment`：已扫描消息中是否发现评论获赞；读取失败或未加载到消息时为 `null`。
-- `comment_like_notifications_count` / `matches`：匹配的通知条数和消息文本。
-- `notifications_scanned`：已扫描的去重消息数；相同完整文本的通知合并，多人点赞的合并通知算一条。
-- `status`：`loaded_list_stable` 表示滚动后列表暂时稳定；`timeout` 或 `activity_ui_unavailable` 表示读取受限。
-- `scope=loaded_notifications`：统计仅覆盖本次加载的消息，不宣称覆盖全部历史通知。
-- `comment_publish_evidence`：发现时为 `observed`，否则为 `not_confirmed`，**没有获赞通知不等于评论发送失败**。
-
-这只能说明某些评论曾发布并获赞，不能确认每条自动评论，也不能证明评论当前仍可见。
-脚本不发送消息；打开 Activity 可能由 TikTok 自动标记通知已读。
-显式传入 `--handle` 时不检查 Activity（返回 `skipped_explicit_handle`），避免将登录者的消息算到其他账号。
-正例测试夹具位于 `src/fixtures/activity_comment_likes.html`，使用截图文案构造，不是真实账号消息。
-
-普通 Chrome 已登录并不代表开启了 CDP。`--cdp` 需要浏览器实际提供的调试地址，
-不会自动连接任意已打开的 Chrome，也不会复制登录凭据或重启你的浏览器。
-比特浏览器用户可以直接使用 `--browser-name`。
-
-例如主页显示 58 / 33 / 175 时，JSON 包含：
-
-```json
-{ "following": 58, "followers": 33, "likes": 175 }
-```
-
-> 评论池在 `config/comments.txt`，每行一条。养号阶段仅评论“评论数 > `min_video_comments`”
-> 的高流量视频，每 session 最多 1~2 条，降低被判垃圾评论的风险。
-
-### 目标号互动（捧场自家品牌）
-
-让 `participants` 里的号每次 session **先刷 FYP，再去检查目标官方号有没有新视频**，
-按概率点赞/评论。配置在 `accounts.yaml` 的 `target_accounts` 段：
-
-```yaml
-target_accounts:
-  enabled: true
-  handles: [brand_account_1, brand_account_2, brand_account_3] # 目标官方号
-  participants: [tiktok_example_6, ..., tiktok_example_15] # 执行号（10 个）
-  first_run_latest_n: 1 # 无记录时只处理最新 1 条
-  max_videos_per_run: 3 # 单次单目标最多处理几条新视频
-  like_probability: 0.9
-  comment_probability: 0.5 # 不强制全员评论，打散抱团
-  comments_file: comments_brand.txt
-  follow: true # 关注目标号（每号对每个目标只关一次）
-  follow_probability: 0.5 # 遇到未关注的目标按此概率关注（分散到不同天）
-```
-
-**关注目标号**：参与号还会关注这几个品牌官方号——每号对每个目标**只关一次**
-（`target_follows` 表记录，关过/已关就不再关），且**按概率分散到不同天**完成，不是
-10 个号同一天一起关。关注状态经校验（按钮文案变 Following / 关注键消失才算成功），
-失败不记录、下次可重试。
-
-**判新机制**：抓目标号主页每条视频 URL 里的 `video_id`（雪花号，越大越新），
-与 SQLite `target_engagements` 表里的水位线（该号对该目标已处理过的最大 id）比对，
-`id > 水位线` 才算新。置顶旧视频因 id 较小不会被误判为新。某号对某目标**无记录时
-只处理最新 1 条**作为起点，之后每天自然跟进新发布的，同一天多次触发不会重复处理。
-
-> ⚠️ 10 个号集中给同一品牌点赞/评论本质是「互动抱团」，是平台重点打击对象。
-> 已内置缓解：点赞/评论各自独立按概率（非全员）、班次错峰、每次先刷 FYP 混淆。
-> **建议先用 2~3 个号灰度 2~3 天，确认点赞/评论留存（没被限流回滚）再扩到 10 个。**
-
-### 定时调度
-
-```bash
-cd src
-python scheduler.py
-```
-
-启动后每天 00:05 为**每个账号**在它自己的 `active_hours` 内随机生成 `fires_per_day`
-个触发时间，每次只跑那一个账号。服务监听 `127.0.0.1:9601`：
-
-- `GET /health` — 查看已排期的触发时间、锁状态
-- 触发前自动探测 BitBrowser API，不可达则跳过本次
-- 进程内串行：同一时刻只驱动一个 profile（`session_lock`）
-- 调度与手动 `python main.py` 通过 `data/run.lock` 互斥，不会同时跑
-
-**共享 IP 错峰（班次模型）**：20 号 / 10 IP 时，每个 IP 挂 2 个号——一个排上午班
-`[[9,12]]`、一个排晚上班 `[[19,23]]`。两班次时间不重叠，所以同一 IP 的两个号绝不会
-同时在线（隔离靠 `active_hours` 错班，配合进程内 `session_lock` 串行执行）。
-
-- `ip_group`：同一个 IP 的两个号填相同字母（A~J），**仅用于启动校验**——若同 IP 的
-  两个号被排进重叠的 `active_hours`，scheduler 启动时会告警。
-- `active_hours`：决定账号属于哪个班次。
-  > 默认 `accounts.yaml` 已是 20 号 / 2 班次模板，仅 `tiktok_1` 启用；填好各号的
-  > `bitbrowser_profile_id` 并把 `enabled` 改 `true` 即可逐个上线。
-
-## 通知（可选）
-
-`config/accounts.yaml` 的 `notify` 段默认关闭。开启后每批结束推送 OK/ERR 摘要，
-支持 ServerChan / Bark / 通用 Webhook。
-
-## 注意
-
-- profile **同一时间只能在一台机器打开**，切勿本机与云电脑同时登录同一 BitBrowser 账号。
+- 生产使用优先在云电脑上运行，不要在本机和云电脑同时打开同一个 BitBrowser profile。
+- BitBrowser 模式需要保持 BitBrowser 开启，并确保 Local API 默认可访问 `http://127.0.0.1:54345`。
+- 同一账号的自动化动作由运行锁控制，避免调度和手动执行同时驱动同一 profile。
+- 共享 IP 的账号应使用不同运行班次，避免同一 IP 下多个账号同时在线。
+- 自动登录遇到验证码、二次验证或安全检查时会进入人工接管，不会自动绕过平台安全检查。
+- 目标号互动建议先使用少量账号验证，确认互动留存后再逐步扩大范围。

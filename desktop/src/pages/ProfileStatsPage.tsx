@@ -184,11 +184,7 @@ export function ProfileStatsPage() {
 
   useEffect(() => {
     setCollectionPagination((current) => ({ ...current, current: 1 }));
-  }, [
-    filters.accountId,
-    filters.timeRange,
-    latestRows.length,
-  ]);
+  }, [filters.accountId, filters.timeRange, latestRows.length]);
 
   const updateFilter = <K extends keyof FilterState>(
     key: K,
@@ -230,11 +226,16 @@ export function ProfileStatsPage() {
 
   const storeStatus = getProfileStoreStatus(sqliteStatus);
   const accountCount = platformAccounts.length || summary.accountCount;
+  const coverageBars = useMemo(
+    () => buildAccountCoverageBars(latestRows),
+    [latestRows],
+  );
+  const collectedRowCount = latestRows.filter((row) => row.snapshot).length;
 
   return (
     <>
       <PageHeader
-        title="成果看板"
+        title="成果展示"
         description="只读展示 TikTok 养号任务完成后自动采集的账号快照。"
         extra={
           <Space>
@@ -257,7 +258,7 @@ export function ProfileStatsPage() {
             <Alert
               showIcon
               type="info"
-              message="成果看板记录库尚未初始化"
+              message="成果展示记录库尚未初始化"
               description="首次完成 TikTok 养号任务后会自动生成采集快照；当前暂无数据。"
               style={{ marginBottom: 16 }}
             />
@@ -266,7 +267,7 @@ export function ProfileStatsPage() {
             <Alert
               showIcon
               type="info"
-              message="成果看板快照表尚未创建"
+              message="成果展示快照表尚未创建"
               description="完成一次新版 TikTok 养号任务后会自动创建并写入快照。"
               style={{ marginBottom: 16 }}
             />
@@ -368,6 +369,26 @@ export function ProfileStatsPage() {
         </Col>
 
         <Col span={24}>
+          <Card
+            className="profile-coverage-card"
+            title="统计面板"
+            extra={
+              <Typography.Text type="secondary">
+                已采集 {collectedRowCount} 个账号
+              </Typography.Text>
+            }
+          >
+            <p className="profile-coverage-caption">
+              已采集账号中，有关注、粉丝、点赞、获赞，以及抓到评论获赞证据的数量
+            </p>
+            <AccountCoverageBarChart
+              bars={coverageBars}
+              yMax={collectedRowCount}
+            />
+          </Card>
+        </Col>
+
+        <Col span={24}>
           <Card title="采集详情">
             <Table
               rowKey="accountId"
@@ -400,6 +421,152 @@ export function ProfileStatsPage() {
         onClose={() => setDetailSnapshot(null)}
       />
     </>
+  );
+}
+
+const ACCOUNT_COVERAGE_DIMENSIONS = [
+  {
+    key: "commentEvidence",
+    label: "评论获赞证据",
+    matches: (snapshot: ProfileStatsSnapshot) =>
+      hasCommentLikeEvidence(snapshot),
+  },
+  {
+    key: "following",
+    label: "关注",
+    matches: (snapshot: ProfileStatsSnapshot) =>
+      hasPositiveCount(snapshot.following),
+  },
+  {
+    key: "followers",
+    label: "粉丝",
+    matches: (snapshot: ProfileStatsSnapshot) =>
+      hasPositiveCount(snapshot.followers),
+  },
+  {
+    key: "liked",
+    label: "点赞",
+    matches: (snapshot: ProfileStatsSnapshot) =>
+      hasPositiveCount(snapshot.liked),
+  },
+  {
+    key: "likes",
+    label: "获赞",
+    matches: (snapshot: ProfileStatsSnapshot) =>
+      hasPositiveCount(snapshot.likes),
+  },
+] as const;
+
+interface AccountCoverageBar {
+  key: string;
+  label: string;
+  accounts: number;
+}
+
+function buildAccountCoverageBars(
+  rows: LatestProfileRow[],
+): AccountCoverageBar[] {
+  const snapshots = rows
+    .map((row) => row.snapshot)
+    .filter((snapshot): snapshot is ProfileStatsSnapshot => Boolean(snapshot));
+  return ACCOUNT_COVERAGE_DIMENSIONS.map((dimension) => ({
+    key: dimension.key,
+    label: dimension.label,
+    accounts: snapshots.filter((snapshot) => dimension.matches(snapshot))
+      .length,
+  }));
+}
+
+function AccountCoverageBarChart({
+  bars,
+  yMax,
+}: {
+  bars: AccountCoverageBar[];
+  yMax: number;
+}) {
+  const scaleMax = Math.max(yMax, ...bars.map((bar) => bar.accounts), 1);
+  const ticks = buildCoverageAxisTicks(scaleMax);
+
+  return (
+    <div className="profile-coverage-chart">
+      <div className="profile-coverage-chart-y-title" aria-label="账号数">
+        <span>账</span>
+        <span>号</span>
+        <span>数</span>
+      </div>
+      <div className="profile-coverage-chart-plot">
+        <div className="profile-coverage-chart-axis" aria-hidden="true">
+          {ticks.map((tick) => (
+            <span key={tick} style={{ bottom: `${(tick / scaleMax) * 100}%` }}>
+              {tick}
+            </span>
+          ))}
+        </div>
+        <div className="profile-coverage-chart-grid" aria-hidden="true">
+          {ticks.map((tick) => (
+            <span
+              key={tick}
+              style={{ bottom: `${(tick / scaleMax) * 100}%` }}
+            />
+          ))}
+        </div>
+        <div
+          className="profile-coverage-chart-bars"
+          role="img"
+          aria-label={bars
+            .map((bar) => `${bar.label} ${bar.accounts} 个账号`)
+            .join("，")}
+        >
+          {bars.map((bar) => {
+            const ratio = bar.accounts / scaleMax;
+            const height = `${ratio * 100}%`;
+            return (
+              <div key={bar.key} className="profile-coverage-chart-col">
+                <div className="profile-coverage-chart-track">
+                  <div
+                    className={
+                      bar.accounts > 0
+                        ? "profile-coverage-chart-bar"
+                        : "profile-coverage-chart-bar is-empty"
+                    }
+                    style={{ height }}
+                    title={`${bar.label}：${bar.accounts} 个账号`}
+                  />
+                  <span
+                    className={
+                      bar.accounts > 0
+                        ? "profile-coverage-chart-value"
+                        : "profile-coverage-chart-value is-empty"
+                    }
+                    style={{ bottom: height }}
+                  >
+                    {bar.accounts}
+                  </span>
+                </div>
+                <div className="profile-coverage-chart-label">{bar.label}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function buildCoverageAxisTicks(max: number) {
+  if (max <= 1) return [0, 1];
+  if (max === 2) return [0, 1, 2];
+  return [0, Math.round(max / 2), max];
+}
+
+function hasPositiveCount(value?: number) {
+  return (value ?? 0) > 0;
+}
+
+function hasCommentLikeEvidence(snapshot: ProfileStatsSnapshot) {
+  return (
+    snapshot.commentPublishEvidence === "observed" ||
+    Boolean(snapshot.activityHasLikedYourComment)
   );
 }
 
@@ -858,11 +1025,7 @@ function compareOptionalNumbers(left?: number, right?: number) {
 
 function getCommentEvidenceFilterValue(snapshot?: ProfileStatsSnapshot) {
   if (!snapshot) return "未采集";
-  return snapshot &&
-    (snapshot.commentPublishEvidence === "observed" ||
-      snapshot.activityHasLikedYourComment)
-    ? "有证据"
-    : "未观察到";
+  return hasCommentLikeEvidence(snapshot) ? "有证据" : "未观察到";
 }
 
 function getLikedCompletenessFilterValue(snapshot?: ProfileStatsSnapshot) {
@@ -923,10 +1086,7 @@ function formatLikedCompleteness(snapshot: ProfileStatsSnapshot) {
 }
 
 function formatCommentEvidence(snapshot: ProfileStatsSnapshot) {
-  if (
-    snapshot.commentPublishEvidence === "observed" ||
-    snapshot.activityHasLikedYourComment
-  ) {
+  if (hasCommentLikeEvidence(snapshot)) {
     return <Tag color="green">有证据</Tag>;
   }
   return <Tag>未观察到</Tag>;

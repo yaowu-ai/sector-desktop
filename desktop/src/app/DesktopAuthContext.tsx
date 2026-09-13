@@ -13,13 +13,16 @@ import { DesktopLoginPage } from "../pages/DesktopLoginPage";
 import { setLicenseEntitlements } from "../services/api";
 import {
   activateDesktopDevice,
+  applyDesktopAuthResponse,
   buildDesktopSchedulerCredential,
   buildDesktopSession,
   clearDesktopSession,
   deactivateDesktopDevice,
-  getDeviceFingerprint,
   desktopLogin,
+  desktopRefresh,
   getDesktopApiBaseUrl,
+  getDeviceFingerprint,
+  isDesktopAuthExpiredError,
   issueDesktopSchedulerCredential,
   loadCurrentSubscription,
   loadDesktopSession,
@@ -35,6 +38,7 @@ import {
 
 const ENTITLEMENT_POLL_MS = 10 * 1000;
 const SCHEDULER_CREDENTIAL_MIN_VALID_MS = 60 * 1000;
+const ACCESS_TOKEN_REFRESH_AHEAD_MS = 60 * 1000;
 
 interface DesktopAuthContextValue {
   apiBaseUrl: string;
@@ -86,6 +90,8 @@ export function DesktopAuthProvider({
     null,
   );
   const entitlementRequestRef = useRef<EntitlementRequestEntry | null>(null);
+  const sessionRef = useRef<DesktopSession | null>(null);
+  sessionRef.current = session;
 
   const clearRuntimeState = useCallback(() => {
     setSession(null);
@@ -94,16 +100,42 @@ export function DesktopAuthProvider({
     setLicense(null);
   }, []);
 
+  const refreshSessionIfNeeded = useCallback(
+    async (current: DesktopSession, nextApiBaseUrl = apiBaseUrl) => {
+      const remainingMs = current.expiresAt - Date.now();
+      if (remainingMs > ACCESS_TOKEN_REFRESH_AHEAD_MS) {
+        return current;
+      }
+      if (!current.refreshToken) {
+        if (remainingMs <= 0) {
+          throw new Error("登录状态已过期，请重新登录");
+        }
+        return current;
+      }
+
+      const auth = await desktopRefresh(current, nextApiBaseUrl);
+      const nextSession = applyDesktopAuthResponse(current, auth);
+      saveDesktopSession(nextSession);
+      setSession(nextSession);
+      return nextSession;
+    },
+    [apiBaseUrl],
+  );
+
   const hydrateEntitlement = useCallback(
     async (nextSession: DesktopSession, nextApiBaseUrl = apiBaseUrl) => {
-      const requestKey = `${nextApiBaseUrl}|${nextSession.accessToken}`;
+      const freshSession = await refreshSessionIfNeeded(
+        nextSession,
+        nextApiBaseUrl,
+      );
+      const requestKey = `${nextApiBaseUrl}|${freshSession.accessToken}`;
       if (entitlementRequestRef.current?.key === requestKey) {
         return entitlementRequestRef.current.request;
       }
 
       const request = (async () => {
         const nextSubscription = await loadCurrentSubscription(
-          nextSession,
+          freshSession,
           nextApiBaseUrl,
         );
         setSubscription(nextSubscription);
@@ -120,28 +152,31 @@ export function DesktopAuthProvider({
         }
 
         const nextDevice = await activateDesktopDevice(
-          nextSession,
+          freshSession,
           nextApiBaseUrl,
         );
         const nextLicense = await loadVerifiedCurrentLicense(
-          nextSession,
+          freshSession,
           nextApiBaseUrl,
         );
         const nextLimits = readDesktopLicenseLimits(nextLicense);
-        let nextSessionWithCredential: DesktopSession = nextSession;
+        let nextSessionWithCredential: DesktopSession = freshSession;
         if (nextLimits.scheduler) {
-          if (!hasFreshSchedulerCredential(nextSession)) {
+          if (!hasFreshSchedulerCredential(freshSession)) {
             const schedulerCredential = buildDesktopSchedulerCredential(
-              await issueDesktopSchedulerCredential(nextSession, nextApiBaseUrl),
+              await issueDesktopSchedulerCredential(
+                freshSession,
+                nextApiBaseUrl,
+              ),
             );
             nextSessionWithCredential = {
-              ...nextSession,
+              ...freshSession,
               schedulerCredential,
             };
           }
-        } else if (nextSession.schedulerCredential) {
+        } else if (freshSession.schedulerCredential) {
           nextSessionWithCredential = {
-            ...nextSession,
+            ...freshSession,
             schedulerCredential: undefined,
           };
         }
@@ -164,7 +199,7 @@ export function DesktopAuthProvider({
         }
       }
     },
-    [apiBaseUrl],
+    [apiBaseUrl, refreshSessionIfNeeded],
   );
 
   const logout = useCallback(() => {
@@ -202,6 +237,10 @@ export function DesktopAuthProvider({
       await hydrateEntitlement(session, apiBaseUrl);
     } catch (error) {
       const message = formatError(error);
+      if (isDesktopAuthExpiredError(message)) {
+        logout();
+        return;
+      }
       if (isTransientEntitlementError(message)) {
         setEntitlementWarning(message);
         return;
@@ -212,7 +251,7 @@ export function DesktopAuthProvider({
     } finally {
       setLoading(false);
     }
-  }, [apiBaseUrl, hydrateEntitlement, session]);
+  }, [apiBaseUrl, hydrateEntitlement, logout, session]);
 
   const login = useCallback(
     async (values: {
@@ -270,7 +309,10 @@ export function DesktopAuthProvider({
         await hydrateEntitlement(saved, apiBaseUrl);
       } catch (error) {
         const message = formatError(error);
-        if (isTransientEntitlementError(message)) {
+        if (isDesktopAuthExpiredError(message)) {
+          clearDesktopSession();
+          clearRuntimeState();
+        } else if (isTransientEntitlementError(message)) {
           setEntitlementWarning(message);
         } else {
           setError(message);
@@ -288,12 +330,18 @@ export function DesktopAuthProvider({
     if (!session) return;
 
     const pollEntitlement = async () => {
+      const current = sessionRef.current;
+      if (!current) return;
       try {
-        await hydrateEntitlement(session, apiBaseUrl);
+        await hydrateEntitlement(current, apiBaseUrl);
         setEntitlementWarning(null);
         setError(null);
       } catch (error) {
         const message = formatError(error);
+        if (isDesktopAuthExpiredError(message)) {
+          logout();
+          return;
+        }
         if (isTransientEntitlementError(message)) {
           setEntitlementWarning(message);
           return;
@@ -308,7 +356,7 @@ export function DesktopAuthProvider({
     }, ENTITLEMENT_POLL_MS);
 
     return () => window.clearInterval(id);
-  }, [apiBaseUrl, hydrateEntitlement, session]);
+  }, [apiBaseUrl, hydrateEntitlement, logout, session]);
 
   useEffect(() => {
     const limits = readDesktopLicenseLimits(license);

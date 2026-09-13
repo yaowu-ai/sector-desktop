@@ -22,6 +22,7 @@ export interface DesktopApiEnvelope<T> {
 
 export interface DesktopSession {
   accessToken: string
+  refreshToken?: string
   expiresAt: number
   schedulerCredential?: DesktopSchedulerCredential
   username: string
@@ -38,6 +39,7 @@ export interface DesktopSchedulerCredential {
 
 export interface DesktopAuthResponse {
   accessToken: string
+  refreshToken?: string
   expiresIn: number
   user?: {
     userId: string
@@ -246,8 +248,28 @@ export function buildDesktopSession(username: string, response: DesktopAuthRespo
     phone: response.user?.phone || '',
     userRole: normalizeUserRole(response.user?.userRole),
     accessToken: response.accessToken,
+    refreshToken: response.refreshToken,
     expiresAt: Date.now() + response.expiresIn * 1000,
   }
+}
+
+export function applyDesktopAuthResponse(
+  session: DesktopSession,
+  response: DesktopAuthResponse,
+): DesktopSession {
+  return {
+    ...buildDesktopSession(session.username, response),
+    refreshToken: response.refreshToken || session.refreshToken,
+    schedulerCredential: session.schedulerCredential,
+  }
+}
+
+export function isDesktopAuthExpiredError(message: string) {
+  return (
+    message.includes('请先登录') ||
+    message.includes('登录状态已过期') ||
+    message.includes('桌面端登录状态无效')
+  )
 }
 
 export function buildDesktopSchedulerCredential(
@@ -291,12 +313,15 @@ export function desktopLogin(username: string, password: string, apiBaseUrl = ge
 }
 
 export function desktopRefresh(session: DesktopSession, apiBaseUrl = getDesktopApiBaseUrl()) {
+  if (!session.refreshToken) {
+    return Promise.reject(new Error('登录状态已过期，请重新登录'))
+  }
   return desktopApiRequest<DesktopAuthResponse>(
     apiBaseUrl,
     '/auth/refresh',
     {
       method: 'POST',
-      token: session.accessToken,
+      body: { refreshToken: session.refreshToken },
     },
   )
 }
@@ -644,6 +669,7 @@ function formatDesktopApiError(error: unknown) {
     'Device not found': '未找到当前设备',
     'Device quota exceeded': '设备名额已满，请先释放旧设备后再登录',
     'Invalid desktop session': '桌面端登录状态无效，请重新登录',
+    Unauthorized: '请先登录',
     'Password verification failed': '密码校验失败，请稍后再试',
     Unauthorized: '请先登录',
     'Load failed': '请求服务端失败，请稍后重试',

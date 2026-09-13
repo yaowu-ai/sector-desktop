@@ -82,7 +82,7 @@ export const routes: AppRoute[] = [
   { key: 'home', label: '首页', icon: Home, element: <HomePage />, scope: 'all_platforms' },
   {
     key: 'profile-stats',
-    label: '成果看板',
+    label: '成果展示',
     icon: LayoutDashboard,
     element: <ProfileStatsPage />,
     scope: 'current_platform',
