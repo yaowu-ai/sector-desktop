@@ -49,3 +49,27 @@ export function canAccessPlatform(platform: Pick<PlatformDefinition, 'status'>, 
 export function filterPlatformsByRole<T extends Pick<PlatformDefinition, 'status'>>(platforms: T[], role: DesktopUserRole) {
   return platforms.filter((platform) => canAccessPlatform(platform, role))
 }
+
+const SYSTEM_MENU_ROUTE_KEYS = new Set([
+  'profile',
+  'plans',
+  'license-devices',
+  'contact',
+  'notifications',
+  'about',
+  'settings',
+])
+
+export function filterRoutesByPlatformAvailability<
+  T extends Pick<AppRoute, 'key'>,
+>(
+  routes: T[],
+  platform: Pick<PlatformDefinition, 'status' | 'automaticExecutionSupported'>,
+) {
+  const platformCanExecute =
+    platform.status === 'supported' && platform.automaticExecutionSupported
+
+  if (platformCanExecute) return routes
+
+  return routes.filter((route) => SYSTEM_MENU_ROUTE_KEYS.has(route.key))
+}

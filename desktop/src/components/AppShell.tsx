@@ -19,9 +19,11 @@ import { useDesktopNotifications } from "../app/DesktopNotificationsContext";
 import {
   DESKTOP_USER_ROLES,
   filterRoutesByRole,
+  filterRoutesByPlatformAvailability,
   normalizeDesktopUserRole,
 } from "../app/routePermissions";
 import { appRoutes, routes, type AppRoute } from "../app/routes";
+import { usePlatformContext } from "../app/PlatformContext";
 import {
   PROCESS_STARTED_EVENT,
   checkBitbrowserApi,
@@ -56,6 +58,7 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
   const contentRef = useRef<HTMLElement>(null);
   const desktopAuth = useDesktopAuth();
   const desktopNotifications = useDesktopNotifications();
+  const { currentPlatformDefinition } = usePlatformContext();
   const startupReportedRef = useRef<string | null>(null);
   const previousProcessStatusRef = useRef<ProcessStatus | null>(null);
   const terminalUsageReportedRef = useRef<Set<string>>(new Set());
@@ -77,15 +80,34 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
     () => filterRoutesByRole(appRoutes, userRole),
     [userRole],
   );
-  const defaultRouteKey = permittedRoutes[0]?.key ?? "home";
+  const visibleRoutes = useMemo(
+    () =>
+      filterRoutesByPlatformAvailability(
+        permittedRoutes,
+        currentPlatformDefinition,
+      ),
+    [currentPlatformDefinition, permittedRoutes],
+  );
+  const visibleRouteKeys = useMemo(
+    () => new Set(visibleRoutes.map((route) => route.key)),
+    [visibleRoutes],
+  );
+  const availableAppRoutes = useMemo(
+    () =>
+      permittedAppRoutes.filter(
+        (route) => route.key === "platforms" || visibleRouteKeys.has(route.key),
+      ),
+    [permittedAppRoutes, visibleRouteKeys],
+  );
+  const defaultRouteKey = visibleRoutes[0]?.key ?? "profile";
   const isTechnician = userRole === DESKTOP_USER_ROLES.technician;
   const canOpenNotifications = permittedAppRoutes.some(
     (route) => route.key === "notifications",
   );
   const siderMenuItems = useMemo(
     () =>
-      buildSiderMenuItems(permittedRoutes, desktopNotifications.unreadCount),
-    [desktopNotifications.unreadCount, permittedRoutes],
+      buildSiderMenuItems(visibleRoutes, desktopNotifications.unreadCount),
+    [desktopNotifications.unreadCount, visibleRoutes],
   );
   const [openKeys, setOpenKeys] = useState<string[]>(() =>
     getInitialOpenKeys(),
@@ -93,10 +115,11 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
 
   const activeRoute = useMemo(
     () =>
-      permittedAppRoutes.find((route) => route.key === activeKey) ??
-      permittedRoutes[0] ??
+      availableAppRoutes.find((route) => route.key === activeKey) ??
+      visibleRoutes[0] ??
+      availableAppRoutes[0] ??
       routes[0],
-    [activeKey, permittedAppRoutes, permittedRoutes],
+    [activeKey, availableAppRoutes, visibleRoutes],
   );
 
   const refreshBitbrowser = useCallback(async () => {
@@ -180,18 +203,18 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
   }, [activeKey]);
 
   useEffect(() => {
-    if (permittedAppRoutes.some((route) => route.key === activeKey)) return;
+    if (availableAppRoutes.some((route) => route.key === activeKey)) return;
     setActiveKey(defaultRouteKey);
-  }, [activeKey, defaultRouteKey, permittedAppRoutes]);
+  }, [activeKey, availableAppRoutes, defaultRouteKey]);
 
   useEffect(() => {
-    const groupKey = permittedRoutes.find((route) => route.key === activeKey)
+    const groupKey = visibleRoutes.find((route) => route.key === activeKey)
       ?.menuGroup?.key;
     if (!groupKey) return;
     setOpenKeys((current) =>
       current.includes(groupKey) ? current : [...current, groupKey],
     );
-  }, [activeKey, permittedRoutes]);
+  }, [activeKey, visibleRoutes]);
 
   useEffect(() => {
     contentRef.current?.scrollTo({ top: 0, left: 0 });
@@ -199,11 +222,11 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
 
   useEffect(() => {
     const onHashChange = () => {
-      setActiveKey(getInitialRouteKey(permittedAppRoutes, defaultRouteKey));
+      setActiveKey(getInitialRouteKey(availableAppRoutes, defaultRouteKey));
     };
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
-  }, [defaultRouteKey, permittedAppRoutes]);
+  }, [availableAppRoutes, defaultRouteKey]);
 
   useEffect(() => {
     void refreshAll();
@@ -261,14 +284,14 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
         <Menu
           mode="inline"
           selectedKeys={
-            permittedRoutes.some((route) => route.key === activeKey)
+            visibleRoutes.some((route) => route.key === activeKey)
               ? [activeKey]
               : []
           }
           openKeys={openKeys}
           onOpenChange={setOpenKeys}
           onClick={({ key }) => {
-            if (permittedRoutes.some((route) => route.key === key)) {
+            if (visibleRoutes.some((route) => route.key === key)) {
               setActiveKey(key);
             }
           }}
