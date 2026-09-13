@@ -1057,9 +1057,23 @@ function formatNumber(value?: number) {
 
 function formatDateTime(value?: string) {
   if (!value) return "-";
-  const ts = Date.parse(value);
-  if (Number.isNaN(ts)) return value;
-  return new Date(ts).toLocaleString();
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const datePart = [
+    date.getFullYear(),
+    padDatePart(date.getMonth() + 1),
+    padDatePart(date.getDate()),
+  ].join("-");
+  const timePart = [
+    padDatePart(date.getHours()),
+    padDatePart(date.getMinutes()),
+    padDatePart(date.getSeconds()),
+  ].join(":");
+  return `${datePart} ${timePart}`;
+}
+
+function padDatePart(value: number) {
+  return String(value).padStart(2, "0");
 }
 
 function formatCollectionStatus(status: string, error?: string) {

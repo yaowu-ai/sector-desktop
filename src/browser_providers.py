@@ -174,7 +174,10 @@ def background_browser_enabled() -> bool:
 
 
 def browser_launch_args() -> list[str]:
-    return [BACKGROUND_BROWSER_ARG] if background_browser_enabled() else []
+    args = ["--mute-audio"]
+    if background_browser_enabled():
+        args.append(BACKGROUND_BROWSER_ARG)
+    return args
 
 
 def set_browser_process_visibility(pid: Optional[int], visible: bool) -> bool:
@@ -361,6 +364,7 @@ class BuiltinChromiumProvider:
             "--no-default-browser-check",
             "--disable-background-networking",
             "--disable-popup-blocking",
+            "--mute-audio",
             "about:blank",
         ]
         if background_browser_enabled():
