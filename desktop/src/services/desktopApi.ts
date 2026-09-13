@@ -669,7 +669,6 @@ function formatDesktopApiError(error: unknown) {
     'Device not found': '未找到当前设备',
     'Device quota exceeded': '设备名额已满，请先释放旧设备后再登录',
     'Invalid desktop session': '桌面端登录状态无效，请重新登录',
-    Unauthorized: '请先登录',
     'Password verification failed': '密码校验失败，请稍后再试',
     Unauthorized: '请先登录',
     'Load failed': '请求服务端失败，请稍后重试',
