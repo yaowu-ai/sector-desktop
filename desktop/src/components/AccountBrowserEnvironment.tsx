@@ -5,11 +5,13 @@ import type { Account, BrowserProviderId } from '../services/types'
 const PROVIDER_LABELS: Record<BrowserProviderId, string> = {
   bitbrowser: 'Bit浏览器',
   builtin_chromium: '内置浏览器',
+  ixbrowser: 'ix浏览器',
 }
 
 const PROVIDER_COLORS: Record<BrowserProviderId, string> = {
   bitbrowser: 'green',
   builtin_chromium: 'gold',
+  ixbrowser: 'blue',
 }
 
 interface AccountBrowserEnvironmentProps {
@@ -48,6 +50,9 @@ function resolveBrowserProvider(account: Account): BrowserProviderId {
 function browserEnvironmentDetail(account: Account, provider: BrowserProviderId) {
   if (provider === 'bitbrowser') {
     return `profile_id: ${account.bitbrowserProfileId ?? account.browser?.profileId ?? '未绑定'}`
+  }
+  if (provider === 'ixbrowser') {
+    return `profile_id: ${account.browser?.profileId ?? '未绑定'}`
   }
   return `用户数据目录：${account.browser?.userDataDir ?? '账号独立目录'}`
 }

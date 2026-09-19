@@ -28,6 +28,7 @@ from platforms.registration.base import RegistrationStatus
 from platforms.registration.registry import adapter_for_platform
 from platforms.tiktok.auth import TikTokAuthAdapter, auto_login_enabled
 from platforms.tiktok.fyp import build_fyp_plan, run_tiktok_fyp
+from platforms.tiktok.navigation import navigate_tiktok_page
 from platforms.tiktok.register import ensure_tiktok_google_login
 from platforms.tiktok.target import run_target_engagement
 
@@ -98,7 +99,7 @@ def choose_tiktok_page(context):
 
     page = fallback or (context.pages[0] if context.pages else context.new_page())
     try:
-        page.goto("https://www.tiktok.com/foryou", timeout=60000)
+        navigate_tiktok_page(page)
     except Exception as exc:
         raise RuntimeError(tiktok_network_error_detail(exc)) from exc
     page.bring_to_front()

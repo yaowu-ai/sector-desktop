@@ -367,9 +367,12 @@ fn normalize_browser_provider(value: &str) -> Result<Option<String>, String> {
     if trimmed.is_empty() {
         return Ok(Some("bitbrowser".to_string()));
     }
-    if matches!(trimmed, "bitbrowser" | "builtin_chromium") {
+    if matches!(trimmed, "bitbrowser" | "builtin_chromium" | "ixbrowser") {
         Ok(Some(trimmed.to_string()))
     } else {
-        Err("default browser provider must be bitbrowser or builtin_chromium".to_string())
+        Err(
+            "default browser provider must be bitbrowser, builtin_chromium, or ixbrowser"
+                .to_string(),
+        )
     }
 }

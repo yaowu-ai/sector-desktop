@@ -66,7 +66,7 @@ export interface Account {
   lastStatus?: AccountLastStatus
 }
 
-export type BrowserProviderId = 'bitbrowser' | 'builtin_chromium'
+export type BrowserProviderId = 'bitbrowser' | 'builtin_chromium' | 'ixbrowser'
 
 export interface AccountBrowserConfig {
   provider?: BrowserProviderId

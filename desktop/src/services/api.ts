@@ -281,6 +281,10 @@ export function checkBitbrowserApi() {
   return invoke<ApiStatus>('check_bitbrowser_api')
 }
 
+export function checkIxbrowserApi() {
+  return invoke<ApiStatus>('check_ixbrowser_api')
+}
+
 export function openBitbrowserDownloadPage() {
   return invoke<void>('open_bitbrowser_download_page')
 }
@@ -305,6 +309,10 @@ export function listBrowserProfiles() {
   return invoke<BrowserProfile[]>('list_browser_profiles')
 }
 
+export function listIxbrowserProfiles() {
+  return invoke<BrowserProfile[]>('list_ixbrowser_profiles')
+}
+
 export function getProfileStatus(profileId: string) {
   return invoke<ProfileStatus>('get_profile_status', { profileId })
 }
@@ -313,8 +321,16 @@ export function openProfile(profileId: string) {
   return invoke<ProfileOperationResult>('open_profile', { profileId })
 }
 
+export function openIxbrowserProfile(profileId: string) {
+  return invoke<ProfileOperationResult>('open_ixbrowser_profile', { profileId })
+}
+
 export function closeProfile(profileId: string) {
   return invoke<ProfileOperationResult>('close_profile', { profileId })
+}
+
+export function closeIxbrowserProfile(profileId: string) {
+  return invoke<ProfileOperationResult>('close_ixbrowser_profile', { profileId })
 }
 
 export function resolveCdpPageWs(request: CdpResolveRequest) {

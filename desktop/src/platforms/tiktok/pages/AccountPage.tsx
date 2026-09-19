@@ -52,6 +52,7 @@ import {
   checkBitbrowserApi,
   openBitbrowserDownloadPage,
   getCurrentRunStatus,
+  openExternalLink,
 } from "../../../services/api";
 import { runTikTokRegister, runTikTokRegisterBatch } from "../services";
 import { usePlatformContext } from "../../../app/PlatformContext";
@@ -82,7 +83,7 @@ interface AccountFormValues {
   ipGroup?: number;
   activeHours: Array<{ start?: number; end?: number }>;
   browserProvider?: BrowserProviderId;
-  bitbrowserProfileId?: string;
+  browserProfileId?: string;
   proxyType?: "http" | "https" | "socks5";
   proxy?: string;
   userDataDir?: string;
@@ -95,6 +96,7 @@ interface AccountFormValues {
 }
 
 const BITBROWSER_DOWNLOAD_URL = "https://www.bitbrowser.cn/download";
+const IXBROWSER_DOWNLOAD_URL = "https://www.ixbrowser.com/zh/download-page";
 const BUSY_RUN_STATUSES = new Set([
   "starting",
   "running",
@@ -108,7 +110,7 @@ const ACCOUNT_DRAFT_FIELD_NAMES = [
   "ipGroup",
   "activeHours",
   "browserProvider",
-  "bitbrowserProfileId",
+  "browserProfileId",
   "proxyType",
   "proxy",
   "userDataDir",
@@ -158,6 +160,7 @@ export function AccountPage() {
         account.id,
         account.platform,
         account.bitbrowserProfileId,
+        account.browser?.profileId,
         account.login?.username,
         account.notes,
       ]
@@ -270,7 +273,7 @@ export function AccountPage() {
       enabled: true,
       activeHours: [{ start: 9, end: 12 }],
       browserProvider: "bitbrowser",
-      bitbrowserProfileId: "",
+      browserProfileId: "",
       proxyType: "socks5",
       proxy: "",
       userDataDir: "",
@@ -362,7 +365,7 @@ export function AccountPage() {
   const confirmDeleteAccount = (account: Account) => {
     confirmDanger({
       title: `删除账号 ${account.id}`,
-      content: `只会从【账号管理】删除该账号配置，不会删除 Bit浏览器窗口 ID ${account.bitbrowserProfileId ?? "未绑定"}。此操作不可撤销。`,
+      content: `只会从【账号管理】删除该账号配置，不会删除已绑定的浏览器窗口。此操作不可撤销。`,
       onOk: () => {
         void persistAccounts(
           accounts.filter((item) => item.id !== account.id),
@@ -1091,6 +1094,14 @@ function AccountForm({
     }
   };
 
+  const openIxbrowserDownload = async () => {
+    try {
+      await openExternalLink(IXBROWSER_DOWNLOAD_URL);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : String(error));
+    }
+  };
+
   return (
     <Form form={form} layout="vertical" requiredMark={false}>
       <Form.Item
@@ -1164,7 +1175,17 @@ function AccountForm({
         label="浏览器提供方"
         rules={[{ required: true }]}
         extra={
-          bitbrowserUnavailable ? (
+          browserProvider === "ixbrowser" ? (
+            <Typography.Link
+              href={IXBROWSER_DOWNLOAD_URL}
+              onClick={(event) => {
+                event.preventDefault();
+                void openIxbrowserDownload();
+              }}
+            >
+              下载 ix浏览器
+            </Typography.Link>
+          ) : bitbrowserUnavailable ? (
             <Typography.Link
               href={BITBROWSER_DOWNLOAD_URL}
               onClick={(event) => {
@@ -1180,6 +1201,7 @@ function AccountForm({
         <Select
           options={[
             { value: "bitbrowser", label: "Bit浏览器" },
+            { value: "ixbrowser", label: "ix浏览器" },
             { value: "builtin_chromium", label: "内置浏览器" },
           ]}
         />
@@ -1187,7 +1209,7 @@ function AccountForm({
 
       {browserProvider === "bitbrowser" ? (
         <Form.Item
-          name="bitbrowserProfileId"
+          name="browserProfileId"
           label="Bit浏览器窗口 ID"
           rules={[
             {
@@ -1199,7 +1221,9 @@ function AccountForm({
                 const conflict = accounts.find(
                   (account) =>
                     account.id !== editingAccount?.id &&
-                    account.bitbrowserProfileId === profileId,
+                    resolveBrowserProvider(account) === browserProvider &&
+                    (account.bitbrowserProfileId ?? account.browser?.profileId) ===
+                      profileId,
                 );
                 if (conflict) {
                   return Promise.reject(
@@ -1212,6 +1236,42 @@ function AccountForm({
           ]}
         >
           <Input placeholder="Bit浏览器窗口 ID" />
+        </Form.Item>
+      ) : null}
+
+      {browserProvider === "ixbrowser" ? (
+        <Form.Item
+          name="browserProfileId"
+          label="ix浏览器 Profile ID"
+          rules={[
+            {
+              validator: (_, value?: string) => {
+                const profileId = value?.trim();
+                if (!profileId) {
+                  return Promise.resolve();
+                }
+                if (!/^\d+$/.test(profileId)) {
+                  return Promise.reject(
+                    new Error("ix浏览器 Profile ID 必须是数字"),
+                  );
+                }
+                const conflict = accounts.find(
+                  (account) =>
+                    account.id !== editingAccount?.id &&
+                    resolveBrowserProvider(account) === browserProvider &&
+                    account.browser?.profileId === profileId,
+                );
+                if (conflict) {
+                  return Promise.reject(
+                    new Error(`Profile ID 已被 ${conflict.id} 使用`),
+                  );
+                }
+                return Promise.resolve();
+              },
+            },
+          ]}
+        >
+          <Input placeholder="填写 ix浏览器中的数字 Profile ID" />
         </Form.Item>
       ) : null}
 
@@ -1591,7 +1651,8 @@ function accountToForm(account: Account): AccountFormValues {
     activeHours: account.activeHours.map(([start, end]) => ({ start, end })),
     browserProvider:
       account.browserProvider ?? account.browser?.provider ?? "bitbrowser",
-    bitbrowserProfileId: account.bitbrowserProfileId ?? "",
+    browserProfileId:
+      account.browser?.profileId ?? account.bitbrowserProfileId ?? "",
     proxyType: account.browser?.proxyType ?? "socks5",
     proxy: account.browser?.proxy ?? "",
     userDataDir: account.browser?.userDataDir ?? "",
@@ -1609,7 +1670,7 @@ function formToAccount(
   existing: Account | null,
 ): Account {
   const provider = values.browserProvider ?? "bitbrowser";
-  const profileId = values.bitbrowserProfileId?.trim() || undefined;
+  const profileId = values.browserProfileId?.trim() || undefined;
   const proxy = values.proxy?.trim() || undefined;
   const userDataDir = values.userDataDir?.trim() || undefined;
   return {
@@ -1626,7 +1687,10 @@ function formToAccount(
     browserProvider: provider,
     browser: {
       provider,
-      profileId: provider === "bitbrowser" ? profileId : undefined,
+      profileId:
+        provider === "bitbrowser" || provider === "ixbrowser"
+          ? profileId
+          : undefined,
       proxyType:
         provider === "builtin_chromium"
           ? (values.proxyType ?? "socks5")
@@ -1696,6 +1760,9 @@ function accountRegisterDisabledReason(
     !account.browser?.profileId
   ) {
     return `${account.id} 未绑定 Bit浏览器窗口 ID`;
+  }
+  if (provider === "ixbrowser" && !account.browser?.profileId) {
+    return `${account.id} 未绑定 ix浏览器 Profile ID`;
   }
   return undefined;
 }

@@ -45,6 +45,9 @@ platforms:
 bitbrowser:
   api_url: http://127.0.0.1:54345
 
+ixbrowser:
+  api_url: http://127.0.0.1:53200
+
 scheduler:
   fires_per_day: 3
 
@@ -67,4 +70,11 @@ notify:
     url: ""
 
 accounts:
+  # 示例：
+  # - id: tiktok_1
+  #   enabled: true
+  #   platform: tiktok
+  #   browser_provider: ixbrowser
+  #   browser:
+  #     profile_id: "123456"
   []

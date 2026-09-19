@@ -4,7 +4,7 @@ from copy import deepcopy
 DEFAULT_PLATFORM = "tiktok"
 VALID_PLATFORMS = {"tiktok", "instagram", "whatsapp", "douyin"}
 DEFAULT_BROWSER_PROVIDER = "bitbrowser"
-VALID_BROWSER_PROVIDERS = {"bitbrowser", "builtin_chromium"}
+VALID_BROWSER_PROVIDERS = {"bitbrowser", "builtin_chromium", "ixbrowser"}
 DEFAULT_AI_COMMENT_CONFIG = {
     "enabled": False,
     "provider": "kimi_moonshot",

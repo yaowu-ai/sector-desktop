@@ -46,7 +46,9 @@ import { usePlatformContext } from "../../../app/PlatformContext";
 import { useBrowserPreview } from "../../../hooks/useBrowserPreview";
 import {
   checkBitbrowserApi,
+  checkIxbrowserApi,
   checkProxy,
+  closeIxbrowserProfile,
   closeProfile,
   createBatchBrowserProfiles,
   cleanupBuiltinChromiumData,
@@ -54,9 +56,12 @@ import {
   diagnoseAccountBrowser,
   getBuiltinChromiumStatus,
   listBrowserProfiles,
+  listIxbrowserProfiles,
   loadBrowserWindowSettings,
   loadAccounts,
+  openExternalLink,
   openBitbrowserDownloadPage,
+  openIxbrowserProfile,
   openProfile,
   syncAccountsApply,
   syncAccountsDryRun,
@@ -119,10 +124,16 @@ export function BrowserProfilePage() {
   const [batchForm] = Form.useForm<BatchCreateForm>();
   const [syncForm] = Form.useForm<SyncForm>();
   const [apiStatus, setApiStatus] = useState<ApiStatus | null>(null);
+  const [ixbrowserStatus, setIxbrowserStatus] = useState<ApiStatus | null>(
+    null,
+  );
   const [chromiumStatus, setChromiumStatus] =
     useState<BuiltinChromiumStatus | null>(null);
   const [accounts, setAccounts] = useState<AccountSummary[]>([]);
   const [profiles, setProfiles] = useState<BrowserProfile[]>([]);
+  const [ixbrowserProfiles, setIxbrowserProfiles] = useState<BrowserProfile[]>(
+    [],
+  );
   const [loading, setLoading] = useState(true);
   const [operatingProfileId, setOperatingProfileId] = useState<string>();
   const [proxyChecking, setProxyChecking] = useState(false);
@@ -169,6 +180,23 @@ export function BrowserProfilePage() {
       ).length,
     [accounts],
   );
+  const ixbrowserAccountCount = useMemo(
+    () =>
+      accounts.filter((account) => effectiveProvider(account) === "ixbrowser")
+        .length,
+    [accounts],
+  );
+  const scopedIxbrowserProfiles = useMemo(
+    () =>
+      ixbrowserProfiles.filter((profile) =>
+        profileMatchesPlatform(profile, currentPlatform),
+      ),
+    [currentPlatform, ixbrowserProfiles],
+  );
+  const ixbrowserOpenedCount = useMemo(
+    () => scopedIxbrowserProfiles.filter((profile) => profile.opened).length,
+    [scopedIxbrowserProfiles],
+  );
   const pendingAccountCount = useMemo(() => {
     return accounts.filter((account) => {
       const provider = effectiveProvider(account);
@@ -182,9 +210,15 @@ export function BrowserProfilePage() {
       if (provider === "builtin_chromium" && !chromiumStatus?.available) {
         return true;
       }
+      if (
+        provider === "ixbrowser" &&
+        (!account.browser?.profileId || !ixbrowserStatus?.available)
+      ) {
+        return true;
+      }
       return false;
     }).length;
-  }, [accounts, chromiumStatus]);
+  }, [accounts, chromiumStatus, ixbrowserStatus]);
   const chromiumAccounts = useMemo(
     () =>
       accounts.filter(
@@ -196,12 +230,14 @@ export function BrowserProfilePage() {
   const refresh = async () => {
     setLoading(true);
     try {
-      const [status, chromium, windowSettings] = await Promise.all([
+      const [status, ixStatus, chromium, windowSettings] = await Promise.all([
         checkBitbrowserApi(),
+        checkIxbrowserApi(),
         getBuiltinChromiumStatus(),
         loadBrowserWindowSettings(),
       ]);
       setApiStatus(status);
+      setIxbrowserStatus(ixStatus);
       setChromiumStatus(chromium);
       setShowBrowserWindow(windowSettings.showBrowserWindow);
       const allAccounts = await loadAccounts(currentPlatform).catch(() => []);
@@ -210,6 +246,11 @@ export function BrowserProfilePage() {
         setProfiles(await listBrowserProfiles());
       } else {
         setProfiles([]);
+      }
+      if (ixStatus.available) {
+        setIxbrowserProfiles(await listIxbrowserProfiles());
+      } else {
+        setIxbrowserProfiles([]);
       }
     } catch (error) {
       message.error(error instanceof Error ? error.message : String(error));
@@ -238,6 +279,14 @@ export function BrowserProfilePage() {
   const openBitbrowserDownload = async () => {
     try {
       await openBitbrowserDownloadPage();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const openIxbrowserDownload = async () => {
+    try {
+      await openExternalLink("https://www.ixbrowser.com/zh/download-page");
     } catch (error) {
       message.error(error instanceof Error ? error.message : String(error));
     }
@@ -281,12 +330,19 @@ export function BrowserProfilePage() {
     });
   }, [batchForm, currentPlatform, syncForm]);
 
-  const toggleProfile = async (profile: BrowserProfile) => {
+  const toggleProfile = async (
+    profile: BrowserProfile,
+    provider: "bitbrowser" | "ixbrowser" = "bitbrowser",
+  ) => {
     setOperatingProfileId(profile.id);
     try {
       const result = profile.opened
-        ? await closeProfile(profile.id)
-        : await openProfile(profile.id);
+        ? provider === "ixbrowser"
+          ? await closeIxbrowserProfile(profile.id)
+          : await closeProfile(profile.id)
+        : provider === "ixbrowser"
+          ? await openIxbrowserProfile(profile.id)
+          : await openProfile(profile.id);
       if (!profile.opened && result.opened && result.cdpEndpoint) {
         browserPreview.openBrowserPreview({
           accountId: profile.boundAccountId ?? profile.name,
@@ -295,7 +351,11 @@ export function BrowserProfilePage() {
           openedAt: new Date().toISOString(),
         });
       }
-      message.success(`${profile.name} ${result.opened ? "已打开" : "已关闭"}`);
+      message.success(
+        `${provider === "ixbrowser" ? "ix浏览器" : "Bit浏览器"} ${profile.name} ${
+          result.opened ? "已打开" : "已关闭"
+        }`,
+      );
       await refresh();
     } catch (error) {
       message.error(error instanceof Error ? error.message : String(error));
@@ -444,16 +504,25 @@ export function BrowserProfilePage() {
     });
   };
 
-  const toggleProfileById = async (profileId: string) => {
-    const profile = profiles.find((item) => item.id === profileId);
+  const toggleProfileById = async (
+    profileId: string,
+    provider: "bitbrowser" | "ixbrowser" = "bitbrowser",
+  ) => {
+    const sourceProfiles =
+      provider === "ixbrowser" ? ixbrowserProfiles : profiles;
+    const profile = sourceProfiles.find((item) => item.id === profileId);
     if (!profile) {
-      message.warning("未找到该 Bit浏览器窗口，请刷新后重试");
+      message.warning(
+        `未找到该 ${provider === "ixbrowser" ? "ix浏览器" : "Bit浏览器"} 窗口，请刷新后重试`,
+      );
       return;
     }
-    await toggleProfile(profile);
+    await toggleProfile(profile, provider);
   };
 
-  const profileColumns: ColumnsType<BrowserProfile> = [
+  const makeProfileColumns = (
+    provider: "bitbrowser" | "ixbrowser",
+  ): ColumnsType<BrowserProfile> => [
     {
       title: "窗口名称",
       dataIndex: "name",
@@ -533,19 +602,21 @@ export function BrowserProfilePage() {
         <Button
           icon={profile.opened ? <PowerOff size={15} /> : <Power size={15} />}
           loading={operatingProfileId === profile.id}
-          onClick={() => void toggleProfile(profile)}
+          onClick={() => void toggleProfile(profile, provider)}
         >
           {profile.opened ? "关闭" : "打开"}
         </Button>
       ),
     },
   ];
+  const profileColumns = makeProfileColumns("bitbrowser");
+  const ixbrowserProfileColumns = makeProfileColumns("ixbrowser");
 
   return (
     <>
       <PageHeader
         title="浏览器环境"
-        description="管理 Bit浏览器与内置浏览器环境、账号绑定、代理检测和运行状态。"
+        description="管理 Bit浏览器、ix浏览器与内置浏览器环境、账号绑定、代理检测和运行状态。"
         extra={
           <Button
             icon={<RefreshCw size={16} />}
@@ -588,6 +659,36 @@ export function BrowserProfilePage() {
         <Col xs={24} md={8}>
           <Card
             size="small"
+            title="ix浏览器"
+            extra={<Tag color="blue">可选</Tag>}
+          >
+            <Statistic
+              title="本地接口"
+              value={ixbrowserStatus?.available ? "在线" : "不可用"}
+              valueStyle={{
+                color: ixbrowserStatus?.available ? "#16a34a" : "#dc2626",
+                fontSize: 20,
+              }}
+            />
+            <Row gutter={16} style={{ marginTop: 12 }}>
+              <Col span={8}>
+                <Statistic
+                  title="窗口数"
+                  value={scopedIxbrowserProfiles.length}
+                />
+              </Col>
+              <Col span={8}>
+                <Statistic title="已打开" value={ixbrowserOpenedCount} />
+              </Col>
+              <Col span={8}>
+                <Statistic title="账号数" value={ixbrowserAccountCount} />
+              </Col>
+            </Row>
+          </Card>
+        </Col>
+        <Col xs={24} md={8}>
+          <Card
+            size="small"
             title="内置浏览器"
             extra={<Tag color="gold">可选</Tag>}
           >
@@ -622,13 +723,16 @@ export function BrowserProfilePage() {
         <Col xs={24} md={8}>
           <Card size="small" title="账号环境">
             <Row gutter={16}>
-              <Col span={8}>
+              <Col span={6}>
                 <Statistic title="Bit浏览器" value={bitbrowserAccountCount} />
               </Col>
-              <Col span={8}>
+              <Col span={6}>
                 <Statistic title="内置浏览器" value={chromiumAccountCount} />
               </Col>
-              <Col span={8}>
+              <Col span={6}>
+                <Statistic title="ix浏览器" value={ixbrowserAccountCount} />
+              </Col>
+              <Col span={6}>
                 <Statistic
                   title="待处理"
                   value={pendingAccountCount}
@@ -703,6 +807,48 @@ export function BrowserProfilePage() {
                   </>
                 ),
               },
+              {
+                key: "ixbrowser",
+                label: "ix浏览器窗口",
+                children: (
+                  <>
+                    {!ixbrowserStatus?.available ? (
+                      <Alert
+                        type="warning"
+                        showIcon
+                        message="ix浏览器 Local API 不可用"
+                        description="请在 ix浏览器左侧“API”页面启动 Local API，并确认端口为 53200，然后刷新此页面。"
+                        action={
+                          <Button
+                            type="link"
+                            size="small"
+                            onClick={() => void openIxbrowserDownload()}
+                          >
+                            下载 ix浏览器
+                          </Button>
+                        }
+                        style={{ marginBottom: 16 }}
+                      />
+                    ) : null}
+                    <Table
+                      rowKey="id"
+                      loading={loading}
+                      columns={ixbrowserProfileColumns}
+                      dataSource={scopedIxbrowserProfiles}
+                      scroll={{ x: 1380 }}
+                      pagination={{ pageSize: 10, showSizeChanger: true }}
+                      locale={{
+                        emptyText: (
+                          <EmptyState
+                            title="暂无 ix浏览器窗口"
+                            description="请先在 ix浏览器中创建窗口，再在账号配置中填写 browser.profile_id。"
+                          />
+                        ),
+                      }}
+                    />
+                  </>
+                ),
+              },
 
               {
                 key: "chromium",
@@ -730,6 +876,7 @@ export function BrowserProfilePage() {
                     accounts={accounts}
                     chromiumStatus={chromiumStatus}
                     apiStatus={apiStatus}
+                    ixbrowserStatus={ixbrowserStatus}
                     diagnosingAccountId={diagnosingAccountId}
                     cleaningAccountId={cleaningAccountId}
                     diagnosisResult={diagnosisResult}
@@ -741,8 +888,12 @@ export function BrowserProfilePage() {
                     onToggleProfile={(profileId) =>
                       void toggleProfileById(profileId)
                     }
+                    onToggleIxbrowserProfile={(profileId) =>
+                      void toggleProfileById(profileId, "ixbrowser")
+                    }
                     operatingProfileId={operatingProfileId}
                     profiles={profiles}
+                    ixbrowserProfiles={ixbrowserProfiles}
                   />
                 ),
               },
@@ -1161,6 +1312,7 @@ function AccountBindingPanel({
   accounts,
   chromiumStatus,
   apiStatus,
+  ixbrowserStatus,
   diagnosingAccountId,
   cleaningAccountId,
   diagnosisResult,
@@ -1168,12 +1320,15 @@ function AccountBindingPanel({
   onCleanup,
   onCloseDiagnosis,
   onToggleProfile,
+  onToggleIxbrowserProfile,
   operatingProfileId,
   profiles,
+  ixbrowserProfiles,
 }: {
   accounts: AccountSummary[];
   chromiumStatus: BuiltinChromiumStatus | null;
   apiStatus: ApiStatus | null;
+  ixbrowserStatus: ApiStatus | null;
   diagnosingAccountId?: string;
   cleaningAccountId?: string;
   diagnosisResult: AccountBrowserDiagnosis | null;
@@ -1181,8 +1336,10 @@ function AccountBindingPanel({
   onCleanup: (accountId: string) => void;
   onCloseDiagnosis: () => void;
   onToggleProfile: (profileId: string) => void;
+  onToggleIxbrowserProfile: (profileId: string) => void;
   operatingProfileId?: string;
   profiles: BrowserProfile[];
+  ixbrowserProfiles: BrowserProfile[];
 }) {
   const profileById = useMemo(() => {
     const map = new Map<string, BrowserProfile>();
@@ -1191,6 +1348,13 @@ function AccountBindingPanel({
     }
     return map;
   }, [profiles]);
+  const ixbrowserProfileById = useMemo(() => {
+    const map = new Map<string, BrowserProfile>();
+    for (const profile of ixbrowserProfiles) {
+      map.set(profile.id, profile);
+    }
+    return map;
+  }, [ixbrowserProfiles]);
 
   const columns: ColumnsType<AccountSummary> = [
     {
@@ -1214,11 +1378,13 @@ function AccountBindingPanel({
       width: 130,
       render: (_, account) => {
         const provider = effectiveProvider(account);
-        return provider === "bitbrowser" ? (
-          <Tag color="green">Bit浏览器</Tag>
-        ) : (
-          <Tag color="gold">内置浏览器</Tag>
-        );
+        if (provider === "bitbrowser") {
+          return <Tag color="green">Bit浏览器</Tag>;
+        }
+        if (provider === "ixbrowser") {
+          return <Tag color="blue">ix浏览器</Tag>;
+        }
+        return <Tag color="gold">内置浏览器</Tag>;
       },
     },
     {
@@ -1239,6 +1405,16 @@ function AccountBindingPanel({
             );
           }
           return <Tag color="orange">待绑定</Tag>;
+        }
+        if (provider === "ixbrowser") {
+          const profileId = account.browser?.profileId;
+          return profileId ? (
+            <Typography.Text copyable={{ text: profileId }} type="secondary">
+              {profileId}
+            </Typography.Text>
+          ) : (
+            <Tag color="orange">待绑定</Tag>
+          );
         }
         // 内置 Chromium: show user-data-dir, do NOT show missing profile_id error
         const dir = account.browser?.userDataDir;
@@ -1307,6 +1483,28 @@ function AccountBindingPanel({
               loading={operatingProfileId === profileId}
               disabled={!apiStatus?.available}
               onClick={() => onToggleProfile(profileId)}
+            >
+              {profile?.opened ? "关闭" : "打开"}
+            </Button>
+          );
+        }
+        if (provider === "ixbrowser") {
+          const profileId = account.browser?.profileId;
+          if (!profileId) {
+            return (
+              <Typography.Text type="secondary">待绑定窗口</Typography.Text>
+            );
+          }
+          const profile = ixbrowserProfileById.get(profileId);
+          return (
+            <Button
+              size="small"
+              icon={
+                profile?.opened ? <PowerOff size={14} /> : <Power size={14} />
+              }
+              loading={operatingProfileId === profileId}
+              disabled={!ixbrowserStatus?.available}
+              onClick={() => onToggleIxbrowserProfile(profileId)}
             >
               {profile?.opened ? "关闭" : "打开"}
             </Button>
@@ -2041,4 +2239,3 @@ function validateProxyFormat(_: unknown, value?: string) {
   }
   return Promise.resolve();
 }
-

@@ -16,13 +16,16 @@ from urllib.parse import urlparse
 
 import requests
 from bitbrowser import BitBrowserClient
+from ixbrowser import DEFAULT_API_URL as IXBROWSER_DEFAULT_API_URL
+from ixbrowser import IXBrowserClient
 from runtime_config import resolve_data_dir
 
 
 BITBROWSER = "bitbrowser"
 BUILTIN_CHROMIUM = "builtin_chromium"
+IXBROWSER = "ixbrowser"
 DEFAULT_BROWSER_PROVIDER = BITBROWSER
-VALID_BROWSER_PROVIDERS = {BITBROWSER, BUILTIN_CHROMIUM}
+VALID_BROWSER_PROVIDERS = {BITBROWSER, BUILTIN_CHROMIUM, IXBROWSER}
 
 
 @dataclass(frozen=True)
@@ -150,6 +153,19 @@ PROVIDER_CAPABILITIES = {
             "and a temporary CDP port. It is not an equivalent replacement for BitBrowser "
             "fingerprint capabilities; BitBrowser remains the default recommendation."
         ),
+    ),
+    IXBROWSER: BrowserProviderCapability(
+        provider=IXBROWSER,
+        label="ixBrowser",
+        implemented=True,
+        production_ready=True,
+        can_launch=True,
+        can_close=True,
+        provides_cdp_endpoint=True,
+        requires_profile_id=True,
+        supports_tiktok=True,
+        risk_level="production_optional",
+        notes="Uses ixBrowser Local API and an existing numeric profile_id.",
     ),
 }
 
@@ -281,6 +297,64 @@ class BitBrowserProvider:
     def close_session(self, session: BrowserSession, config: Mapping[str, Any]) -> None:
         if session.profile_id:
             BitBrowserClient(bitbrowser_api_url(config)).close_browser(session.profile_id)
+
+
+class IXBrowserProvider:
+    name = IXBROWSER
+    capability = PROVIDER_CAPABILITIES[IXBROWSER]
+
+    def _client(self, config: Mapping[str, Any]) -> IXBrowserClient:
+        return IXBrowserClient(ixbrowser_api_url(config))
+
+    def status(self, config: Mapping[str, Any]) -> BrowserProviderStatus:
+        api_url = ixbrowser_api_url(config)
+        try:
+            self._client(config).list_browsers(page_size=1)
+            return BrowserProviderStatus(
+                provider=self.name,
+                available=True,
+                message="ixBrowser Local API is available",
+                api_url=api_url,
+            )
+        except Exception as exc:
+            return BrowserProviderStatus(
+                provider=self.name,
+                available=False,
+                message=f"{type(exc).__name__}: {exc}",
+                api_url=api_url,
+            )
+
+    def validate_account(self, account: Mapping[str, Any], config: Mapping[str, Any]) -> None:
+        profile_id = ixbrowser_profile_id(account)
+        if not profile_id:
+            raise ValueError(f"{account.get('id', '<unknown>')} missing ixBrowser profile_id")
+        if not str(profile_id).isdigit():
+            raise ValueError("ixBrowser profile_id must be numeric")
+        if not ixbrowser_api_url(config):
+            raise ValueError("ixbrowser.api_url is required")
+
+    def is_open(self, account: Mapping[str, Any], config: Mapping[str, Any]) -> bool:
+        self.validate_account(account, config)
+        return self._client(config).is_open(ixbrowser_profile_id(account))
+
+    def start_session(self, account: Mapping[str, Any], config: Mapping[str, Any]) -> BrowserSession:
+        self.validate_account(account, config)
+        account_id = str(account.get("id", ""))
+        profile_id = ixbrowser_profile_id(account)
+        client = self._client(config)
+        already_open = client.is_open(profile_id)
+        cdp_endpoint = client.open_browser(profile_id)
+        return BrowserSession(
+            provider=self.name,
+            account_id=account_id,
+            profile_id=profile_id,
+            cdp_endpoint=cdp_endpoint,
+            already_open=already_open,
+        )
+
+    def close_session(self, session: BrowserSession, config: Mapping[str, Any]) -> None:
+        if session.profile_id:
+            self._client(config).close_browser(session.profile_id)
 
 
 class ReservedProvider:
@@ -415,6 +489,7 @@ class BuiltinChromiumProvider:
 PROVIDERS: Dict[str, BrowserProvider] = {
     BITBROWSER: BitBrowserProvider(),
     BUILTIN_CHROMIUM: BuiltinChromiumProvider(),
+    IXBROWSER: IXBrowserProvider(),
 }
 
 
@@ -462,6 +537,19 @@ def bitbrowser_api_url(config: Mapping[str, Any]) -> str:
     return "http://127.0.0.1:54345"
 
 
+def ixbrowser_api_url(config: Mapping[str, Any]) -> str:
+    browser = browser_defaults(config)
+    value = str(browser.get("ixbrowser_api_url") or "").strip()
+    if value:
+        return value
+    ixbrowser = config.get("ixbrowser") if isinstance(config, Mapping) else None
+    if isinstance(ixbrowser, Mapping):
+        value = str(ixbrowser.get("api_url") or "").strip()
+        if value:
+            return value
+    return IXBROWSER_DEFAULT_API_URL
+
+
 def bitbrowser_profile_id(account: Mapping[str, Any]) -> Optional[str]:
     browser = account.get("browser")
     if isinstance(browser, Mapping):
@@ -474,6 +562,21 @@ def bitbrowser_profile_id(account: Mapping[str, Any]) -> Optional[str]:
             if value:
                 return value
     value = str(account.get("bitbrowser_profile_id") or "").strip()
+    return value or None
+
+
+def ixbrowser_profile_id(account: Mapping[str, Any]) -> Optional[str]:
+    browser = account.get("browser")
+    if isinstance(browser, Mapping):
+        value = str(browser.get("profile_id") or "").strip()
+        if value:
+            return value
+        ixbrowser = browser.get("ixbrowser")
+        if isinstance(ixbrowser, Mapping):
+            value = str(ixbrowser.get("profile_id") or "").strip()
+            if value:
+                return value
+    value = str(account.get("ixbrowser_profile_id") or "").strip()
     return value or None
 
 

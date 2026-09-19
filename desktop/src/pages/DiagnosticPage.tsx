@@ -983,6 +983,7 @@ function formatBrowserProvider(provider: BrowserProviderId) {
   const labels: Record<BrowserProviderId, string> = {
     bitbrowser: "Bit浏览器",
     builtin_chromium: "内置浏览器",
+    ixbrowser: "ix浏览器",
   };
   return labels[provider];
 }

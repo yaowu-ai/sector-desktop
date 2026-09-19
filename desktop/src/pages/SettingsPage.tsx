@@ -861,6 +861,7 @@ function formatProviderLabel(
   const labels: Record<BrowserProviderCapability["provider"], string> = {
     bitbrowser: "Bit浏览器",
     builtin_chromium: "内置浏览器",
+    ixbrowser: "ix浏览器",
   };
   return labels[provider] ?? fallback;
 }
@@ -880,6 +881,8 @@ function formatProviderNotes(provider: BrowserProviderCapability) {
       "生产默认方案。使用 Bit浏览器 Local API 和现有 Bit浏览器 profile_id。",
     builtin_chromium:
       "生产可选方案。使用本机内置浏览器、账号独立数据目录和临时 CDP 端口启动；不等价替代 Bit浏览器的指纹环境能力，Bit浏览器仍是默认推荐。",
+    ixbrowser:
+      "生产可选方案。使用 ix浏览器 Local API 和现有数字 profile_id。",
   };
   return notes[provider.provider] ?? provider.notes;
 }
