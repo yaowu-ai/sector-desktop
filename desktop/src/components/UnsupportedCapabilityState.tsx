@@ -5,8 +5,8 @@ import {
   PLATFORM_CAPABILITIES,
   getCapabilityStatusLabel,
   getPlatformDefinition,
-} from '../platforms/registry'
-import type { CapabilityStatus, Platform, PlatformCapability } from '../platforms/types'
+} from '../platforms'
+import type { CapabilityStatus, Platform, PlatformCapability } from '../platforms'
 import { StatusTag, type StatusTone } from './StatusTag'
 
 interface UnsupportedCapabilityStateProps {

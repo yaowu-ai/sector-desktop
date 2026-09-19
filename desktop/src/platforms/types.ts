@@ -84,6 +84,11 @@ export interface PlatformDefaultConfig {
   }
 }
 
+export interface ReservedPlatformEntry {
+  implemented: false
+  reason: string
+}
+
 export interface PlatformDefinition {
   id: Platform
   name: string
@@ -97,4 +102,12 @@ export interface PlatformDefinition {
   defaultConfig: PlatformDefaultConfig
   defaultTaskConfig?: PlatformDefaultConfig['warmup'] | PlatformDefaultConfig['instagramWarmup']
   defaultTargetConfig?: PlatformDefaultConfig['targetEngagement']
+}
+
+export interface PlatformModuleManifest {
+  definition: PlatformDefinition
+  implementation: 'executable' | 'reserved'
+  pageEntry: string
+  serviceEntry: string
+  reservationReason?: string
 }

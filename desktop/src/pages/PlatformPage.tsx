@@ -8,8 +8,9 @@ import { StatusTag } from '../components/StatusTag'
 import {
   PLATFORM_CAPABILITIES,
   PLATFORMS,
+  getPlatformModule,
   type PlatformDefinition,
-} from '../services/platforms'
+} from '../platforms'
 import type { PlatformCapabilityStatus, PlatformSupportStatus } from '../services/types'
 
 export function PlatformPage() {
@@ -99,7 +100,7 @@ export function PlatformPage() {
           type="info"
           showIcon
           message="TikTok 已允许启动真实自动化任务"
-          description="WhatsApp 和抖音仍保留账号、浏览器环境、任务、调度和统计入口。"
+          description="其他平台的业务页面和服务入口保持预留，待对应平台模块实现后再开启。"
         />
 
       <Row gutter={[16, 16]}>
@@ -268,7 +269,7 @@ function platformAccessDetails(platform: PlatformDefinition) {
   if (platform.id === 'douyin') {
     return {
       browser: '可预留账号和 Bit浏览器 profile 绑定。',
-      runner: '现有抓取器暂不接入 PC 端自动执行，启动入口保持禁用。',
+      runner: getPlatformModule(platform.id).reservationReason ?? '启动入口保持禁用。',
       runnerChips: ['src/douyin-fetcher'],
       api: '后续接入时需补齐平台 adapter、执行器入口和日志统计口径。',
       apiChips: ['platform adapter', 'runner', 'stats schema'],
@@ -276,7 +277,7 @@ function platformAccessDetails(platform: PlatformDefinition) {
   }
   return {
     browser: '可预留账号和 Bit浏览器 profile 绑定。',
-    runner: '自动执行 runner 未接入，启动类入口保持禁用。',
+    runner: getPlatformModule(platform.id).reservationReason ?? '启动入口保持禁用。',
     runnerChips: ['reserved runner'],
     api: '后续接入时需补齐平台 adapter、平台 API 凭据或网页自动化环境说明。',
     apiChips: ['platform adapter', 'API credentials', 'automation env'],

@@ -266,6 +266,27 @@ pub fn check_bitbrowser_api() -> ApiStatus {
 }
 
 #[tauri::command]
+pub fn check_ixbrowser_api() -> ApiStatus {
+    let checked_at = Local::now().to_rfc3339();
+    let api_url = ixbrowser_api_url();
+
+    match socket_addr_from_url(&api_url).and_then(check_tcp) {
+        Ok(()) => ApiStatus {
+            available: true,
+            api_url,
+            checked_at,
+            error: None,
+        },
+        Err(error) => ApiStatus {
+            available: false,
+            api_url,
+            checked_at,
+            error: Some(error),
+        },
+    }
+}
+
+#[tauri::command]
 pub fn get_browser_provider_matrix() -> Vec<BrowserProviderCapability> {
     provider_capability_matrix()
 }
@@ -437,6 +458,41 @@ pub fn diagnose_account_browser(account_id: String) -> Result<AccountBrowserDiag
                 detail: error,
             }),
         }
+    } else if provider == "ixbrowser" {
+        if let Some(profile_id) = account.browser_profile_id() {
+            checks.push(ProviderDiagnosticCheck {
+                name: "accountProfile".to_string(),
+                status: "ok".to_string(),
+                detail: profile_id.to_string(),
+            });
+            let api_status = check_ixbrowser_api();
+            checks.push(ProviderDiagnosticCheck {
+                name: "providerStatus".to_string(),
+                status: if api_status.available() { "ok" } else { "error" }.to_string(),
+                detail: api_status
+                    .error()
+                    .map(|error| format!("{}: {}", api_status.api_url(), error))
+                    .unwrap_or_else(|| api_status.api_url().to_string()),
+            });
+            if api_status.available() {
+                let profile_status = list_ixbrowser_profiles()
+                    .ok()
+                    .and_then(|profiles| profiles.into_iter().find(|profile| profile.id == profile_id));
+                checks.push(ProviderDiagnosticCheck {
+                    name: "profileStatus".to_string(),
+                    status: if profile_status.is_some() { "ok" } else { "warning" }.to_string(),
+                    detail: profile_status
+                        .map(|profile| format!("opened={}", profile.opened))
+                        .unwrap_or_else(|| "profile not found".to_string()),
+                });
+            }
+        } else {
+            checks.push(ProviderDiagnosticCheck {
+                name: "accountProfile".to_string(),
+                status: "error".to_string(),
+                detail: "ixBrowser provider requires browser.profile_id".to_string(),
+            });
+        }
     } else {
         checks.push(ProviderDiagnosticCheck {
             name: "providerStatus".to_string(),
@@ -540,6 +596,19 @@ pub fn list_browser_profiles() -> Result<Vec<BrowserProfile>, String> {
 }
 
 #[tauri::command]
+pub fn list_ixbrowser_profiles() -> Result<Vec<BrowserProfile>, String> {
+    let api_url = ixbrowser_api_url();
+    let raw_profiles = list_ix_raw_profiles(&api_url)?;
+    let opened_ids = ix_opened_profile_ids(&api_url)?;
+    let bindings = profile_account_bindings();
+
+    Ok(raw_profiles
+        .iter()
+        .filter_map(|profile| map_ix_browser_profile(profile, &opened_ids, &bindings))
+        .collect())
+}
+
+#[tauri::command]
 pub fn get_profile_status(profile_id: String) -> ProfileStatus {
     let api_url = bitbrowser_api_url();
     match profile_pids(&api_url, &[profile_id.clone()]) {
@@ -590,6 +659,60 @@ pub fn close_profile(profile_id: String) -> Result<ProfileOperationResult, Strin
         opened: false,
         cdp_endpoint: None,
         message: "profile closed".to_string(),
+    })
+}
+
+#[tauri::command]
+pub fn open_ixbrowser_profile(profile_id: String) -> Result<ProfileOperationResult, String> {
+    let api_url = ixbrowser_api_url();
+    let numeric_id = profile_id
+        .parse::<i64>()
+        .map_err(|_| format!("invalid ixBrowser profile_id '{}'", profile_id))?;
+    let response = http_post_json(
+        &api_url,
+        "/profile-open",
+        &json!({
+            "profile_id": numeric_id,
+            "load_extensions": true,
+            "load_profile_info_page": false,
+            "cookies_backup": true,
+            "args": ["--disable-extension-welcome-page"],
+        }),
+    )?;
+    ensure_ix_api_success(&response, "ixBrowser open")?;
+    let cdp_endpoint = response
+        .get("data")
+        .and_then(extract_ix_cdp_endpoint)
+        .or_else(|| extract_ix_cdp_endpoint(&response));
+    let cdp_endpoint = cdp_endpoint
+        .ok_or_else(|| "ixBrowser 打开窗口后未返回 debugging_address".to_string())?;
+
+    Ok(ProfileOperationResult {
+        profile_id,
+        opened: true,
+        cdp_endpoint: Some(cdp_endpoint),
+        message: "ixBrowser profile opened".to_string(),
+    })
+}
+
+#[tauri::command]
+pub fn close_ixbrowser_profile(profile_id: String) -> Result<ProfileOperationResult, String> {
+    let api_url = ixbrowser_api_url();
+    let numeric_id = profile_id
+        .parse::<i64>()
+        .map_err(|_| format!("invalid ixBrowser profile_id '{}'", profile_id))?;
+    let response = http_post_json(
+        &api_url,
+        "/profile-close",
+        &json!({ "profile_id": numeric_id }),
+    )?;
+    ensure_ix_api_success(&response, "ixBrowser close")?;
+
+    Ok(ProfileOperationResult {
+        profile_id,
+        opened: false,
+        cdp_endpoint: None,
+        message: "ixBrowser profile closed".to_string(),
     })
 }
 
@@ -855,6 +978,131 @@ fn bitbrowser_api_url() -> String {
         .ok()
         .and_then(|snapshot| snapshot.bitbrowser_api_url())
         .unwrap_or_else(|| "http://127.0.0.1:54345".to_string())
+}
+
+fn ixbrowser_api_url() -> String {
+    std::env::var("AM_IXBROWSER_API_URL")
+        .ok()
+        .map(|value| value.trim().trim_end_matches('/').to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "http://127.0.0.1:53200/api/v2".to_string())
+}
+
+fn list_ix_raw_profiles(api_url: &str) -> Result<Vec<JsonValue>, String> {
+    let mut profiles = Vec::new();
+    let mut page = 1;
+    let page_size = 100;
+
+    loop {
+        let response = http_post_json(
+            api_url,
+            "/profile-list",
+            &json!({ "page": page, "limit": page_size }),
+        )?;
+        ensure_ix_api_success(&response, "ixBrowser list")?;
+        let data = response
+            .get("data")
+            .and_then(JsonValue::as_object)
+            .ok_or_else(|| "ixBrowser list returned no paginated data".to_string())?;
+        let items = data
+            .get("data")
+            .and_then(JsonValue::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let item_count = items.len();
+        profiles.extend(items);
+        let total = data.get("total").and_then(JsonValue::as_u64).unwrap_or(0) as usize;
+        if item_count == 0 || item_count < page_size || (total > 0 && profiles.len() >= total) {
+            break;
+        }
+        page += 1;
+    }
+
+    Ok(profiles)
+}
+
+fn ix_opened_profile_ids(api_url: &str) -> Result<HashSet<String>, String> {
+    let response = http_post_json(api_url, "/profile-opened-list", &json!({}))?;
+    ensure_ix_api_success(&response, "ixBrowser opened list")?;
+    let rows = response
+        .get("data")
+        .and_then(JsonValue::as_array)
+        .cloned()
+        .unwrap_or_default();
+    Ok(rows
+        .iter()
+        .filter_map(ix_profile_id_from_raw)
+        .collect::<HashSet<_>>())
+}
+
+fn map_ix_browser_profile(
+    raw: &JsonValue,
+    opened_ids: &HashSet<String>,
+    bindings: &HashMap<String, String>,
+) -> Option<BrowserProfile> {
+    let id = ix_profile_id_from_raw(raw)?;
+    let name = string_field(raw, &["name", "profile_name"]).unwrap_or_else(|| id.clone());
+    let proxy = raw
+        .get("proxy_config")
+        .or_else(|| raw.get("proxyConfig"))
+        .and_then(|value| {
+            value
+                .get("proxy_ip")
+                .or_else(|| value.get("proxyIp"))
+                .and_then(JsonValue::as_str)
+                .map(|host| {
+                    value
+                        .get("proxy_port")
+                        .or_else(|| value.get("proxyPort"))
+                        .map(|port| format!("{}:{}", host, json_value_to_label(port)))
+                        .unwrap_or_else(|| host.to_string())
+                })
+        });
+
+    Some(BrowserProfile {
+        platform: Some(infer_platform_from_name(&name)),
+        group_id: string_field(raw, &["group_id", "groupId"]),
+        opened: opened_ids.contains(&id),
+        bound_account_id: bindings.get(&id).cloned(),
+        id,
+        name,
+        proxy,
+    })
+}
+
+fn ix_profile_id_from_raw(raw: &JsonValue) -> Option<String> {
+    if let Some(value) = raw.as_str() {
+        return Some(value.to_string());
+    }
+    if let Some(value) = raw.as_i64() {
+        return Some(value.to_string());
+    }
+    raw.get("profile_id")
+        .or_else(|| raw.get("profileId"))
+        .or_else(|| raw.get("id"))
+        .and_then(|value| {
+            value
+                .as_str()
+                .map(ToString::to_string)
+                .or_else(|| value.as_i64().map(|value| value.to_string()))
+        })
+}
+
+fn extract_ix_cdp_endpoint(value: &JsonValue) -> Option<String> {
+    ["debugging_address", "debuggingAddress", "debugger_address", "debuggerAddress"]
+        .iter()
+        .find_map(|key| value.get(*key).and_then(JsonValue::as_str))
+        .map(|endpoint| {
+            if endpoint.starts_with("http://")
+                || endpoint.starts_with("https://")
+                || endpoint.starts_with("ws://")
+                || endpoint.starts_with("wss://")
+            {
+                endpoint.to_string()
+            } else {
+                format!("http://{}", endpoint)
+            }
+        })
 }
 
 fn builtin_chromium_status() -> BuiltinChromiumStatus {
@@ -1477,7 +1725,7 @@ fn profile_account_bindings() -> HashMap<String, String> {
     let mut bindings = HashMap::new();
     if let Ok(config) = load_config() {
         for account in config.accounts() {
-            if let Some(profile_id) = account.bitbrowser_profile_id() {
+            if let Some(profile_id) = account.browser_profile_id() {
                 bindings.insert(profile_id.to_string(), account.id().to_string());
             }
         }
@@ -1898,6 +2146,24 @@ fn ensure_api_success(value: &JsonValue, label: &str) -> Result<(), String> {
         Ok(())
     } else {
         Err(api_message(value, label))
+    }
+}
+
+fn ensure_ix_api_success(value: &JsonValue, label: &str) -> Result<(), String> {
+    let code = value
+        .get("error")
+        .and_then(|error| error.get("code"))
+        .and_then(JsonValue::as_i64)
+        .unwrap_or(-1);
+    if code == 0 {
+        Ok(())
+    } else {
+        let message = value
+            .get("error")
+            .and_then(|error| error.get("message"))
+            .and_then(JsonValue::as_str)
+            .unwrap_or(label);
+        Err(format!("{}: {} (code={})", label, message, code))
     }
 }
 
@@ -2340,6 +2606,19 @@ fn provider_capability_matrix() -> Vec<BrowserProviderCapability> {
             supports_tiktok: true,
             risk_level: "production_optional".to_string(),
             notes: "Production optional. Launches local Chromium with per-account user data and a temporary CDP port. It is not an equivalent replacement for BitBrowser fingerprint capabilities; BitBrowser remains the default recommendation.".to_string(),
+        },
+        BrowserProviderCapability {
+            provider: "ixbrowser".to_string(),
+            label: "ixBrowser".to_string(),
+            implemented: true,
+            production_ready: true,
+            can_launch: true,
+            can_close: true,
+            provides_cdp_endpoint: true,
+            requires_profile_id: true,
+            supports_tiktok: true,
+            risk_level: "production_optional".to_string(),
+            notes: "Uses ixBrowser Local API and an existing numeric profile_id.".to_string(),
         },
     ]
 }

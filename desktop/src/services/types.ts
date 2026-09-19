@@ -1,6 +1,6 @@
-import type { CapabilityStatus, Platform, PlatformStatus } from '../platforms/types'
+import type { CapabilityStatus, Platform, PlatformStatus } from '../platforms'
 
-export type { Platform } from '../platforms/types'
+export type { Platform } from '../platforms'
 export type PlatformId = Platform
 export type PlatformSupportStatus = PlatformStatus
 export type PlatformCapabilityStatus = CapabilityStatus
@@ -66,7 +66,7 @@ export interface Account {
   lastStatus?: AccountLastStatus
 }
 
-export type BrowserProviderId = 'bitbrowser' | 'builtin_chromium'
+export type BrowserProviderId = 'bitbrowser' | 'builtin_chromium' | 'ixbrowser'
 
 export interface AccountBrowserConfig {
   provider?: BrowserProviderId

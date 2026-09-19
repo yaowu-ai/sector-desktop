@@ -511,17 +511,19 @@ pub fn query_fyp_stats(filter: StatsScopeRequest) -> Result<FypStatsSummary, Str
 }
 
 #[tauri::command]
-pub fn get_home_summary() -> Result<HomeSummary, String> {
+pub fn get_home_summary(platform: Option<String>) -> Result<HomeSummary, String> {
     let config = load_config()?;
+    let platform = normalized_platform_filter(platform.as_deref())?
+        .unwrap_or_else(|| "tiktok".to_string());
     let tiktok_enabled_accounts = config
         .accounts()
         .iter()
-        .filter(|account| account.platform() == "tiktok" && account.enabled())
+        .filter(|account| account.platform() == platform && account.enabled())
         .count();
     let fires_per_day = config.scheduler_fires_per_day().unwrap_or(0).max(0) as usize;
     let today_planned_tasks = tiktok_enabled_accounts.saturating_mul(fires_per_day);
     let today = Local::now().format("%Y-%m-%d").to_string();
-    let db_stats = read_today_db_stats(&today).unwrap_or_default();
+    let db_stats = read_today_db_stats(&today, &platform).unwrap_or_default();
 
     Ok(HomeSummary {
         tiktok_enabled_accounts,
@@ -1231,7 +1233,7 @@ struct TargetEngagementRow {
     commented: i64,
 }
 
-fn read_today_db_stats(today: &str) -> Result<TodayDbStats, String> {
+fn read_today_db_stats(today: &str, platform: &str) -> Result<TodayDbStats, String> {
     let paths = project_paths()?;
     let db_path = std::path::PathBuf::from(&paths.actions_db_path);
     if !db_path.exists() {
@@ -1241,27 +1243,42 @@ fn read_today_db_stats(today: &str) -> Result<TodayDbStats, String> {
     let conn = Connection::open(&db_path)
         .map_err(|err| format!("failed to open {}: {}", paths.actions_db_path, err))?;
     let day_prefix = format!("{}%", today);
+    let action_log_platform_expr = platform_select_expr(&conn, "action_log", "account_id")?;
+    let target_platform_expr =
+        platform_select_expr(&conn, "target_engagements", "our_account")?;
 
     let completed_accounts: usize = conn
         .query_row(
-            "SELECT COUNT(DISTINCT account_id) FROM action_log WHERE action='fyp_browse' AND status='ok' AND ts LIKE ?1",
-            params![day_prefix.as_str()],
+            &format!(
+                "SELECT COUNT(DISTINCT account_id) FROM action_log
+                 WHERE {} = ?1 AND action='fyp_browse' AND status='ok' AND ts LIKE ?2",
+                action_log_platform_expr
+            ),
+            params![platform, day_prefix.as_str()],
             |row| row.get::<_, i64>(0),
         )
         .unwrap_or(0)
         .max(0) as usize;
     let failed_accounts: usize = conn
         .query_row(
-            "SELECT COUNT(DISTINCT account_id) FROM action_log WHERE status='error' AND ts LIKE ?1",
-            params![day_prefix.as_str()],
+            &format!(
+                "SELECT COUNT(DISTINCT account_id) FROM action_log
+                 WHERE {} = ?1 AND status='error' AND ts LIKE ?2",
+                action_log_platform_expr
+            ),
+            params![platform, day_prefix.as_str()],
             |row| row.get::<_, i64>(0),
         )
         .unwrap_or(0)
         .max(0) as usize;
     let target_interactions: usize = conn
         .query_row(
-            "SELECT COUNT(*) FROM target_engagements WHERE ts LIKE ?1 AND (liked=1 OR commented=1)",
-            params![day_prefix.as_str()],
+            &format!(
+                "SELECT COUNT(*) FROM target_engagements
+                 WHERE {} = ?1 AND ts LIKE ?2 AND (liked=1 OR commented=1)",
+                target_platform_expr
+            ),
+            params![platform, day_prefix.as_str()],
             |row| row.get::<_, i64>(0),
         )
         .unwrap_or(0)

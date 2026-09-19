@@ -24,7 +24,7 @@
 .\desktop-dev.ps1
 
 # 测试环境安装包：前端按 test 模式构建
-.\desktop-build.ps1 -BuildMode test
+.\desktop-build.ps1 -BuildMode test -Python ".runtime-build-venv\Scripts\python.exe"
 
 # 生产环境安装包：默认模式，包含 production 环境校验
 .\desktop-build.ps1
@@ -104,6 +104,13 @@ docs/                  产品文档
 # 创建绑定代理的 BitBrowser 窗口
 python src/create_browser.py --name tiktok_2 --proxy "host:port:user:password"
 
+# 创建 ixBrowser 窗口；先在 ixBrowser 中开启 Local API
+python src/ix_create_browser.py --name tiktok_2 \
+  --proxy "host:port:user:password"
+
+# 创建不设置代理的 ixBrowser 窗口
+python src/ix_create_browser.py --name tiktok_direct --no-proxy
+
 # 批量读取代理文件创建窗口
 python src/create_browser.py --file config/private/proxies/ip_0630
 
@@ -126,6 +133,8 @@ python src/test_comment.py
 
 - 生产使用优先在云电脑上运行，不要在本机和云电脑同时打开同一个 BitBrowser profile。
 - BitBrowser 模式需要保持 BitBrowser 开启，并确保 Local API 默认可访问 `http://127.0.0.1:54345`。
+- ixBrowser 模式需要保持 ixBrowser 开启并启用 Local API，默认地址为 `http://127.0.0.1:53200`。
+- 使用 ixBrowser 时，在账号配置中设置 `browser_provider: ixbrowser` 和数字类型的 `browser.profile_id`。
 - 同一账号的自动化动作由运行锁控制，避免调度和手动执行同时驱动同一 profile。
 - 共享 IP 的账号应使用不同运行班次，避免同一 IP 下多个账号同时在线。
 - 自动登录遇到验证码、二次验证或安全检查时会进入人工接管，不会自动绕过平台安全检查。

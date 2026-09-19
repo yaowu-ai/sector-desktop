@@ -539,6 +539,13 @@ impl Account {
         self.bitbrowser_profile_id.as_deref()
     }
 
+    pub fn browser_profile_id(&self) -> Option<&str> {
+        self.browser
+            .as_ref()
+            .and_then(|browser| browser.profile_id.as_deref())
+            .or_else(|| self.bitbrowser_profile_id.as_deref())
+    }
+
     pub fn browser_user_data_dir(&self) -> Option<&str> {
         self.browser
             .as_ref()
@@ -2941,11 +2948,12 @@ fn validate_accounts(
         };
 
         if account.enabled.unwrap_or(true) {
-            if provider == DEFAULT_BROWSER_PROVIDER && account_browser_profile_id(account).is_none()
+            if matches!(provider.as_str(), DEFAULT_BROWSER_PROVIDER | "ixbrowser")
+                && account_browser_profile_id(account).is_none()
             {
                 errors.push(issue(
                     format!("{}.bitbrowser_profile_id", base),
-                    "BitBrowser 浏览器环境需要配置 bitbrowser_profile_id 或 browser.profile_id",
+                    "该浏览器环境需要配置 profile_id 或 bitbrowser_profile_id",
                 ));
             }
             if provider == "builtin_chromium" {
@@ -5038,10 +5046,16 @@ fn validate_builtin_proxy_port(port: &str) -> Result<(), String> {
 
 fn normalize_browser_provider(provider: &str, path: &str) -> Result<String, String> {
     let normalized = provider.trim().to_ascii_lowercase();
-    if matches!(normalized.as_str(), "bitbrowser" | "builtin_chromium") {
+    if matches!(
+        normalized.as_str(),
+        "bitbrowser" | "builtin_chromium" | "ixbrowser"
+    ) {
         Ok(normalized)
     } else {
-        Err(format!("{} 必须是 bitbrowser 或 builtin_chromium", path))
+        Err(format!(
+            "{} 必须是 bitbrowser、builtin_chromium 或 ixbrowser",
+            path
+        ))
     }
 }
 

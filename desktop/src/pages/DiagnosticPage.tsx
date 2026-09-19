@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { usePlatformContext } from "../app/PlatformContext";
 import { PageHeader } from "../components/PageHeader";
 import { ProcessOutputPanel } from "../components/ProcessOutputPanel";
 import { StatusTag } from "../components/StatusTag";
@@ -43,8 +44,7 @@ import {
   getAutomaticExecutionDisabledReason,
   getPlatformLabel,
   isExecutablePlatform,
-  PLATFORMS,
-} from "../services/platforms";
+} from "../platforms";
 import type {
   Account,
   AccountBrowserDiagnosis,
@@ -86,9 +86,9 @@ const DEFAULT_COMMENT: CommentFormValues = {
 };
 
 export function DiagnosticPage() {
+  const { currentPlatform, currentPlatformDefinition } = usePlatformContext();
   const [likeForm] = Form.useForm<LikeFormValues>();
   const [commentForm] = Form.useForm<CommentFormValues>();
-  const [selectedPlatform, setSelectedPlatform] = useState<Platform>("tiktok");
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
@@ -101,22 +101,22 @@ export function DiagnosticPage() {
   const accountOptions = useMemo(
     () =>
       accounts
-        .filter((account) => account.platform === selectedPlatform)
+        .filter((account) => account.platform === currentPlatform)
         .map((account) => ({
           value: account.id,
           label: `${account.id} | ${formatBrowserProvider(resolveBrowserProvider(account))}${account.enabled ? "" : "（停用）"}`,
           disabled: Boolean(accountDiagnosticDisabledReason(account)),
         })),
-    [accounts, selectedPlatform],
+    [accounts, currentPlatform],
   );
   const browserDiagnosticAccount = useMemo(
     () => accounts.find((account) => account.id === browserDiagnosticAccountId),
     [accounts, browserDiagnosticAccountId],
   );
-  const selectedPlatformExecutable = isExecutablePlatform(selectedPlatform);
-  const diagnosticDisabledReason = selectedPlatformExecutable
+  const currentPlatformExecutable = isExecutablePlatform(currentPlatform);
+  const diagnosticDisabledReason = currentPlatformExecutable
     ? undefined
-    : getAutomaticExecutionDisabledReason(selectedPlatform, "diagnostics");
+    : getAutomaticExecutionDisabledReason(currentPlatform, "diagnostics");
 
   const refreshConfig = useCallback(async () => {
     setLoading(true);
@@ -125,7 +125,7 @@ export function DiagnosticPage() {
       setAccounts(snapshot.accounts);
       const first = snapshot.accounts.find(
         (account) =>
-          account.platform === selectedPlatform &&
+          account.platform === currentPlatform &&
           !accountDiagnosticDisabledReason(account),
       );
       if (first) {
@@ -133,7 +133,7 @@ export function DiagnosticPage() {
           accountId: accountCanRunDiagnostics(
             likeForm.getFieldValue("accountId"),
             snapshot.accounts,
-            selectedPlatform,
+            currentPlatform,
           )
             ? likeForm.getFieldValue("accountId")
             : first.id,
@@ -144,13 +144,13 @@ export function DiagnosticPage() {
           accountId: accountCanRunDiagnostics(
             commentForm.getFieldValue("accountId"),
             snapshot.accounts,
-            selectedPlatform,
+            currentPlatform,
           )
             ? commentForm.getFieldValue("accountId")
             : first.id,
         });
         setBrowserDiagnosticAccountId((current) =>
-          accountCanRunDiagnostics(current, snapshot.accounts, selectedPlatform)
+          accountCanRunDiagnostics(current, snapshot.accounts, currentPlatform)
             ? current
             : first.id,
         );
@@ -168,19 +168,11 @@ export function DiagnosticPage() {
     } finally {
       setLoading(false);
     }
-  }, [commentForm, likeForm, selectedPlatform]);
+  }, [commentForm, currentPlatform, likeForm]);
 
   useEffect(() => {
     void refreshConfig();
   }, [refreshConfig]);
-
-  const updateSelectedPlatform = (platform: Platform) => {
-    setSelectedPlatform(platform);
-    likeForm.setFieldsValue({ accountId: undefined });
-    commentForm.setFieldsValue({ accountId: undefined });
-    setBrowserDiagnosticAccountId(undefined);
-    setBrowserDiagnosis(null);
-  };
 
   const runBrowserDiagnosis = async () => {
     if (!browserDiagnosticAccountId) {
@@ -312,25 +304,17 @@ export function DiagnosticPage() {
           <Card>
             <Space wrap size={12}>
               <Typography.Text type="secondary">诊断平台</Typography.Text>
-              <Select<Platform>
-                value={selectedPlatform}
-                options={PLATFORMS.map((platform) => ({
-                  value: platform.id,
-                  label: `${platform.localeName}${isExecutablePlatform(platform.id) ? "" : "（自动执行未接入）"}`,
-                }))}
-                style={{ width: 220 }}
-                onChange={updateSelectedPlatform}
-              />
+              <Tag color="blue">{currentPlatformDefinition.localeName}</Tag>
               <StatusTag
-                status={selectedPlatformExecutable ? "ok" : "warning"}
+                status={currentPlatformExecutable ? "ok" : "warning"}
                 label={
-                  selectedPlatformExecutable
+                  currentPlatformExecutable
                     ? "可运行诊断脚本"
                     : "诊断脚本未接入"
                 }
               />
               <Typography.Text type="secondary">
-                当前账号选项只展示 {getPlatformLabel(selectedPlatform)}。
+                当前账号选项只展示 {getPlatformLabel(currentPlatform)}。
               </Typography.Text>
             </Space>
           </Card>
@@ -374,7 +358,7 @@ export function DiagnosticPage() {
                   showSearch
                   value={browserDiagnosticAccountId}
                   options={accountOptions}
-                  placeholder={`选择 ${getPlatformLabel(selectedPlatform)} 启用账号`}
+                  placeholder={`选择 ${getPlatformLabel(currentPlatform)} 启用账号`}
                   onChange={(accountId) => {
                     setBrowserDiagnosticAccountId(accountId);
                     setBrowserDiagnosis(null);
@@ -424,7 +408,7 @@ export function DiagnosticPage() {
                   <Select
                     showSearch
                     options={accountOptions}
-                    placeholder={`选择 ${getPlatformLabel(selectedPlatform)} 启用账号`}
+                    placeholder={`选择 ${getPlatformLabel(currentPlatform)} 启用账号`}
                   />
                 </Form.Item>
               </Form>
@@ -462,7 +446,7 @@ export function DiagnosticPage() {
                   <Select
                     showSearch
                     options={accountOptions}
-                    placeholder={`选择 ${getPlatformLabel(selectedPlatform)} 启用账号`}
+                    placeholder={`选择 ${getPlatformLabel(currentPlatform)} 启用账号`}
                   />
                 </Form.Item>
                 <Row gutter={12}>
@@ -999,6 +983,7 @@ function formatBrowserProvider(provider: BrowserProviderId) {
   const labels: Record<BrowserProviderId, string> = {
     bitbrowser: "Bit浏览器",
     builtin_chromium: "内置浏览器",
+    ixbrowser: "ix浏览器",
   };
   return labels[provider];
 }

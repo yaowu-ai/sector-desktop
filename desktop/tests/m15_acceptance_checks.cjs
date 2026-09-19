@@ -25,14 +25,15 @@ const routes = read(srcRoot, 'app', 'routes.tsx')
 const appShell = read(srcRoot, 'components', 'AppShell.tsx')
 const platformSelector = read(srcRoot, 'components', 'PlatformSelector.tsx')
 const routeScopeFrame = read(srcRoot, 'components', 'RouteScopeFrame.tsx')
-const accountPage = read(srcRoot, 'pages', 'AccountPage.tsx')
-const taskPage = read(srcRoot, 'pages', 'TaskPage.tsx')
-const targetPage = read(srcRoot, 'pages', 'TargetEngagementPage.tsx')
-const commentPage = read(srcRoot, 'pages', 'CommentPoolPage.tsx')
-const homePage = read(srcRoot, 'pages', 'HomePage.tsx')
-const recordsPage = read(srcRoot, 'pages', 'ExecutionRecordPage.tsx')
-const sessionsPage = read(srcRoot, 'pages', 'SessionLogPage.tsx')
-const statsPage = read(srcRoot, 'pages', 'StatsPage.tsx')
+const tiktokPagesRoot = path.join(srcRoot, 'platforms', 'tiktok', 'pages')
+const accountPage = read(tiktokPagesRoot, 'AccountPage.tsx')
+const taskPage = read(tiktokPagesRoot, 'TaskPage.tsx')
+const targetPage = read(tiktokPagesRoot, 'TargetEngagementPage.tsx')
+const commentPage = read(tiktokPagesRoot, 'CommentPoolPage.tsx')
+const homePage = read(tiktokPagesRoot, 'HomePage.tsx')
+const recordsPage = read(tiktokPagesRoot, 'ExecutionRecordPage.tsx')
+const sessionsPage = read(tiktokPagesRoot, 'SessionLogPage.tsx')
+const statsPage = read(tiktokPagesRoot, 'StatsPage.tsx')
 const api = read(srcRoot, 'services', 'api.ts')
 const types = read(srcRoot, 'services', 'types.ts')
 const processRs = read(rustRoot, 'commands', 'process.rs')
@@ -56,11 +57,19 @@ assert.equal(routes.includes('children:'), false, 'left navigation should not de
 
 assertContains(accountPage, 'account.platform === currentPlatform', 'account page should filter by current platform')
 assertContains(accountPage, 'platform: currentPlatform', 'new/saved account payloads should include current platform')
-assertContains(taskPage, 'nextSnapshot.accounts.filter((account) => account.platform === currentPlatform)', 'warmup task should filter accounts by current platform')
+assert.match(
+  taskPage,
+  /nextSnapshot\.accounts\.filter\(\s*\(account\)\s*=>\s*account\.platform === currentPlatform\s*,?\s*\)/s,
+  'warmup task should filter accounts by current platform',
+)
 assertContains(taskPage, 'saveFypSettings(normalizeFypSettings(values), currentPlatform)', 'warmup settings should save current platform')
 assertContains(taskPage, 'platform: currentPlatform', 'warmup run request should include current platform')
 assertContains(targetPage, 'queryTargetWatermarks({ platform: currentPlatform })', 'target watermarks should query current platform')
-assertContains(targetPage, 'saveTargetEngagementSettings(normalizeTargetSettings(values), currentPlatform)', 'target settings should save current platform')
+assert.match(
+  targetPage,
+  /saveTargetEngagementSettings\([^)]*currentPlatform\)/s,
+  'target settings should save current platform',
+)
 assertContains(targetPage, 'platform: currentPlatform', 'target run request should include current platform')
 assertContains(commentPage, 'loadCommentPools(currentPlatform)', 'comment pools should load current platform')
 assertContains(commentPage, 'platform: currentPlatform', 'comment pools should save current platform')
@@ -76,19 +85,22 @@ for (const [source, pageName] of [
   [statsPage, 'stats'],
 ]) {
   assert.ok(
-    source.includes("useState<PlatformFilterValue>('all')") ||
-      source.includes("platform: 'all'") ||
-      source.includes('DEFAULT_FILTERS'),
-    `${pageName} should default to all platforms`,
+    source.includes('usePlatformContext') &&
+      !source.includes('PlatformScopeFilter') &&
+      !source.includes('PlatformFilterValue'),
+    `${pageName} should use the current platform without a cross-platform filter`,
   )
-  assertContains(source, '<PlatformScopeFilter', `${pageName} should expose platform filter`)
 }
-assertContains(recordsPage, 'queryActionLogs(actionFilter)', 'execution records should query with platform filter')
-assertContains(statsPage, 'queryFypStats(request)', 'stats should query fyp with platform filter')
-assertContains(statsPage, 'queryTargetStats(request)', 'stats should query target with platform filter')
+assertContains(recordsPage, 'queryActionLogs(actionFilter)', 'execution records should query with current platform')
+assertContains(statsPage, 'queryFypStats(request)', 'stats should query fyp with current platform')
+assertContains(statsPage, 'queryTargetStats(request)', 'stats should query target with current platform')
 
 assert.equal(routeBlock(routes, 'settings').includes("scope: 'system'"), true, 'system settings should be system scoped')
-assert.equal(routeBlock(routes, 'diagnostic').includes("scope: 'system'"), true, 'diagnostic should be system scoped')
+assert.equal(
+  routeBlock(routes, 'diagnostic').includes("scope: 'current_platform'"),
+  true,
+  'diagnostic should be current-platform scoped',
+)
 assertContains(routeScopeFrame, "scope === 'current_platform' && capability", 'current platform routes should gate capabilities')
 assertContains(routeScopeFrame, 'supportsCapability(currentPlatform, capability)', 'frontend should reject unsupported capabilities')
 assertContains(processRs, 'ensure_platform_capability(&platform, capability)', 'backend should validate platform capability')
