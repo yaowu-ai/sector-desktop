@@ -4,9 +4,10 @@ This entrypoint is intentionally thin: account execution still goes through the
 existing core runner so current BitBrowser behavior remains unchanged.
 """
 import argparse
+import errno
+import sys
 import json
 import os
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -23,6 +24,44 @@ SUPPORTED_COMMANDS = [
     "profile-stats",
     "version",
 ]
+
+
+class SafeTextStream:
+    """Keep shutdown-time invalid Windows handles from changing task results."""
+
+    def __init__(self, stream):
+        self._stream = stream
+        self._invalid = False
+
+    def write(self, value):
+        if self._invalid:
+            return len(value)
+        try:
+            return self._stream.write(value)
+        except OSError as exc:
+            if exc.errno == errno.EINVAL:
+                self._invalid = True
+                return len(value)
+            raise
+
+    def flush(self):
+        if self._invalid:
+            return
+        try:
+            self._stream.flush()
+        except OSError as exc:
+            if exc.errno == errno.EINVAL:
+                self._invalid = True
+                return
+            raise
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
+def install_safe_stdio():
+    sys.stdout = SafeTextStream(sys.stdout)
+    sys.stderr = SafeTextStream(sys.stderr)
 
 
 def main(argv=None):
@@ -388,4 +427,5 @@ def version_payload():
 
 
 if __name__ == "__main__":
+    install_safe_stdio()
     raise SystemExit(main())
