@@ -1,0 +1,305 @@
+{
+  "version": 3,
+  "mode": "code-bugfix",
+  "diagnosis_source": "direct-repository-evidence",
+  "active": false,
+  "phase": "lock-direct",
+  "terminal_state": "PASS",
+  "repository_root": "E:/YAOWU/yangHao/account-matrix",
+  "direct_evidence_lock": {
+    "schema_version": 1,
+    "kind": "direct-evidence-lock",
+    "producer": "code-bugfix",
+    "lock_id": "tiktok-login-check-unknown-20260920",
+    "status": "DIRECT_EVIDENCE_LOCKED",
+    "locked_at": "2026-09-20T13:30:00+08:00",
+    "source_context": {
+      "analysis_class": "non-trivial",
+      "investigation_boundary": "TikTok authentication state classification after navigation",
+      "repository_root": "E:/YAOWU/yangHao/account-matrix",
+      "revision": "working-tree",
+      "providers_used": ["user", "repository"],
+      "external_evidence_required": false,
+      "context7": {
+        "status": "N/A",
+        "reason": "The failure is closed by local authentication code and a focused local regression test."
+      },
+      "deepwiki": {
+        "status": "N/A",
+        "reason": "No external architecture evidence is required."
+      }
+    },
+    "failure_object": {
+      "trigger_input": "Run the TikTok authentication check immediately after opening the Bit Browser page.",
+      "state_environment": "TikTok navigation has completed, but page content may still be settling asynchronously.",
+      "failing_signal": "The execution record contains login_check with state unknown and detail unable to classify TikTok login state.",
+      "expected_behavior": {
+        "statement": "A transient unknown result should be rechecked before the login check reports unknown.",
+        "authority_evidence_ids": ["E1"]
+      },
+      "actual_behavior": "ensure_logged_in classifies the page once and immediately returns UNKNOWN when no marker is visible in that snapshot.",
+      "affected_boundary": "src/platforms/tiktok/auth.py TikTokAuthAdapter.ensure_logged_in",
+      "nearby_objects_not_accepted": [
+        "Bit Browser provider availability",
+        "TikTok account credential validity",
+        "Registration completion"
+      ]
+    },
+    "evidence": [
+      {
+        "id": "E1",
+        "kind": "user",
+        "provider": "user",
+        "scope": "reported-instance",
+        "summary": "The screenshot shows login_check recorded as unknown while later records show the registration and session completed successfully.",
+        "source_anchor": {
+          "type": "conversation-image",
+          "ref": "codex-clipboard-9e9fdfb2-b3ce-403d-ba18-b677c105c0f7.png"
+        },
+        "captured_at": "2026-09-20T13:20:00+08:00",
+        "same_failure_object": true,
+        "same_causal_chain": false,
+        "proves": [
+          "the reported unknown login_check is user-visible",
+          "the expected behavior is to avoid a false transient unknown result"
+        ],
+        "does_not_prove": [
+          "implementation root cause",
+          "Bit Browser account state"
+        ],
+        "redacted": true
+      },
+      {
+        "id": "E2",
+        "kind": "source",
+        "provider": "repository",
+        "scope": "same-class",
+        "summary": "ensure_logged_in navigates to TikTok and calls classify_tiktok_page exactly once before handling the result; an UNKNOWN result is returned unchanged when auto login is not enabled.",
+        "source_anchor": {
+          "type": "file",
+          "ref": "src/platforms/tiktok/auth.py:86-145",
+          "path": "src/platforms/tiktok/auth.py",
+          "content_sha256": "37e4f87e1c09c0b390e75b4678952f1c3ba5b1ea22fb7ad01944d9384501430f"
+        },
+        "captured_at": "2026-09-20T13:25:00+08:00",
+        "same_failure_object": true,
+        "same_causal_chain": true,
+        "proves": [
+          "the first wrong step is the single immediate classification",
+          "UNKNOWN is propagated without a settling retry"
+        ],
+        "does_not_prove": [
+          "the external browser session is expired"
+        ],
+        "redacted": true
+      },
+      {
+        "id": "E3",
+        "kind": "source",
+        "provider": "repository",
+        "scope": "same-class",
+        "summary": "classify_tiktok_page returns UNKNOWN when no login, logout, challenge, or logged-in selector is visible in the current snapshot.",
+        "source_anchor": {
+          "type": "file",
+          "ref": "src/platforms/tiktok/auth.py:285-359",
+          "path": "src/platforms/tiktok/auth.py",
+          "content_sha256": "37e4f87e1c09c0b390e75b4678952f1c3ba5b1ea22fb7ad01944d9384501430f"
+        },
+        "captured_at": "2026-09-20T13:25:00+08:00",
+        "same_failure_object": true,
+        "same_causal_chain": true,
+        "proves": [
+          "an incomplete DOM snapshot produces the exact UNKNOWN detail"
+        ],
+        "does_not_prove": [
+          "TikTok is actually logged out"
+        ],
+        "redacted": true
+      },
+      {
+        "id": "E4",
+        "kind": "test",
+        "provider": "repository",
+        "scope": "same-class",
+        "summary": "The focused regression test fails before the repair because the adapter returns the first UNKNOWN result instead of rechecking.",
+        "source_anchor": {
+          "type": "file",
+          "ref": "src/test_tiktok_auth_unit.py:1-43",
+          "path": "src/test_tiktok_auth_unit.py",
+          "content_sha256": "711fa110c4d7b3e672d0c4af1c1f1a70a700cbe0e99e20e9a159fba53bb6b612"
+        },
+        "captured_at": "2026-09-20T13:29:00+08:00",
+        "same_failure_object": true,
+        "same_causal_chain": true,
+        "proves": [
+          "the RED test observes the same false UNKNOWN propagation"
+        ],
+        "does_not_prove": [
+          "the production repair is complete"
+        ],
+        "redacted": true
+      }
+    ],
+    "equivalent_reproduction_reason": "The focused test supplies the same sequence as the report: the first page snapshot is unclassifiable and the next snapshot is logged in. The current implementation returns the first UNKNOWN, reproducing the false login_check result.",
+    "claims": [
+      {
+        "id": "RC1",
+        "status": "root-cause",
+        "statement": "The first wrong step is TikTokAuthAdapter.ensure_logged_in treating one transient UNKNOWN page snapshot as final instead of rechecking the page after a short bounded delay.",
+        "evidence_ids": ["E2", "E3"],
+        "consumers": [
+          "repair_handoff",
+          "causal_chain.edge-1",
+          "causal_chain.edge-2",
+          "red",
+          "green",
+          "audit"
+        ],
+        "does_not_prove": [
+          "Bit Browser account expiration",
+          "TikTok registration success"
+        ],
+        "challenge": "If the page were definitively logged out, the existing login-page or logged-out markers would classify it as such rather than UNKNOWN.",
+        "would_disprove": "A deterministic test showing the page remains UNKNOWN across the bounded retry while a later classification becomes logged in without any page change."
+      }
+    ],
+    "hypotheses": [
+      {
+        "id": "H1",
+        "status": "root-cause",
+        "claim_id": "RC1",
+        "statement": "Single-shot classification races asynchronous TikTok page settling.",
+        "evidence_for_ids": ["E2", "E3", "E4"],
+        "evidence_against_ids": [],
+        "challenge": "The test must fail before the retry and pass after it.",
+        "would_disprove": "A retry cannot observe a later valid state in the same page."
+      },
+      {
+        "id": "H2",
+        "status": "ruled-out",
+        "statement": "The Bit Browser account is expired and directly caused this UNKNOWN result.",
+        "evidence_for_ids": ["E2", "E3"],
+        "evidence_against_ids": ["E2", "E3"],
+        "challenge": "The same execution record later shows logged_in and session completion, while UNKNOWN is emitted by the local classifier when markers are absent.",
+        "would_disprove": "A browser/provider error that occurs before classification and consistently prevents later logged_in/session-complete events."
+      }
+    ],
+    "directness_challenge": {
+      "challenge": "Could the unknown record be caused by a genuinely logged-out session rather than a transient snapshot?",
+      "would_disprove": "The focused same-page sequence would not transition from UNKNOWN to LOGGED_IN on the next classification.",
+      "evidence_ids": ["E1", "E3", "E4"],
+      "conclusion": "Directness holds for the local logic defect: the repository shows single-shot propagation, and the focused test reproduces the false transient result without external dependencies."
+    },
+    "causal_chain": {
+      "first_wrong_step_edge_id": "edge-1",
+      "first_wrong_step": "The adapter finalizes an UNKNOWN classification after one snapshot.",
+      "fix_interruption_point": "Reclassify UNKNOWN after a short bounded delay before returning it.",
+      "edges": [
+        {
+          "id": "edge-1",
+          "from": "TikTok page is still settling after navigation",
+          "to": "classify_tiktok_page sees no visible state marker",
+          "relation": "single DOM snapshot is incomplete",
+          "evidence_ids": ["E2", "E3"]
+        },
+        {
+          "id": "edge-2",
+          "from": "classify_tiktok_page sees no visible state marker",
+          "to": "login_check records unknown",
+          "relation": "ensure_logged_in propagates the first result without retry",
+          "evidence_ids": ["E2", "E4"]
+        }
+      ]
+    },
+    "contradictions": [],
+    "open_unknowns": [],
+    "repair_handoff": {
+      "readiness": "READY_FOR_DECISION",
+      "consumer": "$code-bugfix",
+      "root_cause_claim_id": "RC1",
+      "repair_boundary": "Add a bounded retry only for UNKNOWN in TikTokAuthAdapter.ensure_logged_in; preserve all existing state classifications and login flows.",
+      "regression_observable": "When the first classification is UNKNOWN and the next is LOGGED_IN, ensure_logged_in returns LOGGED_IN after one retry.",
+      "constraints": [
+        "Do not change Bit Browser behavior.",
+        "Do not retry known logged-out, MFA, CAPTCHA, or security-check states.",
+        "Do not add unbounded waits or external calls."
+      ],
+      "risk_decisions": [
+        {
+          "id": "R1",
+          "status": "RESOLVED",
+          "decision": "No operational risk; bounded local reclassification only."
+        }
+      ]
+    }
+  },
+  "direct_lock_acceptance": {
+    "accepted": true,
+    "accepted_lock_sha256": "5733122466437fc7427888e2bc8d34771cb1ca9ca43d6f54b39983f9144aa8a9",
+    "source_anchors_current": true,
+    "checked_at": "2026-09-20T13:35:00+08:00"
+  },
+  "repair_authorized": true,
+  "operational_risk": {
+    "cache_invalidation": false,
+    "version_bump": false,
+    "historical_recompute": false,
+    "migration": false,
+    "data_repair": false,
+    "destructive_change": false,
+    "rollout_change": false,
+    "external_call_increase": false
+  },
+  "decision": {
+    "action": "auto-implement",
+    "reason": "The diagnosis, repair boundary, regression observable, and operational risk are fully determined by local repository evidence.",
+    "evidence_ids": ["E2", "E3", "E4"],
+    "risk_approved": true,
+    "resolved_lock_risk_ids": ["R1"]
+  },
+  "red_green": {
+    "red": {
+      "command": "python -m pytest src/test_tiktok_auth_unit.py -q",
+      "result": "FAILED: first UNKNOWN was returned instead of the later LOGGED_IN result",
+      "same_failure_object": true,
+      "same_causal_chain": true
+    },
+    "green": {
+      "command": "python -m pytest src/test_tiktok_auth_unit.py -q",
+      "result": "PASSED: 1 passed",
+      "same_failure_object": true,
+      "same_causal_chain": true
+    }
+  },
+  "verification": [
+    {
+      "command": "python -m pytest src/test_tiktok_auth_unit.py -q",
+      "passed": true
+    },
+    {
+      "command": "python -m pytest src/test_tiktok_navigation_unit.py src/test_tiktok_runner_profile_collection_unit.py -q",
+      "passed": true
+    }
+  ],
+  "changed_files": [
+    {
+      "path": "src/platforms/tiktok/auth.py",
+      "trace_to_claim_id": "RC1",
+      "summary": "Added bounded retries only for UNKNOWN TikTok login classifications."
+    },
+    {
+      "path": "src/test_tiktok_auth_unit.py",
+      "trace_to_claim_id": "RC1",
+      "summary": "Added regression coverage for transient UNKNOWN followed by LOGGED_IN."
+    }
+  ],
+  "gates": {
+    "direct_evidence_accepted": true,
+    "decision_closed": true,
+    "regression_closed": true,
+    "repair_closed": true,
+    "verification_closed": true,
+    "audit_closed": true
+  },
+  "blockers": []
+}

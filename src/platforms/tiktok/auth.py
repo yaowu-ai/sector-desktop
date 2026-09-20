@@ -15,6 +15,7 @@ from platforms.tiktok.navigation import (
 
 TIKTOK_LOGIN_URL = "https://www.tiktok.com/login"
 LOCAL_CREDENTIAL_SOURCES = {"local_secure_store", "dpapi"}
+TIKTOK_UNKNOWN_RETRY_DELAYS_SECONDS = (1.0, 2.0)
 
 
 LOGGED_IN_SELECTORS = [
@@ -123,6 +124,12 @@ class TikTokAuthAdapter:
                 intervention=_intervention(LoginState.UNKNOWN, "load_failed"),
             )
         result = classify_tiktok_page(page, account_id=account_id)
+        if result.state == LoginState.UNKNOWN:
+            for delay in TIKTOK_UNKNOWN_RETRY_DELAYS_SECONDS:
+                time.sleep(delay)
+                result = classify_tiktok_page(page, account_id=account_id)
+                if result.state != LoginState.UNKNOWN:
+                    break
         if result.state == LoginState.LOGGED_IN:
             return result
         if result.state in {LoginState.MFA, LoginState.CAPTCHA, LoginState.SECURITY_CHECK}:
