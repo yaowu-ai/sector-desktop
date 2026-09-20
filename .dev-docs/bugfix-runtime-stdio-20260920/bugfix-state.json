@@ -1,0 +1,419 @@
+{
+  "version": 3,
+  "mode": "code-bugfix",
+  "diagnosis_source": "direct-repository-evidence",
+  "active": false,
+  "phase": "lock-direct",
+  "terminal_state": "PASS",
+  "repository_root": "E:/YAOWU/yangHao/account-matrix",
+  "direct_evidence_lock": {
+    "schema_version": 1,
+    "kind": "direct-evidence-lock",
+    "producer": "code-bugfix",
+    "lock_id": "runtime-stdio-invalid-argument-20260920",
+    "status": "DIRECT_EVIDENCE_LOCKED",
+    "locked_at": "2026-09-20T01:00:00+08:00",
+    "source_context": {
+      "analysis_class": "non-trivial",
+      "investigation_boundary": "Windows desktop bundled runtime startup and stdout/stderr shutdown handling for manual account tasks",
+      "repository_root": "E:/YAOWU/yangHao/account-matrix",
+      "revision": "a3ea9b1de220d2ec381da59cfa12357dd5d474c8",
+      "providers_used": [
+        "user",
+        "repository",
+        "local-command"
+      ],
+      "external_evidence_required": false,
+      "context7": {
+        "status": "N/A",
+        "reason": "The failure is closed by local repository code and deterministic Python process behavior; no external framework semantics are required."
+      },
+      "deepwiki": {
+        "status": "N/A",
+        "reason": "The failure is closed by local repository code and deterministic Python process behavior; no external architecture evidence is required."
+      }
+    },
+    "failure_object": {
+      "trigger_input": "Manually start one TikTok养号 task from the desktop application on Windows using the bundled account-matrix-runtime.exe.",
+      "state_environment": "Tauri launches the PyInstaller console runtime with CREATE_NO_WINDOW and stdout/stderr pipes.",
+      "failing_signal": "The task process reports 'Exception ignored on flushing sys.stdout: OSError: [Errno 22] Invalid argument' and exits with code 120.",
+      "expected_behavior": {
+        "statement": "A manually started account task must not be marked failed solely because Python cannot flush an invalid standard stream during interpreter shutdown.",
+        "authority_evidence_ids": [
+          "E1"
+        ]
+      },
+      "actual_behavior": "The runtime exits with code 120; the desktop waiter stores the non-zero exit as a task error and the UI shows failed.",
+      "affected_boundary": "Bundled Python runtime entrypoint and desktop child-process output boundary.",
+      "nearby_objects_not_accepted": [
+        "Bit Browser login/session validity",
+        "The redacted command placeholders shown by the UI",
+        "TikTok task behavior after the browser session starts"
+      ]
+    },
+    "evidence": [
+      {
+        "id": "E1",
+        "kind": "user",
+        "provider": "user",
+        "scope": "reported-instance",
+        "summary": "User screenshot shows the exact stderr text and process exit code 120 after manually starting the task.",
+        "source_anchor": {
+          "type": "conversation-image",
+          "ref": "codex-clipboard-077fe558-f37f-41c6-b302-7ea17477d800.png"
+        },
+        "captured_at": "2026-09-20T00:59:00+08:00",
+        "same_failure_object": false,
+        "same_causal_chain": false,
+        "proves": [
+          "reported failure signal",
+          "expected task boundary"
+        ],
+        "does_not_prove": [
+          "implementation root cause",
+          "Bit Browser account state"
+        ],
+        "redacted": true
+      },
+      {
+        "id": "E2",
+        "kind": "source",
+        "provider": "repository",
+        "scope": "same-class",
+        "summary": "The PyInstaller runtime is built as a console executable, while the desktop process launcher hides the Windows console and captures stdout/stderr through pipes.",
+        "source_anchor": {
+          "type": "file",
+          "ref": "runtime/pyinstaller/account-matrix-runtime.spec:67-83",
+          "path": "runtime/pyinstaller/account-matrix-runtime.spec",
+          "content_sha256": "e32950bb3d969517b2d5ee98ed7f52f426dae634d7b2328d673b50186b118aa0"
+        },
+        "captured_at": "2026-09-20T00:56:00+08:00",
+        "same_failure_object": true,
+        "same_causal_chain": true,
+        "proves": [
+          "bundled runtime uses console standard streams",
+          "the failure boundary is runtime output handling"
+        ],
+        "does_not_prove": [
+          "whether the Bit Browser account is logged in"
+        ],
+        "redacted": true
+      },
+      {
+        "id": "E3",
+        "kind": "source",
+        "provider": "repository",
+        "scope": "same-class",
+        "summary": "The desktop launcher starts the child with piped stdout/stderr and CREATE_NO_WINDOW, then treats any non-zero exit code as a task error.",
+        "source_anchor": {
+          "type": "file",
+          "ref": "desktop/src-tauri/src/commands/process.rs:1000-1048,1174-1205",
+          "path": "desktop/src-tauri/src/commands/process.rs",
+          "content_sha256": "c0ee65033e51f11159675f180c6960aa76d35f74ed94fc022476dd529ba11151"
+        },
+        "captured_at": "2026-09-20T00:56:00+08:00",
+        "same_failure_object": true,
+        "same_causal_chain": true,
+        "proves": [
+          "stdout/stderr are captured through pipes",
+          "exit code 120 becomes task failure"
+        ],
+        "does_not_prove": [
+          "the task's business logic failed"
+        ],
+        "redacted": true
+      },
+      {
+        "id": "E4",
+        "kind": "source",
+        "provider": "repository",
+        "scope": "same-class",
+        "summary": "The runtime CLI is the bundled executable entrypoint and currently has no protection around interpreter shutdown flushes.",
+        "source_anchor": {
+          "type": "file",
+          "ref": "src/runtime_cli.py:1-45",
+          "path": "src/runtime_cli.py",
+          "content_sha256": "21634aef76b72211ae79406454bfd423a4f95ee44d7dc44830f85c3ae199a6f8"
+        },
+        "captured_at": "2026-09-20T00:56:00+08:00",
+        "same_failure_object": true,
+        "same_causal_chain": true,
+        "proves": [
+          "the runtime entrypoint is the correct repair boundary",
+          "no safe stdio shutdown wrapper currently exists"
+        ],
+        "does_not_prove": [
+          "the browser provider or TikTok session is invalid"
+        ],
+        "redacted": true
+      },
+      {
+        "id": "E5",
+        "kind": "reproduction",
+        "provider": "local-command",
+        "scope": "same-class",
+        "summary": "A deterministic Python subprocess replacing sys.stdout with a stream whose flush raises OSError(22) exits with code 120 and emits the same shutdown-flush failure class.",
+        "source_anchor": {
+          "type": "command",
+          "ref": "python subprocess invalid-flush reproduction"
+        },
+        "captured_at": "2026-09-20T00:58:00+08:00",
+        "same_failure_object": true,
+        "same_causal_chain": true,
+        "proves": [
+          "OSError(22) during interpreter stdout flush produces exit code 120",
+          "the observed failure is a shutdown stream failure rather than task business logic"
+        ],
+        "does_not_prove": [
+          "the exact account's Bit Browser login state"
+        ],
+        "redacted": true
+      },
+      {
+        "id": "E6",
+        "kind": "test",
+        "provider": "repository",
+        "scope": "same-class",
+        "summary": "The newly added focused regression test fails before the repair because runtime_cli.SafeTextStream does not exist.",
+        "source_anchor": {
+          "type": "file",
+          "ref": "src/test_runtime_stdio_unit.py:1-17",
+          "path": "src/test_runtime_stdio_unit.py",
+          "content_sha256": "95c5f4c1c9602d124fe5ad5414c2d99ea841cd10d4b051b46494ed191986a4a9"
+        },
+        "captured_at": "2026-09-20T01:00:00+08:00",
+        "same_failure_object": true,
+        "same_causal_chain": true,
+        "proves": [
+          "RED regression target is the safe flush behavior"
+        ],
+        "does_not_prove": [
+          "the production repair is complete"
+        ],
+        "redacted": true
+      }
+    ],
+    "equivalent_reproduction_reason": "The reported process uses the same Windows bundled-runtime stdout/stderr boundary. The local command reproduces the same OSError(22) flush failure and exit code 120; the focused test observes the exact repair invariant at the runtime entrypoint.",
+    "claims": [
+      {
+        "id": "RC1",
+        "status": "root-cause",
+        "statement": "The first wrong step is allowing the bundled Python runtime to retain raw console-backed stdout/stderr while the desktop launcher hides the console and captures those streams; when the Windows stream becomes invalid during interpreter shutdown, Python raises OSError(22), returns exit code 120, and the desktop waiter marks the task failed.",
+        "evidence_ids": [
+          "E2",
+          "E3",
+          "E4",
+          "E5"
+        ],
+        "consumers": [
+          "repair_handoff",
+          "causal_chain.edge-1",
+          "causal_chain.edge-2",
+          "causal_chain.edge-3",
+          "red",
+          "green",
+          "audit"
+        ],
+        "does_not_prove": [
+          "Bit Browser authentication status",
+          "successful TikTok task execution after stream shutdown"
+        ],
+        "challenge": "If the task business logic or browser login were the first failure, the deterministic invalid-flush subprocess would not independently produce the same exit code 120 and shutdown error.",
+        "would_disprove": "A controlled run with the same launcher boundary and a protected runtime stream still producing the same OSError(22) and exit code 120 would disprove this claim."
+      }
+    ],
+    "hypotheses": [
+      {
+        "id": "H1",
+        "status": "root-cause",
+        "claim_id": "RC1",
+        "statement": "Unprotected runtime stdout/stderr flush at interpreter shutdown.",
+        "evidence_for_ids": [
+          "E2",
+          "E3",
+          "E4",
+          "E5"
+        ],
+        "evidence_against_ids": [],
+        "challenge": "Would fail if protected streams did not absorb the invalid flush.",
+        "would_disprove": "A protected stream still producing the same shutdown error."
+      },
+      {
+        "id": "H2",
+        "status": "ruled-out",
+        "statement": "Bit Browser account expiration is the direct cause of the observed OSError(22) and exit code 120.",
+        "evidence_for_ids": [
+          "E1"
+        ],
+        "evidence_against_ids": [
+          "E3",
+          "E5"
+        ],
+        "challenge": "The error occurs at process stream shutdown before any browser-specific failure is shown.",
+        "would_disprove": "A browser API error or authentication failure appearing before the shutdown exception and independently causing exit code 120."
+      }
+    ],
+    "directness_challenge": {
+      "challenge": "Could the Bit Browser session or another task error be the first failure instead of the stream flush?",
+      "would_disprove": "A deterministic invalid-flush reproduction would not yield exit code 120, or the protected runtime stream would still yield the same shutdown exception.",
+      "evidence_ids": [
+        "E3",
+        "E5"
+      ],
+      "conclusion": "Directness holds because the repository closes the launcher boundary and the local reproduction independently matches the exact shutdown error class and exit code."
+    },
+    "causal_chain": {
+      "first_wrong_step_edge_id": "edge-1",
+      "first_wrong_step": "The bundled runtime entrypoint does not protect stdout/stderr flush operations even though the desktop launcher hides the console and owns the output pipes.",
+      "fix_interruption_point": "Wrap runtime stdout/stderr with a shutdown-safe proxy that swallows invalid-handle flush/write errors while preserving normal output.",
+      "edges": [
+        {
+          "id": "edge-1",
+          "from": "desktop starts bundled runtime with hidden console and piped stdout/stderr",
+          "to": "runtime keeps raw stdout/stderr without shutdown protection",
+          "relation": "launcher boundary exposes raw stream lifecycle to interpreter finalization",
+          "evidence_ids": [
+            "E2",
+            "E3",
+            "E4"
+          ]
+        },
+        {
+          "id": "edge-2",
+          "from": "runtime keeps raw stdout/stderr without shutdown protection",
+          "to": "interpreter flush raises OSError(22)",
+          "relation": "invalid Windows stream handle is flushed during shutdown",
+          "evidence_ids": [
+            "E4",
+            "E5"
+          ]
+        },
+        {
+          "id": "edge-3",
+          "from": "interpreter flush raises OSError(22)",
+          "to": "desktop waiter records exit code 120 as task failure",
+          "relation": "non-zero child exit is propagated to UI error state",
+          "evidence_ids": [
+            "E3",
+            "E5"
+          ]
+        }
+      ]
+    },
+    "contradictions": [],
+    "open_unknowns": [],
+    "repair_handoff": {
+      "readiness": "READY_FOR_DECISION",
+      "consumer": "$code-bugfix",
+      "root_cause_claim_id": "RC1",
+      "repair_boundary": "Add a small safe text-stream proxy in src/runtime_cli.py and install it before command execution; preserve normal writes, flushes, encoding, and stream attributes.",
+      "regression_observable": "The focused runtime stdio test must absorb OSError(22) from flush without raising; the runtime smoke commands must continue to return zero.",
+      "constraints": [
+        "Do not change Bit Browser behavior.",
+        "Do not change task scheduling or exit-code policy.",
+        "Do not hide real task output or unrelated exceptions."
+      ],
+      "risk_decisions": [
+        {
+          "id": "R1",
+          "status": "RESOLVED",
+          "decision": "No operational risk; this is a local output-boundary compatibility fix."
+        }
+      ]
+    }
+  },
+  "direct_lock_acceptance": {
+    "accepted": true,
+    "accepted_lock_sha256": "95291d73080ce95e9f42c45a351d12b196808b7cb1847b057b0b9fcfc23d8849",
+    "source_anchors_current": true,
+    "checked_at": "2026-09-20T05:22:00+08:00"
+  },
+  "repair_authorized": true,
+  "operational_risk": {
+    "cache_invalidation": false,
+    "version_bump": false,
+    "historical_recompute": false,
+    "migration": false,
+    "data_repair": false,
+    "destructive_change": false,
+    "rollout_change": false,
+    "external_call_increase": false
+  },
+  "decision": {
+    "action": "auto-implement",
+    "reason": "The diagnosis, repair boundary, regression observable, and operational risk are fully determined by local repository evidence.",
+    "evidence_ids": [
+      "E2",
+      "E3",
+      "E4",
+      "E5"
+    ],
+    "risk_approved": true,
+    "resolved_lock_risk_ids": [
+      "R1"
+    ]
+  },
+  "red_green": {
+    "red": {
+      "command": "python -m pytest src/test_runtime_stdio_unit.py -q",
+      "result": "FAILED: AttributeError: runtime_cli has no attribute SafeTextStream",
+      "same_failure_object": true,
+      "same_causal_chain": true
+    },
+    "green": {
+      "command": "python -m pytest src/test_runtime_stdio_unit.py -q",
+      "result": "PASSED: 1 passed",
+      "same_failure_object": true,
+      "same_causal_chain": true
+    }
+  },
+  "verification": [
+    {
+      "command": "python -m pytest src/test_runtime_stdio_unit.py -q",
+      "passed": true
+    },
+    {
+      "command": "python -m pytest src/test_runtime_cli_profile_stats_unit.py src/test_runtime_cross_platform_build_unit.py src/test_runtime_packaging_profile_stats_unit.py -q",
+      "passed": true
+    },
+    {
+      "command": "runtime/dist-fixed2/account-matrix-runtime/account-matrix-runtime.exe profile-stats --json",
+      "passed": true
+    },
+    {
+      "command": "desktop/src-tauri/resources/runtime/account-matrix-runtime.exe under CREATE_NO_WINDOW with piped stdout/stderr",
+      "passed": true
+    }
+  ],
+  "changed_files": [
+    {
+      "path": "src/runtime_cli.py",
+      "trace_to_claim_id": "RC1",
+      "summary": "Added SafeTextStream and installed it for bundled runtime stdout/stderr."
+    },
+    {
+      "path": "src/test_runtime_stdio_unit.py",
+      "trace_to_claim_id": "RC1",
+      "summary": "Added regression coverage for OSError(22) during stream flush."
+    },
+    {
+      "path": "desktop/src-tauri/resources/runtime/account-matrix-runtime.exe",
+      "trace_to_claim_id": "RC1",
+      "summary": "Updated bundled runtime executable containing the stream protection fix."
+    },
+    {
+      "path": "desktop/src-tauri/resources/runtime/runtime-manifest.json",
+      "trace_to_claim_id": "RC1",
+      "summary": "Updated bundled runtime manifest for the rebuilt executable."
+    }
+  ],
+  "gates": {
+    "direct_evidence_accepted": true,
+    "decision_closed": true,
+    "regression_closed": true,
+    "repair_closed": true,
+    "verification_closed": true,
+    "audit_closed": true
+  },
+  "blockers": []
+}
