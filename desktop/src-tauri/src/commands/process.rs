@@ -12,7 +12,9 @@ use std::thread;
 use std::time::Duration;
 use tauri::State;
 
-use crate::commands::bitbrowser::{auto_configure_chromium_executable, check_bitbrowser_api};
+use crate::commands::bitbrowser::{
+    auto_configure_chromium_executable, check_bitbrowser_api, check_ixbrowser_api,
+};
 use crate::commands::config::{
     ensure_account_ids_belong_to_platform, ensure_platform_capability, load_config,
     normalize_platform, read_login_password_for_runtime,
@@ -1506,6 +1508,28 @@ fn ensure_tiktok_register_account(account_id: &str) -> Result<(), String> {
                 ));
             }
         }
+        "ixbrowser" => {
+            let profile_id = account.browser_profile_id().ok_or_else(|| {
+                format!(
+                    "REGISTER_BROWSER_PROVIDER_INVALID: account '{}' has no ixBrowser browser.profile_id",
+                    account_id,
+                )
+            })?;
+            if !profile_id.chars().all(|ch| ch.is_ascii_digit()) {
+                return Err(format!(
+                    "REGISTER_BROWSER_PROVIDER_INVALID: account '{}' ixBrowser browser.profile_id must be numeric",
+                    account_id,
+                ));
+            }
+            let api_status = check_ixbrowser_api();
+            if !api_status.available() {
+                return Err(format!(
+                    "REGISTER_BROWSER_PROVIDER_INVALID: ixBrowser API is not available at {}: {}",
+                    api_status.api_url(),
+                    api_status.error().unwrap_or("unknown error")
+                ));
+            }
+        }
         "builtin_chromium" => {
             if paths.chromium_executable.trim().is_empty()
                 && config.chromium_executable().is_none()
@@ -1613,6 +1637,28 @@ fn ensure_account_can_execute_for_platform(
                 );
             }
         }
+        "ixbrowser" => {
+            let profile_id = account.browser_profile_id().ok_or_else(|| {
+                format!(
+                    "account '{}' has no ixBrowser browser.profile_id; platform='{}', capability='{}'",
+                    account_id, platform, capability,
+                )
+            })?;
+            if !profile_id.chars().all(|ch| ch.is_ascii_digit()) {
+                return Err(format!(
+                    "account '{}' ixBrowser browser.profile_id must be numeric; platform='{}', capability='{}'",
+                    account_id, platform, capability,
+                ));
+            }
+            let api_status = check_ixbrowser_api();
+            if !api_status.available() {
+                return Err(format!(
+                    "ixBrowser API is not available at {}: {}",
+                    api_status.api_url(),
+                    api_status.error().unwrap_or("unknown error")
+                ));
+            }
+        }
         provider => {
             return Err(format!("unsupported browser provider '{}'", provider));
         }
@@ -1674,16 +1720,37 @@ fn ensure_all_enabled_accounts_can_execute_for_platform(
     let missing_profiles = executable_accounts
         .iter()
         .filter(|account| {
-            account.browser_provider() == "bitbrowser" && account.bitbrowser_profile_id().is_none()
+            (account.browser_provider() == "bitbrowser"
+                && account.bitbrowser_profile_id().is_none())
+                || (account.browser_provider() == "ixbrowser"
+                    && account.browser_profile_id().is_none())
         })
         .map(|account| account.id().to_string())
         .collect::<Vec<_>>();
     if !missing_profiles.is_empty() {
         return Err(format!(
-            "enabled account(s) have no bitbrowser_profile_id; platform='{}', capability='{}', accountIds='{}'",
+            "enabled account(s) have no required browser profile_id; platform='{}', capability='{}', accountIds='{}'",
             platform,
             capability,
             missing_profiles.join(", ")
+        ));
+    }
+    let invalid_ix_profiles = executable_accounts
+        .iter()
+        .filter(|account| account.browser_provider() == "ixbrowser")
+        .filter_map(|account| {
+            account.browser_profile_id().and_then(|profile_id| {
+                (!profile_id.chars().all(|ch| ch.is_ascii_digit()))
+                    .then(|| account.id().to_string())
+            })
+        })
+        .collect::<Vec<_>>();
+    if !invalid_ix_profiles.is_empty() {
+        return Err(format!(
+            "enabled ixBrowser account(s) have non-numeric browser.profile_id; platform='{}', capability='{}', accountIds='{}'",
+            platform,
+            capability,
+            invalid_ix_profiles.join(", ")
         ));
     }
     if executable_accounts
@@ -1694,6 +1761,19 @@ fn ensure_all_enabled_accounts_can_execute_for_platform(
         if !api_status.available() {
             return Err(format!(
                 "BitBrowser API is not available at {}: {}",
+                api_status.api_url(),
+                api_status.error().unwrap_or("unknown error")
+            ));
+        }
+    }
+    if executable_accounts
+        .iter()
+        .any(|account| account.browser_provider() == "ixbrowser")
+    {
+        let api_status = check_ixbrowser_api();
+        if !api_status.available() {
+            return Err(format!(
+                "ixBrowser API is not available at {}: {}",
                 api_status.api_url(),
                 api_status.error().unwrap_or("unknown error")
             ));
