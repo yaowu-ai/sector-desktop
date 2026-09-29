@@ -230,6 +230,7 @@ export interface BatchCreateProfileResult {
 }
 
 export interface SyncAccountsRequest {
+  browserProvider: BrowserProviderId
   prefix: string
   start: number
   end: number

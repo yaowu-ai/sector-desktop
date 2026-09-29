@@ -347,7 +347,7 @@ TikTok 账号行会显示 `自动登录` 按钮，表格上方也提供 `批量�
 - `BitBrowser Profile`：BitBrowser profile 列表和打开/关闭操作。
 - `内置 Chromium`：Chromium 环境信息、内置 Chromium 账号列表、检测和清理。
 - `账号绑定`：统一展示所有账号的浏览器提供方、环境标识和操作。
-- `批量工具`：BitBrowser 单个创建、批量创建和账号环境同步。
+- `批量工具`：BitBrowser 单个创建、批量创建，以及 BitBrowser/ixBrowser 账号环境同步。
 
 浏览器 provider 区别：
 
@@ -418,7 +418,7 @@ BitBrowser API 离线时，该 Tab 内会展示错误提示，但其他 Tab（�
 
 ### 6.4 批量工具
 
-`批量工具` Tab 集中 BitBrowser 创建和账号环境同步工具。
+`批量工具` Tab 集中 BitBrowser 创建，以及 BitBrowser/ixBrowser 账号环境同步工具。
 
 #### BitBrowser 单个创建
 
@@ -458,7 +458,14 @@ BitBrowser API 离线时，该 Tab 内会展示错误提示，但其他 Tab（�
 
 #### 账号环境同步
 
-账号环境同步用于把 BitBrowser profile 批量同步为账号配置。同步只处理 BitBrowser profile 绑定，内置 Chromium 账号无需创建 profile，同步预览中不会提示内置 Chromium 需要创建 profile。
+账号环境同步支持选择 BitBrowser 或 ixBrowser，将对应浏览器窗口批量同步为账号配置。内置 Chromium 不参与窗口同步。
+
+在“平台模板”后选择“浏览器”：
+
+- `Bit浏览器`：读取 BitBrowser Local API，写入 `bitbrowser_profile_id`。
+- `ix浏览器`：读取 ixBrowser Local API，写入 `browser_provider: ixbrowser` 和 `browser.profile_id`。
+
+两种浏览器都会按精确窗口名匹配账号，例如 `tiktok_21`。先点“试运行”，确认将新增账号、已有账号、缺失窗口和重复窗口，再点“同步”。
 
 填写：
 
@@ -469,7 +476,7 @@ BitBrowser API 离线时，该 Tab 内会展示错误提示，但其他 Tab（�
 - `晚上起`、`晚上止`：晚上班时间。
 - `首个 IP 组`：起始 IP 分组编号。
 
-同步会按 BitBrowser 精确窗口名生成缺失账号并补齐 profile 绑定，例如 `tiktok_21`、`instagram_21`。先点 `dry-run`，确认将新增账号、已有账号、缺失 profile、重复 profile。确认无误后再 `apply`，写入前会备份 `accounts.yaml`。
+同步会按所选浏览器的精确窗口名生成缺失账号并补齐 profile 绑定，例如 `tiktok_21`、`instagram_21`。先点 `dry-run`，确认将新增账号、已有账号、缺失窗口、重复窗口。确认无误后再 `apply`，写入前会备份 `accounts.yaml`。
 
 ### 6.5 内置 Chromium 账号数据
 

@@ -107,6 +107,7 @@ interface BatchCreateForm {
 }
 
 interface SyncForm {
+  browserProvider: BrowserProviderId;
   platform: Platform;
   prefix: string;
   start: number;
@@ -306,6 +307,7 @@ export function BrowserProfilePage() {
       skipUsed: true,
     });
     syncForm.setFieldsValue({
+      browserProvider: "bitbrowser",
       platform: currentPlatform,
       prefix: currentPlatform,
       start: 21,
@@ -1194,13 +1196,18 @@ function SyncPanel({
   onDryRun: () => void;
   onApply: () => void;
 }) {
+  const browserProvider =
+    Form.useWatch("browserProvider", form) ?? "bitbrowser";
+  const browserLabel =
+    browserProvider === "ixbrowser" ? "ix浏览器" : "Bit浏览器";
+
   return (
     <Space direction="vertical" size={16} className="full-width">
       <Alert
         type="info"
         showIcon
         message="先试运行，再同步"
-        description="同步会按 Bit浏览器精确窗口名生成缺失账号，例如 tiktok_001。"
+        description={`同步会按 ${browserLabel} 精确窗口名生成缺失账号，例如 tiktok_001。`}
       />
       <Form form={form} layout="vertical" requiredMark={false}>
         <Row gutter={12}>
@@ -1221,6 +1228,15 @@ function SyncPanel({
           </Col>
           <Col xs={24} md={5}>
             <Form.Item
+              name="browserProvider"
+              label="浏览器"
+              rules={[{ required: true }]}
+            >
+              <Select options={browserProviderOptions()} />
+            </Form.Item>
+          </Col>
+          <Col xs={24} md={5}>
+            <Form.Item
               name="prefix"
               label="窗口前缀"
               rules={[{ required: true }]}
@@ -1228,6 +1244,8 @@ function SyncPanel({
               <Input />
             </Form.Item>
           </Col>
+        </Row>
+        <Row gutter={12}>
           <Col xs={12} md={2}>
             <Form.Item name="start" label="起始" rules={[{ required: true }]}>
               <InputNumber precision={0} min={1} className="full-width" />
@@ -1966,6 +1984,13 @@ function platformOptions() {
     value: platform.id,
     label: `${platform.localeName}${platform.automaticExecutionSupported ? "" : "（预留）"}`,
   }));
+}
+
+function browserProviderOptions() {
+  return [
+    { value: "bitbrowser", label: "Bit浏览器" },
+    { value: "ixbrowser", label: "ix浏览器" },
+  ] satisfies { value: BrowserProviderId; label: string }[];
 }
 
 function profileMatchesPlatform(profile: BrowserProfile, platform: Platform) {

@@ -9,7 +9,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-use crate::commands::config::{append_accounts_to_config, load_config, AccountInput, SaveResult};
+use crate::commands::config::{
+    append_accounts_to_config, load_config, AccountBrowserInput, AccountInput, SaveResult,
+};
 use crate::paths::{
     effective_chromium_executable, load_local_app_settings, normalize, project_paths,
     save_local_app_settings,
@@ -217,6 +219,8 @@ pub struct BatchProfileIssue {
 #[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncAccountsRequest {
+    #[serde(default)]
+    browser_provider: Option<String>,
     prefix: String,
     start: i64,
     end: i64,
@@ -1735,8 +1739,15 @@ fn profile_account_bindings() -> HashMap<String, String> {
 
 fn build_sync_preview(request: &SyncAccountsRequest) -> Result<SyncPreview, String> {
     validate_sync_request(request)?;
-    let api_url = bitbrowser_api_url();
-    let profiles = list_raw_profiles(&api_url, Some(format!("{}_", request.prefix)))?;
+    let provider = sync_browser_provider(request)?;
+    let profiles = match provider {
+        "bitbrowser" => {
+            let api_url = bitbrowser_api_url();
+            list_raw_profiles(&api_url, Some(format!("{}_", request.prefix)))?
+        }
+        "ixbrowser" => list_ix_raw_profiles(&ixbrowser_api_url())?,
+        _ => unreachable!("sync provider is validated before profile lookup"),
+    };
     let (profile_map, duplicate_profiles) = exact_profile_map(&profiles, &request.prefix);
     let config = load_config()?;
     let existing_ids = config
@@ -1765,6 +1776,7 @@ fn build_sync_preview(request: &SyncAccountsRequest) -> Result<SyncPreview, Stri
             number,
             &request.prefix,
             profile_id,
+            provider,
             request,
         )?);
     }
@@ -1942,6 +1954,7 @@ fn validate_profile_name(name: &str) -> Result<(), String> {
 }
 
 fn validate_sync_request(request: &SyncAccountsRequest) -> Result<(), String> {
+    sync_browser_provider(request)?;
     validate_profile_name(&format!("{}_1", request.prefix))?;
     if request.start > request.end {
         return Err("同步起始编号不能大于结束编号".to_string());
@@ -1961,6 +1974,7 @@ fn build_account_input(
     number: i64,
     prefix: &str,
     profile_id: &str,
+    provider: &str,
     request: &SyncAccountsRequest,
 ) -> Result<AccountInput, String> {
     let (shift_name, active_hours) = shift_for_number(number, request)?;
@@ -1975,6 +1989,7 @@ fn build_account_input(
         format!("IP-{} 上午", ip_group)
     };
 
+    let is_ixbrowser = provider == "ixbrowser";
     Ok(AccountInput {
         id: format!("{}_{}", prefix, number),
         platform: infer_platform_from_name(prefix),
@@ -1982,12 +1997,30 @@ fn build_account_input(
         scheduled: Some(true),
         ip_group: Some(ip_group),
         active_hours,
-        browser_provider: None,
-        browser: None,
+        browser_provider: is_ixbrowser.then(|| provider.to_string()),
+        browser: is_ixbrowser.then(|| AccountBrowserInput {
+            provider: Some(provider.to_string()),
+            profile_id: Some(profile_id.to_string()),
+            proxy_type: None,
+            proxy: None,
+            user_data_dir: None,
+        }),
         login: None,
-        bitbrowser_profile_id: Some(profile_id.to_string()),
+        bitbrowser_profile_id: (!is_ixbrowser).then(|| profile_id.to_string()),
         notes: Some(notes),
     })
+}
+
+fn sync_browser_provider(request: &SyncAccountsRequest) -> Result<&str, String> {
+    let provider = request
+        .browser_provider
+        .as_deref()
+        .unwrap_or("bitbrowser")
+        .trim();
+    match provider {
+        "bitbrowser" | "ixbrowser" => Ok(provider),
+        _ => Err("账号环境同步仅支持 Bit浏览器或 ix浏览器".to_string()),
+    }
 }
 
 fn shift_for_number(
@@ -2029,7 +2062,10 @@ fn exact_profile_map(
     let needle = format!("{}_", prefix);
 
     for profile in profiles {
-        let Some(name) = string_field(profile, &["name", "browserName", "windowName"]) else {
+        let Some(name) = string_field(
+            profile,
+            &["name", "browserName", "windowName", "profile_name", "profileName"],
+        ) else {
             continue;
         };
         if !name.starts_with(&needle) {
@@ -2083,7 +2119,7 @@ fn extract_list_items(data: &JsonValue) -> Result<(Vec<JsonValue>, Option<usize>
 }
 
 fn profile_id_from_raw(profile: &JsonValue) -> Option<String> {
-    string_field(profile, &["id", "browserId"])
+    string_field(profile, &["id", "browserId", "profile_id", "profileId"])
 }
 
 fn proxy_label_from_raw(profile: &JsonValue) -> Option<String> {
@@ -2635,6 +2671,7 @@ mod tests {
 
     fn sync_request() -> SyncAccountsRequest {
         SyncAccountsRequest {
+            browser_provider: Some("bitbrowser".to_string()),
             prefix: "tiktok".to_string(),
             start: 101,
             end: 104,
@@ -2675,10 +2712,12 @@ mod tests {
     #[test]
     fn sync_account_builder_assigns_shift_and_ip_group() {
         let request = sync_request();
-        let morning = build_account_input(101, "tiktok", "profile_morning", &request)
-            .expect("morning account");
-        let evening = build_account_input(103, "tiktok", "profile_evening", &request)
-            .expect("evening account");
+        let morning =
+            build_account_input(101, "tiktok", "profile_morning", "bitbrowser", &request)
+                .expect("morning account");
+        let evening =
+            build_account_input(103, "tiktok", "profile_evening", "bitbrowser", &request)
+                .expect("evening account");
 
         assert_eq!(morning.id, "tiktok_101");
         assert_eq!(morning.ip_group, Some(500));
@@ -2689,6 +2728,60 @@ mod tests {
         assert_eq!(
             evening.bitbrowser_profile_id.as_deref(),
             Some("profile_evening")
+        );
+    }
+
+    #[test]
+    fn sync_account_builder_writes_ixbrowser_environment() {
+        let mut request = sync_request();
+        request.browser_provider = Some("ixbrowser".to_string());
+        let account =
+            build_account_input(101, "tiktok", "12345", "ixbrowser", &request)
+                .expect("ixBrowser account");
+
+        assert_eq!(account.browser_provider.as_deref(), Some("ixbrowser"));
+        assert!(account.bitbrowser_profile_id.is_none());
+        let browser = account.browser.expect("browser config");
+        assert_eq!(browser.provider.as_deref(), Some("ixbrowser"));
+        assert_eq!(browser.profile_id.as_deref(), Some("12345"));
+    }
+
+    #[test]
+    fn sync_provider_defaults_to_bitbrowser_and_rejects_builtin_chromium() {
+        let mut request = sync_request();
+        request.browser_provider = None;
+        assert_eq!(
+            sync_browser_provider(&request).expect("default provider"),
+            "bitbrowser"
+        );
+
+        request.browser_provider = Some("builtin_chromium".to_string());
+        assert!(sync_browser_provider(&request).is_err());
+    }
+
+    #[test]
+    fn exact_profile_map_accepts_ixbrowser_profile_fields() {
+        let profiles = vec![
+            json!({
+                "profile_name": "tiktok_101",
+                "profile_id": 12345
+            }),
+            json!({
+                "profileName": "tiktok_102",
+                "profileId": 12346
+            }),
+        ];
+
+        let (profile_map, duplicates) = exact_profile_map(&profiles, "tiktok");
+
+        assert!(duplicates.is_empty());
+        assert_eq!(
+            profile_map.get("tiktok_101").map(String::as_str),
+            Some("12345")
+        );
+        assert_eq!(
+            profile_map.get("tiktok_102").map(String::as_str),
+            Some("12346")
         );
     }
 }
