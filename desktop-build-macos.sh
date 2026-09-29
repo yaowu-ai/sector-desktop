@@ -30,4 +30,19 @@ if [ "${BUILD_MODE}" = "prod" ]; then
 else
   export DESKTOP_BUILD_MODE="${BUILD_MODE}"
 fi
-corepack pnpm tauri build --bundles dmg
+
+corepack pnpm tauri build --bundles app
+
+APP_NAME="$(node -p "require('./src-tauri/tauri.conf.json').productName")"
+APP_VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+APP_PATH="src-tauri/target/release/bundle/macos/${APP_NAME}.app"
+DMG_DIR="src-tauri/target/release/bundle/dmg"
+DMG_PATH="${DMG_DIR}/${APP_NAME}_${APP_VERSION}_aarch64.dmg"
+
+if [[ ! -d "${APP_PATH}" ]]; then
+  echo "[error] app bundle not found: ${APP_PATH}" >&2
+  exit 1
+fi
+
+mkdir -p "${DMG_DIR}"
+hdiutil create -volname "${APP_NAME}" -srcfolder "${APP_PATH}" -ov -format UDZO "${DMG_PATH}"
