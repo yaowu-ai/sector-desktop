@@ -31,7 +31,14 @@ from core.runner import run, find_account
 from core.runtime import acquire_lock, pid_alive, release_lock
 from runtime_config import resolve_config_path
 from platform_config import account_platform, load_runtime_config, scheduler_config
-from browser_providers import account_provider_name, BITBROWSER
+from browser_providers import (
+    account_provider_name,
+    bitbrowser_api_url,
+    ixbrowser_api_url,
+    BITBROWSER,
+    IXBROWSER,
+)
+from ixbrowser import IXBrowserClient
 
 
 SCHEDULER_LOGIN_CREDENTIALS_ENV = "AM_SCHEDULER_LOGIN_CREDENTIALS"
@@ -144,7 +151,7 @@ def is_locked_externally():
 def bitbrowser_responsive():
     """Cheap probe — can BitBrowser API answer within 5s?"""
     cfg = load_config()
-    api_url = cfg["bitbrowser"]["api_url"].rstrip("/")
+    api_url = bitbrowser_api_url(cfg).rstrip("/")
     try:
         resp = requests.post(
             f"{api_url}/browser/pids",
@@ -154,6 +161,18 @@ def bitbrowser_responsive():
         return resp.ok
     except Exception as e:
         logger.warning(f"BitBrowser probe failed: {e}")
+        return False
+
+
+def ixbrowser_responsive():
+    """Cheap probe — can ixBrowser Local API answer?"""
+    cfg = load_config()
+    api_url = ixbrowser_api_url(cfg)
+    try:
+        IXBrowserClient(api_url).list_browsers(page_size=1)
+        return True
+    except Exception as e:
+        logger.warning(f"ixBrowser probe failed: {e}")
         return False
 
 
@@ -216,7 +235,18 @@ async def account_session_task(account_id, job_id=None):
     main_runtime.record_scheduler_job_started(job_id, platform, account_id)
 
     if provider == BITBROWSER and not bitbrowser_responsive():
-        detail = "BitBrowser API unreachable on 127.0.0.1:54345. Is the BitBrowser app running?"
+        detail = (
+            f"BitBrowser API unreachable at {bitbrowser_api_url(load_config())}. "
+            "Is the BitBrowser app running?"
+        )
+        main_runtime.record_scheduler_job_finished(job_id, "skipped", detail)
+        logger.error(f"Skipped {account_id} — {detail}")
+        return
+    if provider == IXBROWSER and not ixbrowser_responsive():
+        detail = (
+            f"ixBrowser API unreachable at {ixbrowser_api_url(load_config())}. "
+            "Is the ixBrowser app running?"
+        )
         main_runtime.record_scheduler_job_finished(job_id, "skipped", detail)
         logger.error(f"Skipped {account_id} — {detail}")
         return
@@ -426,13 +456,27 @@ def setup_scheduler():
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     logger.info("TikTok bot scheduler starting...")
-    if bitbrowser_responsive():
-        logger.info("BitBrowser health check OK")
-    else:
-        logger.warning(
-            "BitBrowser API not responsive at startup. "
-            "Scheduler will run, but fires will skip until the app is reachable."
-        )
+    startup_cfg = load_config()
+    startup_providers = {
+        account_provider_name(account, startup_cfg)
+        for account in executable_accounts(startup_cfg)
+    }
+    if BITBROWSER in startup_providers:
+        if bitbrowser_responsive():
+            logger.info("BitBrowser health check OK")
+        else:
+            logger.warning(
+                "BitBrowser API not responsive at startup. "
+                "BitBrowser fires will skip until the app is reachable."
+            )
+    if IXBROWSER in startup_providers:
+        if ixbrowser_responsive():
+            logger.info("ixBrowser health check OK")
+        else:
+            logger.warning(
+                "ixBrowser API not responsive at startup. "
+                "ixBrowser fires will skip until the app is reachable."
+            )
     setup_scheduler()
     scheduler.start()
     logger.info("Scheduler running")

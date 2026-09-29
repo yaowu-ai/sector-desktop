@@ -38,6 +38,7 @@ import { useDesktopAuth } from "../../../app/DesktopAuthContext";
 import { usePlatformContext } from "../../../app/PlatformContext";
 import {
   checkBitbrowserApi,
+  checkIxbrowserApi,
   clearRunLock,
   getSchedulerHealth,
   getSchedulerProcessStatus,
@@ -65,6 +66,7 @@ import type {
   SchedulerJob,
   SchedulerJobRunRecord,
   SchedulerProcessStatus,
+  BrowserProviderId,
 } from "../../../services/types";
 
 interface SchedulerRow {
@@ -74,6 +76,7 @@ interface SchedulerRow {
   platform: Platform;
   ipGroup?: number;
   activeHours: [number, number][];
+  browserProvider: BrowserProviderId;
   notes?: string;
 }
 
@@ -108,6 +111,7 @@ export function SchedulerPage() {
   const licenseLimits = readDesktopLicenseLimits(license);
   const [form] = Form.useForm<ActiveHoursFormValues>();
   const [bitbrowser, setBitbrowser] = useState<ApiStatus | null>(null);
+  const [ixbrowser, setIxbrowser] = useState<ApiStatus | null>(null);
   const [health, setHealth] = useState<SchedulerHealth>(EMPTY_HEALTH);
   const [processStatus, setProcessStatus] =
     useState<SchedulerProcessStatus>(EMPTY_PROCESS);
@@ -181,6 +185,18 @@ export function SchedulerPage() {
       ]).size,
     [todayPendingJobs, todayRunHistory],
   );
+  const scheduledProviderUsage = useMemo(() => {
+    const providers = new Set(
+      schedulableRows
+        .filter((row) => row.scheduled)
+        .map((row) => row.browserProvider),
+    );
+    return {
+      bitbrowser: providers.has("bitbrowser"),
+      ixbrowser: providers.has("ixbrowser"),
+      builtinChromium: providers.has("builtin_chromium"),
+    };
+  }, [schedulableRows]);
 
   const refresh = useCallback(
     async (options: { showLoading?: boolean } = {}) => {
@@ -199,12 +215,14 @@ export function SchedulerPage() {
           nextProcess,
           nextHealth,
           nextBitbrowser,
+          nextIxbrowser,
           nextRunHistory,
         ] = await Promise.all([
           loadConfig(),
           getSchedulerProcessStatus(),
           getSchedulerHealth(),
           checkBitbrowserApi(),
+          checkIxbrowserApi(),
           querySchedulerJobRuns({
             platform: currentPlatform,
             startTs: historyStartTs,
@@ -225,6 +243,7 @@ export function SchedulerPage() {
         setProcessStatus(nextProcess);
         setHealth(nextHealth);
         setBitbrowser(nextBitbrowser);
+        setIxbrowser(nextIxbrowser);
       } catch (error) {
         message.error(formatError(error));
       } finally {
@@ -454,18 +473,41 @@ export function SchedulerPage() {
         <Col xs={24} md={8} xl={4}>
           <Card>
             <Space direction="vertical" size={8}>
-              <Typography.Text type="secondary">Bit浏览器</Typography.Text>
-              <StatusTag
-                status={bitbrowser?.available ? "ok" : "error"}
-                label={bitbrowser?.available ? "可用" : "不可用"}
-              />
-              <Typography.Text
-                type="secondary"
-                ellipsis
-                style={{ maxWidth: 180 }}
-              >
-                {bitbrowser?.apiUrl ?? "-"}
-              </Typography.Text>
+              <Typography.Text type="secondary">浏览器接口</Typography.Text>
+              {scheduledProviderUsage.bitbrowser ? (
+                <BrowserApiStatusLine label="Bit" status={bitbrowser} />
+              ) : null}
+              {scheduledProviderUsage.ixbrowser ? (
+                <BrowserApiStatusLine label="ix" status={ixbrowser} />
+              ) : null}
+              {scheduledProviderUsage.builtinChromium ? (
+                <StatusTag status="ok" label="内置浏览器" />
+              ) : null}
+              {!scheduledProviderUsage.bitbrowser &&
+              !scheduledProviderUsage.ixbrowser &&
+              !scheduledProviderUsage.builtinChromium ? (
+                <Typography.Text type="secondary">暂无调度账号</Typography.Text>
+              ) : null}
+              {scheduledProviderUsage.bitbrowser &&
+              !scheduledProviderUsage.ixbrowser ? (
+                <Typography.Text
+                  type="secondary"
+                  ellipsis
+                  style={{ maxWidth: 180 }}
+                >
+                  {bitbrowser?.apiUrl ?? "-"}
+                </Typography.Text>
+              ) : null}
+              {scheduledProviderUsage.ixbrowser &&
+              !scheduledProviderUsage.bitbrowser ? (
+                <Typography.Text
+                  type="secondary"
+                  ellipsis
+                  style={{ maxWidth: 180 }}
+                >
+                  {ixbrowser?.apiUrl ?? "-"}
+                </Typography.Text>
+              ) : null}
             </Space>
           </Card>
         </Col>
@@ -1076,8 +1118,28 @@ function accountToRow(account: Account): SchedulerRow {
     platform: account.platform,
     ipGroup: account.ipGroup,
     activeHours: account.activeHours,
+    browserProvider:
+      account.browserProvider ?? account.browser?.provider ?? "bitbrowser",
     notes: account.notes,
   };
+}
+
+function BrowserApiStatusLine({
+  label,
+  status,
+}: {
+  label: string;
+  status: ApiStatus | null;
+}) {
+  return (
+    <Space size={6}>
+      <Typography.Text type="secondary">{label}</Typography.Text>
+      <StatusTag
+        status={status?.available ? "ok" : "error"}
+        label={status?.available ? "可用" : "不可用"}
+      />
+    </Space>
+  );
 }
 
 function rowToSchedulerAccount(row: SchedulerRow): SchedulerAccountSettings {

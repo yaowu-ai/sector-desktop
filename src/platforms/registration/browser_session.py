@@ -8,6 +8,7 @@ from typing import Any, Iterator, Mapping, Optional
 from browser_providers import (
     BrowserSession,
     bitbrowser_profile_id,
+    ixbrowser_profile_id,
     provider_for_account,
     test_cdp_endpoint,
 )
@@ -35,7 +36,7 @@ def open_registration_browser(
     account_id = str(account.get("id") or "")
     provider = provider_for_account(account, config)
     provider.validate_account(account, config)
-    profile_id = bitbrowser_profile_id(account) or account_id
+    profile_id = bitbrowser_profile_id(account) or ixbrowser_profile_id(account) or account_id
 
     runtime.session_log(f"{account_id} | REGISTER OPEN | provider={provider.name}", platform)
     session = provider.start_session(account, config)
