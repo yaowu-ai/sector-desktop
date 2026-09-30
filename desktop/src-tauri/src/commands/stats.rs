@@ -396,7 +396,9 @@ pub fn query_profile_stats_detail(
 }
 
 #[tauri::command]
-pub fn query_profile_stats_summary(filter: ProfileStatsFilter) -> Result<ProfileStatsSummary, String> {
+pub fn query_profile_stats_summary(
+    filter: ProfileStatsFilter,
+) -> Result<ProfileStatsSummary, String> {
     let configured_account_count = profile_stats_configured_account_count(&filter)?;
     let Some(conn) = open_actions_db_if_exists()? else {
         return Ok(ProfileStatsSummary {
@@ -513,8 +515,8 @@ pub fn query_fyp_stats(filter: StatsScopeRequest) -> Result<FypStatsSummary, Str
 #[tauri::command]
 pub fn get_home_summary(platform: Option<String>) -> Result<HomeSummary, String> {
     let config = load_config()?;
-    let platform = normalized_platform_filter(platform.as_deref())?
-        .unwrap_or_else(|| "tiktok".to_string());
+    let platform =
+        normalized_platform_filter(platform.as_deref())?.unwrap_or_else(|| "tiktok".to_string());
     let tiktok_enabled_accounts = config
         .accounts()
         .iter()
@@ -627,7 +629,9 @@ fn query_fyp_video_view_rows(
     let end_ts = optional_trim(filter.end_ts.as_deref());
     let has_title = filter.has_title;
     let liked = filter.liked.map(|value| if value { 1_i64 } else { 0_i64 });
-    let commented = filter.commented.map(|value| if value { 1_i64 } else { 0_i64 });
+    let commented = filter
+        .commented
+        .map(|value| if value { 1_i64 } else { 0_i64 });
     let limit = normalized_limit(filter.limit);
     let query_limit = limit.saturating_mul(5).clamp(1, 5000) as i64;
 
@@ -1244,8 +1248,7 @@ fn read_today_db_stats(today: &str, platform: &str) -> Result<TodayDbStats, Stri
         .map_err(|err| format!("failed to open {}: {}", paths.actions_db_path, err))?;
     let day_prefix = format!("{}%", today);
     let action_log_platform_expr = platform_select_expr(&conn, "action_log", "account_id")?;
-    let target_platform_expr =
-        platform_select_expr(&conn, "target_engagements", "our_account")?;
+    let target_platform_expr = platform_select_expr(&conn, "target_engagements", "our_account")?;
 
     let completed_accounts: usize = conn
         .query_row(
@@ -1424,7 +1427,15 @@ fn query_profile_stats_latest_rows(
     query_profile_stats_rows(
         conn,
         &query,
-        params![platform, account_id, task_run_id, status, start_ts, end_ts, limit],
+        params![
+            platform,
+            account_id,
+            task_run_id,
+            status,
+            start_ts,
+            end_ts,
+            limit
+        ],
         "latest profile stats",
     )
 }
@@ -1456,7 +1467,15 @@ fn query_profile_stats_history_rows(
     query_profile_stats_rows(
         conn,
         &query,
-        params![platform, account_id, task_run_id, status, start_ts, end_ts, limit],
+        params![
+            platform,
+            account_id,
+            task_run_id,
+            status,
+            start_ts,
+            end_ts,
+            limit
+        ],
         "profile stats history",
     )
 }

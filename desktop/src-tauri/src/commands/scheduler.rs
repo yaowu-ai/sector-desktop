@@ -1,4 +1,4 @@
-﻿use chrono::Local;
+use chrono::Local;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -11,9 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::State;
 
-use crate::commands::config::{
-    load_config, read_login_password_for_runtime,
-};
+use crate::commands::config::{load_config, read_login_password_for_runtime};
 use crate::paths::{normalize, project_paths, project_root, python_command_parts, ProjectPaths};
 use crate::state::{AppState, LicenseEntitlements};
 
@@ -130,6 +128,7 @@ struct RawHealth {
 #[tauri::command]
 pub fn start_scheduler(state: State<'_, AppState>) -> Result<SchedulerStartResult, String> {
     ensure_scheduler_entitled(state.license_entitlements.clone())?;
+    let paths = project_paths()?;
     {
         let mut scheduler = state
             .scheduler_process
@@ -137,17 +136,19 @@ pub fn start_scheduler(state: State<'_, AppState>) -> Result<SchedulerStartResul
             .map_err(|_| "failed to lock scheduler state".to_string())?;
         if let Some(process_id) = *scheduler {
             if process_is_alive(process_id) {
-                return Ok(SchedulerStartResult {
-                    process_id,
-                    command: scheduler_command()?,
-                    status: "running".to_string(),
-                });
+                if scheduler_health_matches_paths(&paths).is_ok() {
+                    return Ok(SchedulerStartResult {
+                        process_id,
+                        command: scheduler_command_for_paths(&paths)?.0,
+                        status: "running".to_string(),
+                    });
+                }
+                let _ = stop_process(process_id);
             }
             *scheduler = None;
         }
     }
 
-    let paths = project_paths()?;
     if let Ok(raw) = read_health_endpoint() {
         let process_id = raw.process_id.or_else(scheduler_port_process_id);
         if raw
@@ -183,6 +184,35 @@ pub fn start_scheduler(state: State<'_, AppState>) -> Result<SchedulerStartResul
     let login_credentials = scheduler_login_credentials()?;
     let quota_env = scheduler_quota_env(state.license_entitlements.clone())?;
     let (command, current_dir) = scheduler_command_for_paths(&paths)?;
+    let log_path = std::path::PathBuf::from(&paths.logs_dir).join("scheduler.log");
+    fs::create_dir_all(&paths.logs_dir).map_err(|err| {
+        format!(
+            "failed to create scheduler log dir {}: {}",
+            paths.logs_dir, err
+        )
+    })?;
+    let mut log_file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .map_err(|err| {
+            format!(
+                "failed to open scheduler log {}: {}",
+                normalize(&log_path),
+                err
+            )
+        })?;
+    writeln!(
+        log_file,
+        "\n===== scheduler start {} =====\ncommand: {:?}\ncurrent_dir: {}",
+        Local::now().to_rfc3339(),
+        command,
+        normalize(&current_dir)
+    )
+    .map_err(|err| format!("failed to write scheduler log header: {}", err))?;
+    let stdout_log = log_file
+        .try_clone()
+        .map_err(|err| format!("failed to clone scheduler log handle: {}", err))?;
     let mut command_builder = Command::new(&command[0]);
     command_builder
         .args(&command[1..])
@@ -198,8 +228,8 @@ pub fn start_scheduler(state: State<'_, AppState>) -> Result<SchedulerStartResul
             "AM_SHOW_BROWSER_WINDOW",
             if paths.show_browser_window { "1" } else { "0" },
         )
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stdout(Stdio::from(stdout_log))
+        .stderr(Stdio::from(log_file));
     hide_console_window(&mut command_builder);
     let child = command_builder.spawn().map_err(|err| {
         format!(
@@ -211,6 +241,16 @@ pub fn start_scheduler(state: State<'_, AppState>) -> Result<SchedulerStartResul
     })?;
 
     let process_id = child.id();
+    if let Err(error) = wait_for_scheduler_health(process_id, &paths, Duration::from_secs(10)) {
+        let _ = stop_process(process_id);
+        return Err(format!(
+            "scheduler process {} started but health endpoint did not become ready: {}. Check log: {}",
+            process_id,
+            error,
+            normalize(&log_path)
+        ));
+    }
+
     let mut scheduler = state
         .scheduler_process
         .lock()
@@ -220,7 +260,7 @@ pub fn start_scheduler(state: State<'_, AppState>) -> Result<SchedulerStartResul
     Ok(SchedulerStartResult {
         process_id,
         command,
-        status: "starting".to_string(),
+        status: "running".to_string(),
     })
 }
 
@@ -261,7 +301,10 @@ fn scheduler_quota_env(
         scheduler_token.clone()
     };
     let mut env_vars = HashMap::from([
-        (DESKTOP_AI_COMMENT_MODE_ENV.to_string(), "remote".to_string()),
+        (
+            DESKTOP_AI_COMMENT_MODE_ENV.to_string(),
+            "remote".to_string(),
+        ),
         (DESKTOP_API_BASE_URL_ENV.to_string(), api_base_url),
         (DESKTOP_ACCESS_TOKEN_ENV.to_string(), bearer_token),
         (DEVICE_FINGERPRINT_ENV.to_string(), device_fingerprint),
@@ -380,13 +423,25 @@ pub fn get_scheduler_process_status(
     };
 
     match process_id {
-        Some(process_id) if process_is_alive(process_id) => Ok(SchedulerProcessStatus {
-            status: "running".to_string(),
-            process_id: Some(process_id),
-            command: scheduler_command()?,
-            health_url: health_url(),
-            error: None,
-        }),
+        Some(process_id) if process_is_alive(process_id) => {
+            let paths = project_paths()?;
+            match scheduler_health_matches_paths(&paths) {
+                Ok(()) => Ok(SchedulerProcessStatus {
+                    status: "running".to_string(),
+                    process_id: Some(process_id),
+                    command: scheduler_command_for_paths(&paths)?.0,
+                    health_url: health_url(),
+                    error: None,
+                }),
+                Err(error) => Ok(SchedulerProcessStatus {
+                    status: "error".to_string(),
+                    process_id: Some(process_id),
+                    command: scheduler_command_for_paths(&paths)?.0,
+                    health_url: health_url(),
+                    error: Some(error),
+                }),
+            }
+        }
         Some(process_id) => {
             let mut scheduler = state
                 .scheduler_process
@@ -655,6 +710,50 @@ fn scheduler_command_for_paths(
 
 fn health_url() -> String {
     format!("http://{}:{}/health", SCHEDULER_HOST, SCHEDULER_PORT)
+}
+
+fn wait_for_scheduler_health(
+    process_id: u32,
+    paths: &ProjectPaths,
+    timeout: Duration,
+) -> Result<(), String> {
+    let started_at = std::time::Instant::now();
+    let mut last_error = None;
+    while started_at.elapsed() < timeout {
+        if !process_is_alive(process_id) {
+            return Err(format!(
+                "scheduler process {} exited before health endpoint became reachable{}",
+                process_id,
+                last_error
+                    .map(|error| format!("; last health error: {}", error))
+                    .unwrap_or_default()
+            ));
+        }
+        match scheduler_health_matches_paths(paths) {
+            Ok(()) => return Ok(()),
+            Err(error) => last_error = Some(error),
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    Err(last_error.unwrap_or_else(|| "timed out waiting for scheduler health".to_string()))
+}
+
+fn scheduler_health_matches_paths(paths: &ProjectPaths) -> Result<(), String> {
+    let raw = read_health_endpoint()?;
+    if raw
+        .config_path
+        .as_deref()
+        .map(|path| same_path(path, &paths.config_path))
+        .unwrap_or(false)
+    {
+        Ok(())
+    } else {
+        Err(format!(
+            "scheduler health endpoint is using {}, but the app is using {}",
+            raw.config_path.as_deref().unwrap_or("an unknown config"),
+            paths.config_path
+        ))
+    }
 }
 
 fn read_health_endpoint() -> Result<RawHealth, String> {

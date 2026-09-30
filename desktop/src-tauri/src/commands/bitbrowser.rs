@@ -472,19 +472,31 @@ pub fn diagnose_account_browser(account_id: String) -> Result<AccountBrowserDiag
             let api_status = check_ixbrowser_api();
             checks.push(ProviderDiagnosticCheck {
                 name: "providerStatus".to_string(),
-                status: if api_status.available() { "ok" } else { "error" }.to_string(),
+                status: if api_status.available() {
+                    "ok"
+                } else {
+                    "error"
+                }
+                .to_string(),
                 detail: api_status
                     .error()
                     .map(|error| format!("{}: {}", api_status.api_url(), error))
                     .unwrap_or_else(|| api_status.api_url().to_string()),
             });
             if api_status.available() {
-                let profile_status = list_ixbrowser_profiles()
-                    .ok()
-                    .and_then(|profiles| profiles.into_iter().find(|profile| profile.id == profile_id));
+                let profile_status = list_ixbrowser_profiles().ok().and_then(|profiles| {
+                    profiles
+                        .into_iter()
+                        .find(|profile| profile.id == profile_id)
+                });
                 checks.push(ProviderDiagnosticCheck {
                     name: "profileStatus".to_string(),
-                    status: if profile_status.is_some() { "ok" } else { "warning" }.to_string(),
+                    status: if profile_status.is_some() {
+                        "ok"
+                    } else {
+                        "warning"
+                    }
+                    .to_string(),
                     detail: profile_status
                         .map(|profile| format!("opened={}", profile.opened))
                         .unwrap_or_else(|| "profile not found".to_string()),
@@ -688,8 +700,8 @@ pub fn open_ixbrowser_profile(profile_id: String) -> Result<ProfileOperationResu
         .get("data")
         .and_then(extract_ix_cdp_endpoint)
         .or_else(|| extract_ix_cdp_endpoint(&response));
-    let cdp_endpoint = cdp_endpoint
-        .ok_or_else(|| "ixBrowser 打开窗口后未返回 debugging_address".to_string())?;
+    let cdp_endpoint =
+        cdp_endpoint.ok_or_else(|| "ixBrowser 打开窗口后未返回 debugging_address".to_string())?;
 
     Ok(ProfileOperationResult {
         profile_id,
@@ -1093,20 +1105,25 @@ fn ix_profile_id_from_raw(raw: &JsonValue) -> Option<String> {
 }
 
 fn extract_ix_cdp_endpoint(value: &JsonValue) -> Option<String> {
-    ["debugging_address", "debuggingAddress", "debugger_address", "debuggerAddress"]
-        .iter()
-        .find_map(|key| value.get(*key).and_then(JsonValue::as_str))
-        .map(|endpoint| {
-            if endpoint.starts_with("http://")
-                || endpoint.starts_with("https://")
-                || endpoint.starts_with("ws://")
-                || endpoint.starts_with("wss://")
-            {
-                endpoint.to_string()
-            } else {
-                format!("http://{}", endpoint)
-            }
-        })
+    [
+        "debugging_address",
+        "debuggingAddress",
+        "debugger_address",
+        "debuggerAddress",
+    ]
+    .iter()
+    .find_map(|key| value.get(*key).and_then(JsonValue::as_str))
+    .map(|endpoint| {
+        if endpoint.starts_with("http://")
+            || endpoint.starts_with("https://")
+            || endpoint.starts_with("ws://")
+            || endpoint.starts_with("wss://")
+        {
+            endpoint.to_string()
+        } else {
+            format!("http://{}", endpoint)
+        }
+    })
 }
 
 fn builtin_chromium_status() -> BuiltinChromiumStatus {
@@ -2064,7 +2081,13 @@ fn exact_profile_map(
     for profile in profiles {
         let Some(name) = string_field(
             profile,
-            &["name", "browserName", "windowName", "profile_name", "profileName"],
+            &[
+                "name",
+                "browserName",
+                "windowName",
+                "profile_name",
+                "profileName",
+            ],
         ) else {
             continue;
         };
@@ -2712,12 +2735,10 @@ mod tests {
     #[test]
     fn sync_account_builder_assigns_shift_and_ip_group() {
         let request = sync_request();
-        let morning =
-            build_account_input(101, "tiktok", "profile_morning", "bitbrowser", &request)
-                .expect("morning account");
-        let evening =
-            build_account_input(103, "tiktok", "profile_evening", "bitbrowser", &request)
-                .expect("evening account");
+        let morning = build_account_input(101, "tiktok", "profile_morning", "bitbrowser", &request)
+            .expect("morning account");
+        let evening = build_account_input(103, "tiktok", "profile_evening", "bitbrowser", &request)
+            .expect("evening account");
 
         assert_eq!(morning.id, "tiktok_101");
         assert_eq!(morning.ip_group, Some(500));
@@ -2735,9 +2756,8 @@ mod tests {
     fn sync_account_builder_writes_ixbrowser_environment() {
         let mut request = sync_request();
         request.browser_provider = Some("ixbrowser".to_string());
-        let account =
-            build_account_input(101, "tiktok", "12345", "ixbrowser", &request)
-                .expect("ixBrowser account");
+        let account = build_account_input(101, "tiktok", "12345", "ixbrowser", &request)
+            .expect("ixBrowser account");
 
         assert_eq!(account.browser_provider.as_deref(), Some("ixbrowser"));
         assert!(account.bitbrowser_profile_id.is_none());
