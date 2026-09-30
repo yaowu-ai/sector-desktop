@@ -21,7 +21,9 @@ use crate::commands::config::{
 };
 use crate::paths::{normalize, project_paths, project_root, python_command_parts, ProjectPaths};
 use crate::security::redact_line;
-use crate::state::{AppState, AuthInterventionState, BrowserPreviewState, LicenseEntitlements, RunState};
+use crate::state::{
+    AppState, AuthInterventionState, BrowserPreviewState, LicenseEntitlements, RunState,
+};
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -840,7 +842,10 @@ fn ai_comment_env_for_runtime(
     if !config.ai_comment_enabled() {
         return (HashMap::new(), Vec::new());
     }
-    let mut env_vars = HashMap::from([(DESKTOP_AI_COMMENT_MODE_ENV.to_string(), "remote".to_string())]);
+    let mut env_vars = HashMap::from([(
+        DESKTOP_AI_COMMENT_MODE_ENV.to_string(),
+        "remote".to_string(),
+    )]);
     let Ok(entitlements) = license_entitlements.lock() else {
         return (env_vars, Vec::new());
     };
@@ -859,10 +864,7 @@ fn ai_comment_env_for_runtime(
         DESKTOP_API_BASE_URL_ENV.to_string(),
         entitlements.api_base_url.clone(),
     );
-    env_vars.insert(
-        DESKTOP_ACCESS_TOKEN_ENV.to_string(),
-        bearer_token.clone(),
-    );
+    env_vars.insert(DESKTOP_ACCESS_TOKEN_ENV.to_string(), bearer_token.clone());
     if !entitlements.scheduler_token.is_empty() {
         env_vars.insert(
             SCHEDULER_TOKEN_ENV.to_string(),
@@ -873,7 +875,10 @@ fn ai_comment_env_for_runtime(
         DEVICE_FINGERPRINT_ENV.to_string(),
         entitlements.device_fingerprint.clone(),
     );
-    (env_vars, vec![entitlements.access_token.clone(), bearer_token])
+    (
+        env_vars,
+        vec![entitlements.access_token.clone(), bearer_token],
+    )
 }
 
 fn ensure_task_capability_entitled(
@@ -1152,9 +1157,12 @@ fn spawn_waiter(
 
         if let Some(account_id) = next_account {
             let result = match license_entitlements.clone() {
-                Some(entitlements) => {
-                    spawn_account_process(run_state.clone(), entitlements, account_id, task_type.clone())
-                }
+                Some(entitlements) => spawn_account_process(
+                    run_state.clone(),
+                    entitlements,
+                    account_id,
+                    task_type.clone(),
+                ),
                 None => Err("missing license entitlements for queued account run".to_string()),
             };
             if let Err(error) = result {
@@ -2048,28 +2056,22 @@ mod tests {
         ProjectPaths {
             runtime_mode: runtime_mode.to_string(),
             project_root: "E:/repo/account-matrix".to_string(),
-            config_path: "C:/Users/me/AppData/Roaming/星域/config/accounts.yaml"
+            config_path: "C:/Users/me/AppData/Roaming/星域/config/accounts.yaml".to_string(),
+            comments_path: "C:/Users/me/AppData/Roaming/星域/config/comments.txt".to_string(),
+            brand_comments_path: "C:/Users/me/AppData/Roaming/星域/config/comments_brand.txt"
                 .to_string(),
-            comments_path: "C:/Users/me/AppData/Roaming/星域/config/comments.txt"
-                .to_string(),
-            brand_comments_path:
-                "C:/Users/me/AppData/Roaming/星域/config/comments_brand.txt".to_string(),
             data_dir: "C:/Users/me/AppData/Local/星域/data".to_string(),
             logs_dir: "C:/Users/me/AppData/Local/星域/logs".to_string(),
             actions_db_path: "C:/Users/me/AppData/Local/星域/data/actions.db".to_string(),
-            sessions_log_path: "C:/Users/me/AppData/Local/星域/data/sessions.log"
-                .to_string(),
+            sessions_log_path: "C:/Users/me/AppData/Local/星域/data/sessions.log".to_string(),
             lock_file_path: "C:/Users/me/AppData/Local/星域/data/run.lock".to_string(),
             src_dir: "E:/repo/account-matrix/src".to_string(),
-            settings_path:
-                "C:/Users/me/AppData/Roaming/星域/settings/local-settings.json"
-                    .to_string(),
-            runtime_path:
-                "C:/Program Files/星域/resources/runtime/account-matrix-runtime.exe"
-                    .to_string(),
-            runtime_manifest_path:
-                "C:/Program Files/星域/resources/runtime/runtime-manifest.json"
-                    .to_string(),
+            settings_path: "C:/Users/me/AppData/Roaming/星域/settings/local-settings.json"
+                .to_string(),
+            runtime_path: "C:/Program Files/星域/resources/runtime/account-matrix-runtime.exe"
+                .to_string(),
+            runtime_manifest_path: "C:/Program Files/星域/resources/runtime/runtime-manifest.json"
+                .to_string(),
             runtime_version: Some("0.1.0".to_string()),
             python_executable: "py".to_string(),
             default_browser_provider: "bitbrowser".to_string(),

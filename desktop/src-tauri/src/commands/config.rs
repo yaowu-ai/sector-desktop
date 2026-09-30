@@ -1049,9 +1049,17 @@ pub fn set_license_entitlements(
         target_engagement: payload.target_engagement,
         export_csv: payload.export_csv,
         ai_comment: payload.ai_comment,
-        api_base_url: payload.api_base_url.trim().trim_end_matches('/').to_string(),
+        api_base_url: payload
+            .api_base_url
+            .trim()
+            .trim_end_matches('/')
+            .to_string(),
         access_token: payload.access_token.trim().to_string(),
-        scheduler_token: payload.scheduler_token.unwrap_or_default().trim().to_string(),
+        scheduler_token: payload
+            .scheduler_token
+            .unwrap_or_default()
+            .trim()
+            .to_string(),
         device_fingerprint: payload.device_fingerprint.trim().to_string(),
     };
     Ok(())
@@ -1137,7 +1145,10 @@ pub fn save_fyp_settings(payload: FypSettingsPayload) -> Result<SaveResult, Stri
 pub fn save_instagram_warmup_settings(
     payload: InstagramWarmupSettingsPayload,
 ) -> Result<SaveResult, String> {
-    let platform = normalize_platform(payload.platform.as_deref().unwrap_or("instagram"), "platform")?;
+    let platform = normalize_platform(
+        payload.platform.as_deref().unwrap_or("instagram"),
+        "platform",
+    )?;
     ensure_platform_capability(&platform, "warmupTask")?;
 
     let paths = project_paths()?;
@@ -1540,7 +1551,11 @@ fn config_snapshot(paths: ProjectPaths, raw_yaml: String) -> Result<ConfigSnapsh
         paths,
         accounts,
         fyp_settings: map_fyp_settings(resolve_tiktok_warmup(&config)),
-        instagram_warmup: map_instagram_warmup_settings(platform_section(&config_value, "instagram", "warmup")),
+        instagram_warmup: map_instagram_warmup_settings(platform_section(
+            &config_value,
+            "instagram",
+            "warmup",
+        )),
         target_engagement: map_target_engagement(resolve_tiktok_target_engagement(&config)),
         scheduler_settings: map_scheduler_settings(resolve_tiktok_scheduler(&config)),
         ai_comment: map_ai_comment_settings(config.ai_comment.as_ref()),
@@ -1831,7 +1846,10 @@ fn ensure_enabled_account_limit(
     if enabled_count <= entitlements.max_enabled_accounts {
         Ok(())
     } else {
-        Err(format!("当前套餐最多启用 {} 个账号", entitlements.max_enabled_accounts))
+        Err(format!(
+            "当前套餐最多启用 {} 个账号",
+            entitlements.max_enabled_accounts
+        ))
     }
 }
 
@@ -1936,9 +1954,8 @@ fn protect_login_secret(credential_ref: &str, secret: &str) -> Result<String, St
 }
 
 fn unprotect_login_secret(credential_ref: &str, encrypted: &str) -> Result<String, String> {
-    unprotect_os_secret(LOGIN_SECRET_SERVICE, credential_ref, encrypted).or_else(|_| {
-        unprotect_os_secret(LEGACY_LOGIN_SECRET_SERVICE, credential_ref, encrypted)
-    })
+    unprotect_os_secret(LOGIN_SECRET_SERVICE, credential_ref, encrypted)
+        .or_else(|_| unprotect_os_secret(LEGACY_LOGIN_SECRET_SERVICE, credential_ref, encrypted))
 }
 
 fn delete_login_secret(credential_ref: &str) -> Result<(), String> {
@@ -1948,7 +1965,11 @@ fn delete_login_secret(credential_ref: &str) -> Result<(), String> {
 }
 
 #[cfg(target_os = "windows")]
-fn protect_os_secret(_service: &str, _credential_ref: &str, secret: &str) -> Result<String, String> {
+fn protect_os_secret(
+    _service: &str,
+    _credential_ref: &str,
+    secret: &str,
+) -> Result<String, String> {
     let script = r#"$ErrorActionPreference = 'Stop'; $secret = [Console]::In.ReadToEnd(); $secure = ConvertTo-SecureString -String $secret -AsPlainText -Force; $secure | ConvertFrom-SecureString"#;
     let encrypted = run_powershell_with_stdin(script, secret, "encrypt login credential")?;
     let encrypted = encrypted.trim();
@@ -1960,7 +1981,11 @@ fn protect_os_secret(_service: &str, _credential_ref: &str, secret: &str) -> Res
 }
 
 #[cfg(target_os = "windows")]
-fn unprotect_os_secret(_service: &str, _credential_ref: &str, encrypted: &str) -> Result<String, String> {
+fn unprotect_os_secret(
+    _service: &str,
+    _credential_ref: &str,
+    encrypted: &str,
+) -> Result<String, String> {
     let script = r#"$ErrorActionPreference = 'Stop'; $blob = [Console]::In.ReadToEnd(); $secure = ConvertTo-SecureString -String $blob; $ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure); try { [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) }"#;
     run_powershell_with_stdin(script, encrypted, "read login credential")
         .map(|value| value.trim_end_matches(['\r', '\n']).to_string())
@@ -2018,7 +2043,11 @@ fn protect_os_secret(service: &str, credential_ref: &str, secret: &str) -> Resul
 }
 
 #[cfg(target_os = "macos")]
-fn unprotect_os_secret(service: &str, credential_ref: &str, encrypted: &str) -> Result<String, String> {
+fn unprotect_os_secret(
+    service: &str,
+    credential_ref: &str,
+    encrypted: &str,
+) -> Result<String, String> {
     if encrypted.lines().next() != Some(MACOS_KEYCHAIN_MARKER) {
         return Err("stored credential marker is not a macOS Keychain credential".to_string());
     }
@@ -2089,7 +2118,11 @@ unsafe extern "C" {
 }
 
 #[cfg(target_os = "macos")]
-fn macos_keychain_save_password(service: &str, credential_ref: &str, secret: &str) -> Result<(), String> {
+fn macos_keychain_save_password(
+    service: &str,
+    credential_ref: &str,
+    secret: &str,
+) -> Result<(), String> {
     let service = service.as_bytes();
     let account = credential_ref.as_bytes();
     let password = secret.as_bytes();
@@ -2172,12 +2205,7 @@ fn macos_keychain_read_password(service: &str, credential_ref: &str) -> Result<S
         let bytes = std::slice::from_raw_parts(password_data as *const u8, password_len as usize);
         String::from_utf8(bytes.to_vec())
     }
-    .map_err(|err| {
-        format!(
-            "macOS Keychain returned non-UTF-8 credential: {}",
-            err
-        )
-    });
+    .map_err(|err| format!("macOS Keychain returned non-UTF-8 credential: {}", err));
     unsafe {
         SecKeychainItemFreeContent(std::ptr::null_mut(), password_data);
     }
@@ -2248,7 +2276,11 @@ fn macos_len(len: usize, label: &str) -> Result<u32, String> {
 }
 
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-fn protect_os_secret(_service: &str, _credential_ref: &str, _secret: &str) -> Result<String, String> {
+fn protect_os_secret(
+    _service: &str,
+    _credential_ref: &str,
+    _secret: &str,
+) -> Result<String, String> {
     Err("secure credential storage is not supported on this operating system".to_string())
 }
 
@@ -2417,7 +2449,12 @@ fn apply_config_value_migration(config: &mut Value, paths: &ProjectPaths) -> Res
     }
 
     if platform_section(config, "instagram", "warmup").is_none() {
-        set_platform_section(config, "instagram", "warmup", default_instagram_warmup_mapping()?)?;
+        set_platform_section(
+            config,
+            "instagram",
+            "warmup",
+            default_instagram_warmup_mapping()?,
+        )?;
     }
 
     if platform_section(config, "instagram", "comments").is_none() {
@@ -2545,8 +2582,7 @@ fn sqlite_instagram_runtime_schema_pending(actions_db_path: &str) -> Result<bool
     }
     let conn = Connection::open(&db_path)
         .map_err(|err| format!("failed to open {}: {}", actions_db_path, err))?;
-    if !sqlite_table_exists(&conn, "ins_warm_log")?
-        || !sqlite_table_exists(&conn, "risk_cooldown")?
+    if !sqlite_table_exists(&conn, "ins_warm_log")? || !sqlite_table_exists(&conn, "risk_cooldown")?
     {
         return Ok(true);
     }
@@ -2719,10 +2755,7 @@ fn validate_no_plaintext_login_passwords(config: &Value, errors: &mut Vec<Valida
 }
 
 fn validate_no_plaintext_ai_comment_api_key(config: &Value, errors: &mut Vec<ValidationIssue>) {
-    let Some(ai_comment) = config
-        .get("ai_comment")
-        .and_then(Value::as_mapping)
-    else {
+    let Some(ai_comment) = config.get("ai_comment").and_then(Value::as_mapping) else {
         return;
     };
     for key in ai_comment.keys().filter_map(Value::as_str) {
@@ -3412,15 +3445,15 @@ fn validate_raw_integer_min(
     let Some(value) = mapping.get(&Value::String(key.to_string())) else {
         return;
     };
-    let number = value
-        .as_i64()
-        .or_else(|| value.as_f64().and_then(|number| {
+    let number = value.as_i64().or_else(|| {
+        value.as_f64().and_then(|number| {
             if number.fract() == 0.0 {
                 Some(number as i64)
             } else {
                 None
             }
-        }));
+        })
+    });
     match number {
         Some(number) if number >= min => {}
         Some(_) => errors.push(issue(
@@ -3853,7 +3886,11 @@ fn instagram_warmup_payload_to_yaml_mapping(
     insert_yaml_value(&mut mapping, "save_prob", settings.save_prob)?;
     insert_yaml_value(&mut mapping, "comment_prob", settings.comment_prob)?;
     insert_yaml_value(&mut mapping, "active_hours", settings.active_hours.clone())?;
-    insert_yaml_value(&mut mapping, "sessions_per_day", settings.sessions_per_day.clone())?;
+    insert_yaml_value(
+        &mut mapping,
+        "sessions_per_day",
+        settings.sessions_per_day.clone(),
+    )?;
     insert_yaml_value(&mut mapping, "rest_day_prob", settings.rest_day_prob)?;
     insert_yaml_value(
         &mut mapping,
@@ -3861,18 +3898,46 @@ fn instagram_warmup_payload_to_yaml_mapping(
         settings.min_session_gap_minutes,
     )?;
     insert_yaml_value(&mut mapping, "one_per_window", settings.one_per_window)?;
-    insert_yaml_value(&mut mapping, "duration_jitter", settings.duration_jitter.clone())?;
-    insert_yaml_value(&mut mapping, "max_likes_per_day", settings.max_likes_per_day)?;
-    insert_yaml_value(&mut mapping, "max_saves_per_day", settings.max_saves_per_day)?;
-    insert_yaml_value(&mut mapping, "max_follows_per_day", settings.max_follows_per_day)?;
-    insert_yaml_value(&mut mapping, "max_likes_per_session", settings.max_likes_per_session)?;
-    insert_yaml_value(&mut mapping, "max_comments_per_day", settings.max_comments_per_day)?;
+    insert_yaml_value(
+        &mut mapping,
+        "duration_jitter",
+        settings.duration_jitter.clone(),
+    )?;
+    insert_yaml_value(
+        &mut mapping,
+        "max_likes_per_day",
+        settings.max_likes_per_day,
+    )?;
+    insert_yaml_value(
+        &mut mapping,
+        "max_saves_per_day",
+        settings.max_saves_per_day,
+    )?;
+    insert_yaml_value(
+        &mut mapping,
+        "max_follows_per_day",
+        settings.max_follows_per_day,
+    )?;
+    insert_yaml_value(
+        &mut mapping,
+        "max_likes_per_session",
+        settings.max_likes_per_session,
+    )?;
+    insert_yaml_value(
+        &mut mapping,
+        "max_comments_per_day",
+        settings.max_comments_per_day,
+    )?;
     insert_yaml_value(
         &mut mapping,
         "max_comments_per_session",
         settings.max_comments_per_session,
     )?;
-    insert_yaml_value(&mut mapping, "block_cooldown_hours", settings.block_cooldown_hours)?;
+    insert_yaml_value(
+        &mut mapping,
+        "block_cooldown_hours",
+        settings.block_cooldown_hours,
+    )?;
     insert_yaml_value(&mut mapping, "round_skip_prob", settings.round_skip_prob)?;
     insert_yaml_value(&mut mapping, "require_proxy", settings.require_proxy)?;
     insert_yaml_value(&mut mapping, "no_like", settings.no_like)?;
@@ -3885,15 +3950,24 @@ fn instagram_warmup_payload_to_yaml_mapping(
     Ok(mapping)
 }
 
-fn insert_yaml_value<T: Serialize>(mapping: &mut Mapping, key: &str, value: T) -> Result<(), String> {
+fn insert_yaml_value<T: Serialize>(
+    mapping: &mut Mapping,
+    key: &str,
+    value: T,
+) -> Result<(), String> {
     mapping.insert(
         Value::String(key.to_string()),
-        serde_yaml::to_value(value).map_err(|err| format!("failed to serialize {}: {}", key, err))?,
+        serde_yaml::to_value(value)
+            .map_err(|err| format!("failed to serialize {}: {}", key, err))?,
     );
     Ok(())
 }
 
-fn yaml_mapping_value<'a>(mapping: &'a Mapping, snake_key: &str, camel_key: &str) -> Option<&'a Value> {
+fn yaml_mapping_value<'a>(
+    mapping: &'a Mapping,
+    snake_key: &str,
+    camel_key: &str,
+) -> Option<&'a Value> {
     mapping
         .get(&Value::String(snake_key.to_string()))
         .or_else(|| mapping.get(&Value::String(camel_key.to_string())))
@@ -3901,13 +3975,21 @@ fn yaml_mapping_value<'a>(mapping: &'a Mapping, snake_key: &str, camel_key: &str
 
 fn yaml_mapping_i64(mapping: &Mapping, snake_key: &str, camel_key: &str, fallback: i64) -> i64 {
     yaml_mapping_value(mapping, snake_key, camel_key)
-        .and_then(|value| value.as_i64().or_else(|| value.as_f64().map(|number| number as i64)))
+        .and_then(|value| {
+            value
+                .as_i64()
+                .or_else(|| value.as_f64().map(|number| number as i64))
+        })
         .unwrap_or(fallback)
 }
 
 fn yaml_mapping_f64(mapping: &Mapping, snake_key: &str, camel_key: &str, fallback: f64) -> f64 {
     yaml_mapping_value(mapping, snake_key, camel_key)
-        .and_then(|value| value.as_f64().or_else(|| value.as_i64().map(|number| number as f64)))
+        .and_then(|value| {
+            value
+                .as_f64()
+                .or_else(|| value.as_i64().map(|number| number as f64))
+        })
         .unwrap_or(fallback)
 }
 
@@ -3917,7 +3999,12 @@ fn yaml_mapping_bool(mapping: &Mapping, snake_key: &str, camel_key: &str, fallba
         .unwrap_or(fallback)
 }
 
-fn yaml_mapping_string(mapping: &Mapping, snake_key: &str, camel_key: &str, fallback: &str) -> String {
+fn yaml_mapping_string(
+    mapping: &Mapping,
+    snake_key: &str,
+    camel_key: &str,
+    fallback: &str,
+) -> String {
     yaml_mapping_value(mapping, snake_key, camel_key)
         .and_then(Value::as_str)
         .map(str::trim)
@@ -4319,20 +4406,60 @@ fn map_instagram_warmup_settings(warmup: Option<&Value>) -> Option<InstagramWarm
         duration: yaml_mapping_i64(mapping, "duration", "duration", default.duration),
         like_prob: yaml_mapping_f64(mapping, "like_prob", "likeProb", default.like_prob),
         save_prob: yaml_mapping_f64(mapping, "save_prob", "saveProb", default.save_prob),
-        comment_prob: yaml_mapping_f64(mapping, "comment_prob", "commentProb", default.comment_prob),
-        active_hours: yaml_mapping_string(mapping, "active_hours", "activeHours", &default.active_hours),
-        sessions_per_day: yaml_mapping_string(mapping, "sessions_per_day", "sessionsPerDay", &default.sessions_per_day),
-        rest_day_prob: yaml_mapping_f64(mapping, "rest_day_prob", "restDayProb", default.rest_day_prob),
+        comment_prob: yaml_mapping_f64(
+            mapping,
+            "comment_prob",
+            "commentProb",
+            default.comment_prob,
+        ),
+        active_hours: yaml_mapping_string(
+            mapping,
+            "active_hours",
+            "activeHours",
+            &default.active_hours,
+        ),
+        sessions_per_day: yaml_mapping_string(
+            mapping,
+            "sessions_per_day",
+            "sessionsPerDay",
+            &default.sessions_per_day,
+        ),
+        rest_day_prob: yaml_mapping_f64(
+            mapping,
+            "rest_day_prob",
+            "restDayProb",
+            default.rest_day_prob,
+        ),
         min_session_gap_minutes: yaml_mapping_i64(
             mapping,
             "min_session_gap_minutes",
             "minSessionGapMinutes",
             default.min_session_gap_minutes,
         ),
-        one_per_window: yaml_mapping_bool(mapping, "one_per_window", "onePerWindow", default.one_per_window),
-        duration_jitter: yaml_mapping_string(mapping, "duration_jitter", "durationJitter", &default.duration_jitter),
-        max_likes_per_day: yaml_mapping_i64(mapping, "max_likes_per_day", "maxLikesPerDay", default.max_likes_per_day),
-        max_saves_per_day: yaml_mapping_i64(mapping, "max_saves_per_day", "maxSavesPerDay", default.max_saves_per_day),
+        one_per_window: yaml_mapping_bool(
+            mapping,
+            "one_per_window",
+            "onePerWindow",
+            default.one_per_window,
+        ),
+        duration_jitter: yaml_mapping_string(
+            mapping,
+            "duration_jitter",
+            "durationJitter",
+            &default.duration_jitter,
+        ),
+        max_likes_per_day: yaml_mapping_i64(
+            mapping,
+            "max_likes_per_day",
+            "maxLikesPerDay",
+            default.max_likes_per_day,
+        ),
+        max_saves_per_day: yaml_mapping_i64(
+            mapping,
+            "max_saves_per_day",
+            "maxSavesPerDay",
+            default.max_saves_per_day,
+        ),
         max_follows_per_day: yaml_mapping_i64(
             mapping,
             "max_follows_per_day",
@@ -4363,8 +4490,18 @@ fn map_instagram_warmup_settings(warmup: Option<&Value>) -> Option<InstagramWarm
             "blockCooldownHours",
             default.block_cooldown_hours,
         ),
-        round_skip_prob: yaml_mapping_f64(mapping, "round_skip_prob", "roundSkipProb", default.round_skip_prob),
-        require_proxy: yaml_mapping_bool(mapping, "require_proxy", "requireProxy", default.require_proxy),
+        round_skip_prob: yaml_mapping_f64(
+            mapping,
+            "round_skip_prob",
+            "roundSkipProb",
+            default.round_skip_prob,
+        ),
+        require_proxy: yaml_mapping_bool(
+            mapping,
+            "require_proxy",
+            "requireProxy",
+            default.require_proxy,
+        ),
         no_like: yaml_mapping_bool(mapping, "no_like", "noLike", default.no_like),
         no_save: yaml_mapping_bool(mapping, "no_save", "noSave", default.no_save),
         no_comment: yaml_mapping_bool(mapping, "no_comment", "noComment", default.no_comment),
@@ -4690,12 +4827,9 @@ accounts:
 
         set_platform_section(&mut config_value, "instagram", "warmup", mapping)
             .expect("platform warmup section should be set");
-        let snapshot_settings = map_instagram_warmup_settings(platform_section(
-            &config_value,
-            "instagram",
-            "warmup",
-        ))
-        .expect("warmup should map back to desktop settings");
+        let snapshot_settings =
+            map_instagram_warmup_settings(platform_section(&config_value, "instagram", "warmup"))
+                .expect("warmup should map back to desktop settings");
 
         assert_eq!(snapshot_settings.duration, 8);
         assert_eq!(snapshot_settings.like_prob, 0.11);
@@ -4717,24 +4851,18 @@ accounts:
         let db_path_string = db_path.to_string_lossy().to_string();
 
         Connection::open(&db_path).expect("test db should be created");
-        assert!(
-            sqlite_instagram_runtime_schema_pending(&db_path_string)
-                .expect("pending check should work")
-        );
+        assert!(sqlite_instagram_runtime_schema_pending(&db_path_string)
+            .expect("pending check should work"));
 
         migrate_actions_db(&db_path_string).expect("db migration should apply");
         let conn = Connection::open(&db_path).expect("migrated db should open");
 
         assert!(sqlite_table_exists(&conn, "ins_warm_log").expect("table check should work"));
         assert!(sqlite_table_exists(&conn, "risk_cooldown").expect("table check should work"));
-        assert!(
-            sqlite_column_exists(&conn, "ins_warm_log", "profile_id")
-                .expect("column check should work")
-        );
-        assert!(
-            !sqlite_instagram_runtime_schema_pending(&db_path_string)
-                .expect("pending check should work")
-        );
+        assert!(sqlite_column_exists(&conn, "ins_warm_log", "profile_id")
+            .expect("column check should work"));
+        assert!(!sqlite_instagram_runtime_schema_pending(&db_path_string)
+            .expect("pending check should work"));
 
         let _ = fs::remove_file(db_path);
     }
@@ -4815,7 +4943,9 @@ accounts:
 
         let reserved = ensure_platform_capability("instagram", "targetEngagement")
             .expect_err("instagram target engagement should remain reserved");
-        assert!(reserved.contains("platform 'instagram' capability 'targetEngagement' is 'reserved'"));
+        assert!(
+            reserved.contains("platform 'instagram' capability 'targetEngagement' is 'reserved'")
+        );
 
         let invalid = ensure_platform_capability("unknown", "warmupTask")
             .expect_err("unknown platform should fail");

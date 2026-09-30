@@ -138,9 +138,7 @@ pub fn save_system_settings(
         runtime_version: existing.runtime_version,
         initialized_app_version: existing.initialized_app_version,
         auto_close_profile: Some(payload.auto_close_profile),
-        show_browser_window: payload
-            .show_browser_window
-            .or(existing.show_browser_window),
+        show_browser_window: payload.show_browser_window.or(existing.show_browser_window),
         log_poll_interval_seconds: Some(payload.log_poll_interval_seconds),
     };
     save_local_app_settings(&settings)?;
