@@ -27,6 +27,7 @@ import { usePlatformContext } from "../app/PlatformContext";
 import {
   PROCESS_STARTED_EVENT,
   checkBitbrowserApi,
+  checkIxbrowserApi,
   getCurrentRunStatus,
 } from "../services/api";
 import {
@@ -47,7 +48,7 @@ import { StatusTag, type StatusTone } from "./StatusTag";
 const { Header, Sider, Content } = Layout;
 
 const TASK_POLL_MS = 1500;
-const BITBROWSER_POLL_MS = 10000;
+const BROWSER_STATUS_POLL_MS = 10000;
 
 interface AppShellProps {
   themeMode: "light" | "dark";
@@ -64,6 +65,9 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
   const terminalUsageReportedRef = useRef<Set<string>>(new Set());
   const [activeKey, setActiveKey] = useState(getInitialRouteKey);
   const [bitbrowserStatus, setBitbrowserStatus] = useState<ApiStatus | null>(
+    null,
+  );
+  const [ixbrowserStatus, setIxbrowserStatus] = useState<ApiStatus | null>(
     null,
   );
   const [processStatus, setProcessStatus] = useState<ProcessStatus | null>(
@@ -122,10 +126,14 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
     [activeKey, availableAppRoutes, visibleRoutes],
   );
 
-  const refreshBitbrowser = useCallback(async () => {
-    const nextStatus = await checkBitbrowserApi();
-    setBitbrowserStatus(nextStatus);
-    return nextStatus;
+  const refreshBrowserStatuses = useCallback(async () => {
+    const [nextBitbrowserStatus, nextIxbrowserStatus] = await Promise.all([
+      checkBitbrowserApi(),
+      checkIxbrowserApi(),
+    ]);
+    setBitbrowserStatus(nextBitbrowserStatus);
+    setIxbrowserStatus(nextIxbrowserStatus);
+    return [nextBitbrowserStatus, nextIxbrowserStatus];
   }, []);
 
   const reportTerminalUsageIfNeeded = useCallback(
@@ -188,7 +196,7 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
     setRefreshing(true);
     setShellError(null);
     try {
-      await Promise.all([refreshBitbrowser(), refreshTask()]);
+      await Promise.all([refreshBrowserStatuses(), refreshTask()]);
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       setShellError(detail);
@@ -196,7 +204,7 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
     } finally {
       setRefreshing(false);
     }
-  }, [refreshBitbrowser, refreshTask]);
+  }, [refreshBrowserStatuses, refreshTask]);
 
   useEffect(() => {
     window.location.hash = activeKey;
@@ -269,10 +277,10 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
 
   useEffect(() => {
     const id = window.setInterval(() => {
-      void refreshBitbrowser().catch(handleBackgroundError(setShellError));
-    }, BITBROWSER_POLL_MS);
+      void refreshBrowserStatuses().catch(handleBackgroundError(setShellError));
+    }, BROWSER_STATUS_POLL_MS);
     return () => window.clearInterval(id);
-  }, [refreshBitbrowser]);
+  }, [refreshBrowserStatuses]);
 
   return (
     <Layout className="app-shell">
@@ -343,6 +351,14 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
                   <StatusTag
                     status={bitbrowserTone(bitbrowserStatus)}
                     label={bitbrowserLabel(bitbrowserStatus)}
+                  />
+                </span>
+              </Tooltip>
+              <Tooltip title={ixbrowserTooltip(ixbrowserStatus)}>
+                <span>
+                  <StatusTag
+                    status={ixbrowserTone(ixbrowserStatus)}
+                    label={ixbrowserLabel(ixbrowserStatus)}
                   />
                 </span>
               </Tooltip>
@@ -509,9 +525,19 @@ function bitbrowserTone(status: ApiStatus | null): StatusTone {
   return status.available ? "ok" : "error";
 }
 
+function ixbrowserTone(status: ApiStatus | null): StatusTone {
+  if (!status) return "idle";
+  return status.available ? "ok" : "error";
+}
+
 function bitbrowserLabel(status: ApiStatus | null) {
   if (!status) return "Bit浏览器待检测";
   return status.available ? "Bit浏览器在线" : "Bit浏览器不可用";
+}
+
+function ixbrowserLabel(status: ApiStatus | null) {
+  if (!status) return "ix浏览器待检测";
+  return status.available ? "ix浏览器在线" : "ix浏览器不可用";
 }
 
 function bitbrowserTooltip(status: ApiStatus | null) {
@@ -523,18 +549,31 @@ function bitbrowserTooltip(status: ApiStatus | null) {
   );
 }
 
+function ixbrowserTooltip(status: ApiStatus | null) {
+  if (!status) return "尚未检测";
+  if (status.available) return status.apiUrl;
+  return (
+    formatBrowserConnectionError(status.error, "ix浏览器") ||
+    `无法连接 ix浏览器：${status.apiUrl}`
+  );
+}
+
 function formatBitbrowserError(error?: string) {
+  return formatBrowserConnectionError(error, "Bit浏览器");
+}
+
+function formatBrowserConnectionError(error: string | undefined, label: string) {
   if (!error) return "";
 
   const normalized = error.trim();
   const matched = normalized.match(/failed to connect\s+([^:]+:\d+):\s*(.+)/i);
   if (matched) {
-    return `无法连接 Bit浏览器（${matched[1]}）：${formatConnectionReason(matched[2])}`;
+    return `无法连接 ${label}（${matched[1]}）：${formatConnectionReason(matched[2])}`;
   }
 
-  if (/connection timed out/i.test(normalized)) return "连接 Bit浏览器超时";
-  if (/connection refused/i.test(normalized)) return "Bit浏览器拒绝连接";
-  if (/failed to connect/i.test(normalized)) return "无法连接 Bit浏览器";
+  if (/connection timed out/i.test(normalized)) return `连接 ${label} 超时`;
+  if (/connection refused/i.test(normalized)) return `${label} 拒绝连接`;
+  if (/failed to connect/i.test(normalized)) return `无法连接 ${label}`;
   return normalized;
 }
 
