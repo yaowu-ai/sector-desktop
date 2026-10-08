@@ -453,16 +453,19 @@ def setup_scheduler():
     logger.info("Config reload check set for every 10 seconds")
 
 
-@asynccontextmanager
-async def lifespan(_app: FastAPI):
-    logger.info("TikTok bot scheduler starting...")
-    startup_cfg = load_config()
-    startup_providers = {
-        account_provider_name(account, startup_cfg)
-        for account in executable_accounts(startup_cfg)
-    }
+async def log_startup_browser_health_checks():
+    try:
+        startup_cfg = load_config()
+        startup_providers = {
+            account_provider_name(account, startup_cfg)
+            for account in executable_accounts(startup_cfg)
+        }
+    except Exception as exc:
+        logger.warning(f"Startup browser health check skipped: {exc}")
+        return
+
     if BITBROWSER in startup_providers:
-        if bitbrowser_responsive():
+        if await asyncio.to_thread(bitbrowser_responsive):
             logger.info("BitBrowser health check OK")
         else:
             logger.warning(
@@ -470,15 +473,21 @@ async def lifespan(_app: FastAPI):
                 "BitBrowser fires will skip until the app is reachable."
             )
     if IXBROWSER in startup_providers:
-        if ixbrowser_responsive():
+        if await asyncio.to_thread(ixbrowser_responsive):
             logger.info("ixBrowser health check OK")
         else:
             logger.warning(
                 "ixBrowser API not responsive at startup. "
                 "ixBrowser fires will skip until the app is reachable."
             )
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    logger.info("TikTok bot scheduler starting...")
     setup_scheduler()
     scheduler.start()
+    asyncio.create_task(log_startup_browser_health_checks())
     logger.info("Scheduler running")
     try:
         yield
