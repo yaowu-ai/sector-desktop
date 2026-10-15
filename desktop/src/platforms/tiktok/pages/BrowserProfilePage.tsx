@@ -36,6 +36,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
+import { readOfficeZipEntry } from '../../../services/officeImport';
 
 import { BrowserPreviewModal } from "../../../components/BrowserPreviewModal";
 import { confirmDanger } from "../../../components/ConfirmDanger";
@@ -2089,11 +2090,7 @@ function parseDelimitedRows(content: string, delimiter: "," | "\t") {
 }
 
 async function readDocxText(buffer: ArrayBuffer) {
-  const files = await readZipFiles(buffer);
-  const documentXml = files.get("word/document.xml");
-  if (!documentXml) {
-    throw new Error("未在 docx 中找到 word/document.xml");
-  }
+  const documentXml = await readOfficeZipEntry(buffer, 'word/document.xml');
 
   const paragraphs = documentXml.match(/<w:p[\s\S]*?<\/w:p>/g) ?? [documentXml];
   return paragraphs

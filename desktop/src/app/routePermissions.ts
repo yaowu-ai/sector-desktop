@@ -19,6 +19,8 @@ const CUSTOMER_ROUTE_KEYS = new Set([
   'accounts',
   'browser',
   'tasks',
+  'publish',
+  'publish-records',
   'target-engagement',
   'scheduler',
   'comments',

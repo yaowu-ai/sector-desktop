@@ -11,6 +11,7 @@ import {
   stopCurrentRun,
 } from '../services/api'
 import { runStatusLabel } from '../services/runStatus'
+import { PUBLISH_PHASE_LABELS, PUBLISH_STATUS_LABELS } from '../services/publishing'
 import type { ProcessStatus } from '../services/types'
 import { confirmDanger } from './ConfirmDanger'
 import { LogViewer } from './LogViewer'
@@ -165,7 +166,15 @@ export function ProcessOutputPanel({ title = '运行输出' }: ProcessOutputPane
     }
   }
 
-  const running = Boolean(status && ['starting', 'running', 'pause_pending', 'intervention_required'].includes(status.status))
+  const running = Boolean(status && ['starting', 'running', 'pause_pending', 'intervention_required', 'stopping'].includes(status.status))
+  const publishingEvent = useMemo(() => {
+    for (const line of stdout.split('\n').reverse()) {
+      const index = line.indexOf('AM_PUBLISH_EVENT');
+      if (index < 0) continue;
+      try { return JSON.parse(line.slice(index + 'AM_PUBLISH_EVENT'.length).replace(/^[:\s]+/, '')) as Record<string, unknown>; } catch { /* incomplete stdout chunk */ }
+    }
+    return null;
+  }, [stdout])
   const filteredStdout = useMemo(() => filterPersistedSessionLogLines(stdout), [stdout])
   const latestStderrLine = useMemo(() => latestNonEmptyLine(stderr), [stderr])
   const visibleOutputCount = Number(Boolean(filteredStdout)) + Number(Boolean(stderr))
@@ -197,6 +206,7 @@ export function ProcessOutputPanel({ title = '运行输出' }: ProcessOutputPane
         }
       >
         <Space wrap size={[16, 8]}>
+          {status?.taskType?.startsWith('tiktok_publish') && publishingEvent ? <Typography.Text>发布阶段：{PUBLISH_PHASE_LABELS[String(publishingEvent.phase)] ?? PUBLISH_STATUS_LABELS[String(publishingEvent.status) as keyof typeof PUBLISH_STATUS_LABELS] ?? '执行中'}</Typography.Text> : null}
           <Typography.Text type="secondary">PID：{status?.processId ?? '-'}</Typography.Text>
           <Typography.Text type="secondary">账号：{status?.accountId ?? '-'}</Typography.Text>
           <Typography.Text type="secondary">队列：{status?.queuedAccounts.length ?? 0}</Typography.Text>

@@ -44,6 +44,9 @@ pub struct RunState {
     pub redactions: Vec<String>,
     pub child: Option<Child>,
     pub stop_after_current: bool,
+    pub publish_batch_id: Option<String>,
+    pub publish_record_id: Option<String>,
+    pub publish_request_summary: Option<String>,
 }
 
 #[derive(Clone)]
@@ -85,6 +88,9 @@ impl Default for RunState {
             redactions: Vec::new(),
             child: None,
             stop_after_current: false,
+            publish_batch_id: None,
+            publish_record_id: None,
+            publish_request_summary: None,
         }
     }
 }

@@ -19,6 +19,7 @@ use crate::commands::config::{
     ensure_account_ids_belong_to_platform, ensure_platform_capability, load_config,
     normalize_platform, read_login_password_for_runtime,
 };
+use crate::commands::publishing;
 use crate::paths::{normalize, project_paths, project_root, python_command_parts, ProjectPaths};
 use crate::security::redact_line;
 use crate::state::{
@@ -72,6 +73,295 @@ pub struct ProcessStartResult {
     status: String,
     task_type: String,
     account_id: Option<String>,
+    batch_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PublishRequest {
+    request_id: String,
+    platform: String,
+    mode: String,
+    account_ids: Vec<String>,
+    video_path: String,
+    caption: String,
+}
+
+fn publish_binding(account: &crate::commands::config::Account) -> Result<String, String> {
+    match account.browser_provider() {
+        "bitbrowser" | "ixbrowser" => {
+            let id = account
+                .browser_profile_id()
+                .filter(|v| !v.trim().is_empty())
+                .ok_or("账号缺少浏览器绑定")?;
+            if account.browser_provider() == "ixbrowser" && !id.chars().all(|c| c.is_ascii_digit())
+            {
+                return Err("ixBrowser profile_id 必须是数字".into());
+            }
+            Ok(json!({"profile_id": id}).to_string())
+        }
+        "builtin_chromium" => {
+            let directory = super::bitbrowser::builtin_user_data_dir(
+                account.id(),
+                account.browser_user_data_dir(),
+            )?;
+            Ok(json!({"user_data_dir": crate::paths::normalize(&directory)}).to_string())
+        }
+        _ => Err("不支持的浏览器类型".into()),
+    }
+}
+
+fn publish_result(run: &RunState, batch: &str, status: &str) -> ProcessStartResult {
+    ProcessStartResult {
+        process_id: run.process_id,
+        command: run.command.clone(),
+        status: status.into(),
+        task_type: run
+            .task_type
+            .clone()
+            .unwrap_or_else(|| "tiktok_publish".into()),
+        account_id: run.account_id.clone(),
+        batch_id: Some(batch.into()),
+    }
+}
+
+#[tauri::command]
+pub fn run_tiktok_publish(
+    request: PublishRequest,
+    state: State<'_, AppState>,
+) -> Result<ProcessStartResult, String> {
+    if request.platform != "tiktok"
+        || !matches!(request.mode.as_str(), "single" | "selected" | "all")
+    {
+        return Err("不支持的发布平台或执行模式".into());
+    }
+    if request.request_id.is_empty()
+        || request.request_id.len() > 64
+        || !request
+            .request_id
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
+    {
+        return Err("requestId 必须为不超过64字符的安全唯一标识".into());
+    }
+    if request.caption.contains('\0') || request.caption.encode_utf16().count() > 4000 {
+        return Err("文案不得含NUL或超过4000字符".into());
+    }
+    let mut ids = Vec::new();
+    for id in &request.account_ids {
+        validate_account_id(id)?;
+        if !ids.contains(id) {
+            ids.push(id.clone());
+        }
+    }
+    let normalized = std::fs::canonicalize(&request.video_path)
+        .map(|p| p.to_string_lossy().trim_start_matches(r"\\?\").to_string())
+        .unwrap_or_else(|_| request.video_path.clone());
+    let summary = json!([
+        request.platform,
+        request.mode,
+        if request.mode == "all" {
+            vec![]
+        } else {
+            ids.clone()
+        },
+        normalized,
+        request.caption
+    ])
+    .to_string();
+    let paths = project_paths()?;
+    let mut conn = publishing::connect(&paths.actions_db_path)?;
+    // Replay precedes filesystem reads: a completed batch remains replayable after source deletion.
+    {
+        let mut run = state.current_run.lock().map_err(|_| "运行状态锁失败")?;
+        if run.publish_batch_id.as_deref() == Some(&request.request_id) && run.status == "starting"
+        {
+            if run.publish_request_summary.as_deref() != Some(&summary) {
+                return Err("request_conflict：请求内容与原任务不一致".into());
+            }
+            return Ok(publish_result(&run, &request.request_id, "starting"));
+        }
+        if let Some(status) = publishing::replay(
+            &conn,
+            &request.request_id,
+            &normalized,
+            &request.caption,
+            if request.mode == "all" {
+                None
+            } else {
+                Some(&ids)
+            },
+        )? {
+            return Ok(publish_result(&run, &request.request_id, &status));
+        }
+        ensure_no_current_process(&run)?;
+        // A stale runtime is reconciled only after an authoritative liveness check.
+        ensure_publish_lock_released(&Path::new(&paths.data_dir).join("run.lock"))?;
+        publishing::reconcile(&conn)?;
+        let video = publishing::video_source(&request.video_path)?;
+        ensure_platform_capability("tiktok", "videoPublishing")?;
+        let config = load_config()?;
+        let limit = state
+            .license_entitlements
+            .lock()
+            .map_err(|_| "授权状态锁失败")?
+            .max_enabled_accounts;
+        if limit >= 0 && config.accounts().iter().filter(|a| a.enabled()).count() as i64 > limit {
+            return Err(format!("当前套餐最多启用 {limit} 个账号"));
+        }
+        if request.mode == "all" {
+            ids = config
+                .accounts()
+                .iter()
+                .filter(|a| a.enabled() && a.platform() == "tiktok")
+                .map(|a| a.id().to_string())
+                .collect()
+        }
+        if ids.is_empty() {
+            return Err("没有可执行的启用账号".into());
+        }
+        if request.mode == "single" && ids.len() != 1 {
+            return Err("单账号模式必须选择一个账号".into());
+        }
+        let accounts = ids
+            .iter()
+            .map(|id| {
+                let a = config
+                    .accounts()
+                    .iter()
+                    .find(|a| a.id() == id && a.enabled() && a.platform() == "tiktok")
+                    .ok_or("所选账号未启用或不属于TikTok")?;
+                Ok((
+                    id.clone(),
+                    a.browser_provider().to_string(),
+                    publish_binding(a)?,
+                ))
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        reset_run_state(&mut run, "tiktok_publish");
+        run.publish_batch_id = Some(request.request_id.clone());
+        run.publish_request_summary = Some(summary);
+        drop(run);
+        let reserved = reserve_daily_task_quota(&state.license_entitlements, "tiktok_publish");
+        if let Err(error) = reserved {
+            if let Ok(mut run) = state.current_run.lock() {
+                run.status = "failed".into();
+                run.error = Some(error.clone());
+                run.ended_at = Some(now());
+            }
+            return Err(error);
+        }
+        let mut run = state.current_run.lock().map_err(|_| "运行状态锁失败")?;
+        if run.status != "starting"
+            || run.stop_after_current
+            || run.publish_batch_id.as_deref() != Some(&request.request_id)
+        {
+            return Err("发布启动已取消；额度可能已扣除，未提交作品".into());
+        }
+        if let Err(error) = publishing::create_batch(
+            &mut conn,
+            &request.request_id,
+            &video,
+            &request.caption,
+            &accounts,
+        ) {
+            run.status = "failed".into();
+            run.error = Some(error.clone());
+            run.ended_at = Some(now());
+            return Err(error);
+        }
+    }
+    let first = ids.remove(0);
+    {
+        let mut run = state.current_run.lock().map_err(|_| "运行状态锁失败")?;
+        run.queue = ids;
+    }
+    spawn_publish_account(
+        state.current_run.clone(),
+        state.license_entitlements.clone(),
+        first,
+        "tiktok_publish".into(),
+    )
+}
+
+#[tauri::command]
+pub fn recheck_tiktok_publish(
+    record_id: String,
+    state: State<'_, AppState>,
+) -> Result<ProcessStartResult, String> {
+    let paths = project_paths()?;
+    let conn = publishing::connect(&paths.actions_db_path)?;
+    let (batch,account,provider,binding,status):(String,String,String,String,String)=conn.query_row("SELECT batch_id,account_id,provider,profile_binding_json,status FROM publish_records WHERE id=?1",[&record_id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))).map_err(|e|e.to_string())?;
+    if status != "pending_confirmation" {
+        return Err("仅待确认记录可重新核验".into());
+    }
+    let config = load_config()?;
+    let a = config
+        .accounts()
+        .iter()
+        .find(|a| a.id() == account && a.platform() == "tiktok")
+        .ok_or("原账号配置不存在")?;
+    if a.browser_provider() != provider || publish_binding(a)? != binding {
+        return Err("浏览器绑定已变化，记录保持待确认".into());
+    }
+    {
+        let mut run = state.current_run.lock().map_err(|_| "运行状态锁失败")?;
+        ensure_no_current_process(&run)?;
+        ensure_publish_lock_released(&Path::new(&paths.data_dir).join("run.lock"))?;
+        reset_run_state(&mut run, "tiktok_publish_verify");
+        run.publish_batch_id = Some(batch);
+        run.publish_record_id = Some(record_id);
+    }
+    if let Err(error) =
+        reserve_daily_task_quota(&state.license_entitlements, "tiktok_publish_verify")
+    {
+        if let Ok(mut run) = state.current_run.lock() {
+            run.status = "failed".into();
+            run.error = Some(error.clone());
+            run.ended_at = Some(now());
+        }
+        return Err(error);
+    }
+    spawn_publish_account(
+        state.current_run.clone(),
+        state.license_entitlements.clone(),
+        account,
+        "tiktok_publish_verify".into(),
+    )
+}
+
+pub(crate) fn ensure_publish_lock_released(path: &Path) -> Result<(), String> {
+    if !path.exists() {
+        return Ok(());
+    }
+    let text = std::fs::read_to_string(path).map_err(|e| format!("无法确认旧进程状态：{e}"))?;
+    let pid = text
+        .trim()
+        .parse::<u32>()
+        .map_err(|_| "无法确认旧进程状态：run.lock PID无效")?;
+    if pid == 0 {
+        return Err("无法确认旧进程状态：PID无效".into());
+    }
+    let output = if cfg!(windows) {
+        Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+            .output()
+    } else {
+        Command::new("ps")
+            .args(["-p", &pid.to_string(), "-o", "pid="])
+            .output()
+    }
+    .map_err(|e| format!("无法确认旧进程状态：{e}"))?;
+    if !output.status.success() {
+        return Err("无法确认旧进程状态".into());
+    }
+    if String::from_utf8_lossy(&output.stdout)
+        .split(|c: char| !c.is_ascii_digit())
+        .any(|v| v == pid.to_string())
+    {
+        return Err("旧任务进程仍在运行".into());
+    }
+    std::fs::remove_file(path).map_err(|e| e.to_string())
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -494,7 +784,7 @@ pub fn stop_current_run(force: bool, state: State<'_, AppState>) -> Result<StopR
 
     if !matches!(
         run.status.as_str(),
-        "starting" | "running" | "pause_pending" | "intervention_required"
+        "starting" | "running" | "pause_pending" | "intervention_required" | "stopping"
     ) {
         return Ok(StopResult {
             status: run.status.clone(),
@@ -503,6 +793,41 @@ pub fn stop_current_run(force: bool, state: State<'_, AppState>) -> Result<StopR
         });
     }
 
+    if let Some(batch) = run.publish_batch_id.clone() {
+        let conn = publishing::connect(&project_paths()?.actions_db_path)?;
+        publishing::cancel(&conn, &batch, !force)?;
+        run.stop_after_current = true;
+        run.queue.clear();
+        if force {
+            run.status = "stopping".into();
+            if let Some(child) = run.child.as_mut() {
+                child
+                    .kill()
+                    .map_err(|e| format!("正在停止，无法确认进程退出：{e}"))?;
+                child
+                    .wait()
+                    .map_err(|e| format!("正在停止，无法确认进程退出：{e}"))?;
+            }
+            publishing::finish_interrupted(&conn, &batch, None)?;
+            run.child = None;
+            run.status = "stopped".into();
+            run.ended_at = Some(now());
+            run.browser_preview = None;
+            run.auth_intervention = None;
+        } else {
+            run.status = "pause_pending".into();
+        }
+        return Ok(StopResult {
+            status: run.status.clone(),
+            process_id: run.process_id,
+            message: if force {
+                "发布任务已停止"
+            } else {
+                "当前账号完成后停止"
+            }
+            .into(),
+        });
+    }
     if force {
         let process_id = run.process_id;
         if let Some(child) = run.child.as_mut() {
@@ -697,6 +1022,9 @@ fn spawn_account_process(
     account_id: String,
     task_type: String,
 ) -> Result<ProcessStartResult, String> {
+    if task_type.starts_with("tiktok_publish") {
+        ensure_account_can_execute_for_platform("tiktok", "videoPublishing", &account_id)?;
+    }
     if let Err(error) = preflight_common(true) {
         mark_start_failure(&run_state, &error);
         return Err(error);
@@ -708,6 +1036,19 @@ fn spawn_account_process(
             return Err(error);
         }
     };
+    if task_type.starts_with("tiktok_publish") {
+        let paths = project_paths()?;
+        let conn = publishing::connect(&paths.actions_db_path)?;
+        let run = run_state.lock().map_err(|_| "运行状态锁失败")?;
+        let batch = run.publish_batch_id.as_deref().ok_or("缺少发布批次")?;
+        let record = if task_type == "tiktok_publish_verify" {
+            run.publish_record_id.clone().ok_or("缺少发布记录")?
+        } else {
+            publishing::record_for_account(&conn, batch, &account_id)?
+        };
+        env_vars.insert("AM_PUBLISH_BATCH_ID".into(), batch.into());
+        env_vars.insert("AM_PUBLISH_RECORD_ID".into(), record);
+    }
     let (ai_env_vars, ai_redactions) = ai_comment_env_for_runtime(&license_entitlements);
     for (key, value) in ai_env_vars {
         env_vars.insert(key, value);
@@ -743,12 +1084,67 @@ fn spawn_account_process(
 }
 
 fn runtime_task_type(task_type: &str) -> &'static str {
-    if task_type.contains("target_engagement") {
-        "target_engagement"
-    } else if task_type == "tiktok_register" {
-        "tiktok_register"
-    } else {
-        "fyp"
+    match task_type {
+        "tiktok_publish" => "publish",
+        "tiktok_publish_verify" => "publish_verify",
+        "tiktok_register" => "tiktok_register",
+        "target_engagement" | "tiktok_target_engagement" => "target_engagement",
+        "fyp" | "warmup" | "tiktok_fyp" | "tiktok_warmup" | "instagram_fyp"
+        | "instagram_warmup" => "fyp",
+        _ => "unsupported",
+    }
+}
+
+fn spawn_publish_account(
+    run_state: Arc<Mutex<RunState>>,
+    entitlements: Arc<Mutex<LicenseEntitlements>>,
+    mut account: String,
+    task: String,
+) -> Result<ProcessStartResult, String> {
+    loop {
+        {
+            let run = run_state.lock().map_err(|_| "运行状态锁失败")?;
+            if run.stop_after_current {
+                return Ok(publish_result(
+                    &run,
+                    run.publish_batch_id.as_deref().unwrap_or(""),
+                    &run.status,
+                ));
+            }
+        }
+        let result = spawn_account_process(
+            run_state.clone(),
+            entitlements.clone(),
+            account.clone(),
+            task.clone(),
+        );
+        if result.is_ok() {
+            return result;
+        }
+        let error = result.unwrap_err();
+        let paths = project_paths()?;
+        let conn = publishing::connect(&paths.actions_db_path)?;
+        let mut run = run_state.lock().map_err(|_| "运行状态锁失败")?;
+        let batch = run.publish_batch_id.clone().ok_or("缺少发布批次")?;
+        let record = publishing::record_for_account(&conn, &batch, &account)?;
+        if task == "tiktok_publish" {
+            publishing::fail_start(&conn, &record, &error)?;
+        }
+        run.completed_accounts.push(account.clone());
+        run.error = Some(error);
+        if run.stop_after_current || run.queue.is_empty() {
+            run.status = if run.stop_after_current {
+                "stopped".into()
+            } else {
+                publishing::batch_status(&conn, &batch)?
+            };
+            run.process_id = None;
+            run.account_id = None;
+            run.ended_at = Some(now());
+            return Ok(publish_result(&run, &batch, &run.status));
+        }
+        account = run.queue.remove(0);
+        run.status = "starting".into();
     }
 }
 
@@ -924,6 +1320,7 @@ async fn reserve_daily_task_quota_remote(
     };
     let response = reqwest::Client::new()
         .post(url)
+        .timeout(Duration::from_secs(15))
         .bearer_auth(bearer_token)
         .json(&json!({
             "deviceFingerprint": entitlements.device_fingerprint,
@@ -931,12 +1328,12 @@ async fn reserve_daily_task_quota_remote(
         }))
         .send()
         .await
-        .map_err(|err| format!("每日任务额度校验失败：{}", err))?;
+        .map_err(|err| format!("额度结果无法确认，任务未启动；请勿自动重试：{}", err))?;
     let status = response.status();
     let envelope = response
         .json::<DesktopApiEnvelope>()
         .await
-        .map_err(|err| format!("每日任务额度响应解析失败：{}", err))?;
+        .map_err(|err| format!("额度结果无法确认，任务未启动；响应解析失败：{}", err))?;
     if status.is_success() && envelope.success {
         Ok(())
     } else {
@@ -1010,6 +1407,16 @@ fn spawn_process_with_env_inner(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     hide_console_window(&mut command_builder);
+    // Register the child under the same mutex used by stop; cancellation cannot
+    // slip between spawning an OS process and making that process stoppable.
+    let mut run = run_state
+        .lock()
+        .map_err(|_| "failed to lock process state".to_string())?;
+    if task_type.starts_with("tiktok_publish")
+        && (run.stop_after_current || matches!(run.status.as_str(), "stopped" | "stopping"))
+    {
+        return Err("发布任务已停止，未启动浏览器".into());
+    }
     let mut child = command_builder.spawn().map_err(|err| {
         format!(
             "failed to start {:?} in {}: {}",
@@ -1028,9 +1435,6 @@ fn spawn_process_with_env_inner(
     }
 
     {
-        let mut run = run_state
-            .lock()
-            .map_err(|_| "failed to lock process state".to_string())?;
         run.status = "running".to_string();
         run.process_id = Some(process_id);
         run.task_type = Some(task_type.clone());
@@ -1040,6 +1444,7 @@ fn spawn_process_with_env_inner(
         run.ended_at = None;
         run.child = Some(child);
     }
+    drop(run);
 
     spawn_waiter(run_state.clone(), task_type.clone(), license_entitlements);
 
@@ -1049,6 +1454,10 @@ fn spawn_process_with_env_inner(
         status: "running".to_string(),
         task_type,
         account_id,
+        batch_id: run_state
+            .lock()
+            .ok()
+            .and_then(|r| r.publish_batch_id.clone()),
     })
 }
 
@@ -1063,6 +1472,9 @@ fn mark_start_failure(run_state: &Arc<Mutex<RunState>>, error: &str) {
     let Ok(mut run) = run_state.lock() else {
         return;
     };
+    if run.publish_batch_id.is_some() {
+        return;
+    }
     if run.status != "starting" {
         return;
     }
@@ -1100,7 +1512,9 @@ fn spawn_waiter(
                 }
                 Ok(None) => None,
                 Err(error) => {
-                    run.child = None;
+                    if run.publish_batch_id.is_none() {
+                        run.child = None;
+                    }
                     Some(Err(error.to_string()))
                 }
             }
@@ -1116,6 +1530,25 @@ fn spawn_waiter(
                 Err(_) => return,
             };
 
+            if run.publish_batch_id.is_some() {
+                if exit_result.is_err() {
+                    run.status = "stopping".into();
+                    run.error = Some("无法确认发布子进程已退出".into());
+                    return;
+                }
+                if let (Some(batch), Ok(paths)) = (&run.publish_batch_id, project_paths()) {
+                    match publishing::connect(&paths.actions_db_path).and_then(|conn| {
+                        publishing::finish_interrupted(&conn, batch, run.account_id.as_deref())
+                    }) {
+                        Ok(()) => {}
+                        Err(error) => {
+                            run.status = "failed".into();
+                            run.error = Some(error);
+                            return;
+                        }
+                    }
+                }
+            }
             if let Some(account_id) = run.account_id.clone() {
                 run.completed_accounts.push(account_id);
             }
@@ -1146,6 +1579,15 @@ fn spawn_waiter(
                 } else {
                     "completed".to_string()
                 };
+                if let Some(batch) = &run.publish_batch_id {
+                    run.status = project_paths()
+                        .and_then(|paths| publishing::connect(&paths.actions_db_path))
+                        .and_then(|conn| publishing::batch_status(&conn, batch))
+                        .unwrap_or_else(|error| {
+                            run.error = Some(error);
+                            "failed".into()
+                        });
+                }
                 run.process_id = None;
                 run.account_id = None;
                 run.browser_preview = None;
@@ -1157,6 +1599,14 @@ fn spawn_waiter(
 
         if let Some(account_id) = next_account {
             let result = match license_entitlements.clone() {
+                Some(entitlements) if task_type.starts_with("tiktok_publish") => {
+                    spawn_publish_account(
+                        run_state.clone(),
+                        entitlements,
+                        account_id,
+                        task_type.clone(),
+                    )
+                }
                 Some(entitlements) => spawn_account_process(
                     run_state.clone(),
                     entitlements,
@@ -1470,7 +1920,7 @@ fn ensure_no_active_run_lock(lock_path: &Path) -> Result<(), String> {
 fn ensure_no_current_process(run: &RunState) -> Result<(), String> {
     if matches!(
         run.status.as_str(),
-        "starting" | "running" | "pause_pending" | "intervention_required"
+        "starting" | "running" | "pause_pending" | "intervention_required" | "stopping"
     ) {
         return Err("another account script is already running".to_string());
     }
@@ -2051,6 +2501,13 @@ fn now() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn publication_tasks_never_fall_back_to_warmup() {
+        assert_eq!(runtime_task_type("tiktok_publish"), "publish");
+        assert_eq!(runtime_task_type("tiktok_publish_verify"), "publish_verify");
+        assert_eq!(runtime_task_type("unrecognized_task"), "unsupported");
+    }
 
     fn test_paths(runtime_mode: &str) -> ProjectPaths {
         ProjectPaths {

@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
+import type { PublishRequest, PublishVideoSelection, PublishRecordFilter, PublishRecordPage } from './types'
 
 import type {
   AccountSummary,
@@ -87,6 +88,19 @@ import type {
 } from './types'
 
 export const PROCESS_STARTED_EVENT = 'account-matrix:process-started'
+
+export function selectPublishVideo() {
+  return invoke<PublishVideoSelection | null>('select_publish_video')
+}
+export function runTikTokPublish(request: PublishRequest) {
+  return invoke<ProcessStartResult>('run_tiktok_publish', { request }).then(notifyProcessStarted)
+}
+export function recheckTikTokPublish(recordId: string) {
+  return invoke<ProcessStartResult>('recheck_tiktok_publish', { recordId }).then(notifyProcessStarted)
+}
+export function queryPublishRecords(filter: PublishRecordFilter) {
+  return invoke<PublishRecordPage>('query_publish_records', { filter })
+}
 
 function notifyProcessStarted(result: ProcessStartResult) {
   if (typeof window !== 'undefined') {

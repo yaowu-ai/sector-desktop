@@ -6,6 +6,7 @@ export type PlatformCapability =
   | 'accountManagement'
   | 'browserProfile'
   | 'warmupTask'
+  | 'videoPublishing'
   | 'targetEngagement'
   | 'scheduler'
   | 'comments'

@@ -5195,7 +5195,8 @@ fn is_valid_platform(platform: &str) -> bool {
 
 fn platform_capability_status(platform: &str, capability: &str) -> Option<&'static str> {
     match (platform, capability) {
-        ("tiktok", "accountManagement")
+        ("tiktok", "videoPublishing")
+        | ("tiktok", "accountManagement")
         | ("tiktok", "browserProfile")
         | ("tiktok", "warmupTask")
         | ("tiktok", "targetEngagement")
@@ -5236,7 +5237,8 @@ fn platform_capability_status(platform: &str, capability: &str) -> Option<&'stat
         | ("douyin", "targetEngagement")
         | ("douyin", "gmailSetup") => Some("reserved"),
 
-        ("whatsapp", "targetEngagement") | ("whatsapp", "gmailSetup") => Some("not_supported"),
+        ("whatsapp", "targetEngagement") | ("whatsapp", "gmailSetup")
+        | ("instagram", "videoPublishing") | ("whatsapp", "videoPublishing") | ("douyin", "videoPublishing") => Some("not_supported"),
 
         _ => None,
     }

@@ -8,3 +8,5 @@ pub mod process;
 pub mod scheduler;
 pub mod settings;
 pub mod stats;
+
+pub mod publishing;

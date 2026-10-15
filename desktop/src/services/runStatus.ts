@@ -4,6 +4,7 @@ import type { RunStatus } from './types'
 const RUN_STATUS_LABELS: Record<RunStatus, string> = {
   idle: '\u7a7a\u95f2',
   starting: '\u542f\u52a8\u4e2d',
+  stopping: '正在停止',
   running: '\u8fd0\u884c\u4e2d',
   pause_pending: '\u6b63\u5728\u6682\u505c',
   intervention_required: '\u9700\u8981\u4eba\u5de5\u5904\u7406',
