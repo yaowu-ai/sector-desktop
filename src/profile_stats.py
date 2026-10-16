@@ -5,6 +5,7 @@ import json
 import re
 import sys
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from decimal import Decimal
 from urllib.parse import parse_qs, urljoin, urlsplit
@@ -181,7 +182,9 @@ def read_liked(page, timeout):
     return state.result()
 
 
-def collect_current_account(browser, timeout):
+@contextmanager
+def open_current_account_profile(browser, timeout=DEFAULT_TIMEOUT, expected_handle=None):
+    """Open and validate a temporary own-profile page without reading activity."""
     timeout = normalize_timeout(timeout)
     if len(browser.contexts) != 1:
         raise RuntimeError("自动识别需要唯一浏览器会话，请连接目标账号对应的浏览器窗口")
@@ -201,7 +204,7 @@ def collect_current_account(browser, timeout):
             continue  # Closed, loading, or denied tabs have no usable login hint.
     if len(handles) > 1:
         raise RuntimeError("已有 TikTok 标签页显示不同登录账号，请关闭过期标签后重试")
-    handle = next(iter(handles), None)
+    handle = next(iter(handles), None) or expected_handle
     page = context.new_page()
     try:
         if handle is None:
@@ -210,14 +213,25 @@ def collect_current_account(browser, timeout):
             handle = logged_in_handle(page, timeout)
         page.goto(f"https://www.tiktok.com/@{handle}?lang=en-GB",
                   wait_until="domcontentloaded", timeout=timeout * 1000)
+        if expected_handle is not None and handle != expected_handle.lower():
+            raise RuntimeError("当前登录账号发生变化")
+        if profile_handle(page.url) != handle or logged_in_handle(page, timeout) != handle:
+            raise RuntimeError("读取期间登录账号或主页地址发生变化，请重试")
+        yield page, handle
+        if profile_handle(page.url) != handle or logged_in_handle(page, timeout) != handle:
+            raise RuntimeError("读取期间登录账号或主页地址发生变化，请重试")
+    finally:
+        page.close()
+
+
+def collect_current_account(browser, timeout):
+    with open_current_account_profile(browser, timeout) as (page, handle):
         result = read_stats(page, timeout)
         result.update(read_liked(page, timeout))
         result["activity"] = read_activity(page, timeout)
         if profile_handle(page.url) != handle or logged_in_handle(page, timeout) != handle:
             raise RuntimeError("读取期间登录账号或主页地址发生变化，请重试")
         return {"handle": handle, **result, "collected_at": utc_now()}
-    finally:
-        page.close()
 
 
 def collect(browser, handle=None, timeout=DEFAULT_TIMEOUT):

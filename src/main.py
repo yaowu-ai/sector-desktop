@@ -2,7 +2,7 @@
 import argparse
 
 from core import runtime
-from core.runner import find_account, run
+from core.runner import find_account, run, publication_exit_code
 
 configure_runtime = runtime.configure_runtime
 pid_alive = runtime.pid_alive
@@ -49,6 +49,7 @@ if __name__ == "__main__":
     configure_runtime(args.config)
     acquire_lock()
     try:
-        run(account_id=args.account, platform=args.platform)
+        summaries = run(account_id=args.account, platform=args.platform)
     finally:
         release_lock()
+    raise SystemExit(publication_exit_code(summaries))

@@ -126,15 +126,15 @@ def add_config_and_data_args(parser):
 def cmd_run(args):
     apply_runtime_env(args)
     from core import runtime
-    from core.runner import run
+    from core.runner import run, publication_exit_code
 
     runtime.configure_runtime(args.config)
     runtime.acquire_lock()
     try:
-        run(account_id=args.account, platform=args.platform)
+        summaries = run(account_id=args.account, platform=args.platform)
     finally:
         runtime.release_lock()
-    return 0
+    return publication_exit_code(summaries)
 
 
 def cmd_scheduler(args):

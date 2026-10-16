@@ -10,6 +10,17 @@ from platforms.registry import get_runner
 ACCOUNT_GAP_SECONDS = (30, 120)
 
 
+def publication_exit_code(summaries):
+    """Only publishing changes CLI exit semantics; pending is explicitly distinct."""
+    if not summaries or not all(item.get('task_type') in {'publish','publish_verify'} for item in summaries):
+        return 0
+    if all(item.get('publish_status') == 'verified' for item in summaries):
+        return 0
+    if any(item.get('publish_status') == 'failed' for item in summaries):
+        return 1
+    return 2
+
+
 def find_account(config, account_id):
     for account in config["accounts"]:
         if account["id"] == account_id:
@@ -81,6 +92,13 @@ def run(account_id=None, platform=None):
 
 
 def build_batch_message(summaries):
+    if summaries and all(item.get('task_type') in {'publish','publish_verify'} for item in summaries):
+        verified = sum(item.get('publish_status') == 'verified' for item in summaries)
+        pending = sum(item.get('publish_status') == 'pending_confirmation' for item in summaries)
+        failed = sum(item.get('publish_status') == 'failed' for item in summaries)
+        operation = '核验' if all(item['task_type']=='publish_verify' for item in summaries) else '发布'
+        title = f'星域 {operation}: {verified}/{len(summaries)} 已确认, {pending} 待确认, {failed} 失败'
+        return title, '\n'.join(f"{item['account_id']}: {item.get('publish_status')} {item.get('error') or ''}" for item in summaries)
     ok = sum(1 for item in summaries if item["status"] == "ok")
     err = sum(1 for item in summaries if item["status"] == "error")
     skip = sum(1 for item in summaries if item["status"] == "skip")
