@@ -149,6 +149,7 @@ class PublishSafetyTests(unittest.TestCase):
         self.store.claim('R1')
         page = MagicMock()
         with patch('platforms.tiktok.publish.validate_publish_source',return_value='video.mp4'), \
+             patch('platforms.tiktok.publish.logged_in_handle',return_value='alice'), \
              patch('platforms.tiktok.publish.profile_observation',return_value={'handle':'alice','ids':[],'complete':False}), \
              patch('platforms.tiktok.publish.assert_current_identity'), \
              patch('platforms.tiktok.publish.open_upload_page',return_value=page), \
@@ -157,6 +158,119 @@ class PublishSafetyTests(unittest.TestCase):
         self.assertEqual(result['status'],'failed')
         self.assertEqual(result['error_code'],'upload_failed')
         self.assertIsNone(result['submitted_at'])
+
+    def test_first_publication_opens_upload_before_any_profile_observation(self):
+        self.store.claim('R1')
+        page = MagicMock()
+        events = []
+
+        def open_upload(current):
+            self.assertIs(current, page)
+            events.append('Upload')
+            return page
+
+        with patch('platforms.tiktok.publish.validate_publish_source', return_value='video.mp4'), \
+             patch('platforms.tiktok.publish.logged_in_handle', return_value='alice'), \
+             patch('platforms.tiktok.publish.profile_observation', side_effect=PublishError(
+                 'baseline_unavailable', 'Upload your first video')) as observe, \
+             patch('platforms.tiktok.publish.open_current_account_profile') as own_profile, \
+             patch('platforms.tiktok.publish.open_upload_page', side_effect=open_upload) as upload_page, \
+             patch('platforms.tiktok.publish.upload_video', side_effect=PublishError(
+                 'upload_failed', 'test stops after reaching upload')) as upload:
+            result = run_tiktok_publish(page, MagicMock(), self.store, 'R1')
+
+        upload_page.assert_called_once_with(page)
+        upload.assert_called_once()
+        observe.assert_not_called()
+        own_profile.assert_not_called()
+        self.assertEqual(events, ['Upload'])
+        self.assertEqual(result['handle'], 'alice')
+        self.assertEqual(result['error_code'], 'upload_failed')
+        self.assertIsNone(result['submitted_at'])
+
+    def test_identity_check_reads_navigation_without_opening_profile(self):
+        from platforms.tiktok.publish import assert_current_identity
+        browser = MagicMock()
+        browser.contexts = [MagicMock()]
+        page = browser.contexts[0].new_page.return_value
+        with patch('platforms.tiktok.publish.logged_in_handle', return_value='alice'), \
+             patch('platforms.tiktok.publish.open_current_account_profile') as profile:
+            self.assertEqual(assert_current_identity(browser, 'alice'), 'alice')
+        profile.assert_not_called()
+        self.assertEqual(page.goto.call_args.args[0], 'https://www.tiktok.com/?lang=en-GB')
+        page.close.assert_called_once()
+
+    def test_post_precedes_own_profile_verification_without_baseline(self):
+        self.store.claim('R1')
+        page = MagicMock(url='https://www.tiktok.com/tiktokstudio/upload')
+        post = MagicMock()
+        radio = MagicMock()
+        radio.is_visible.return_value = True
+        page.get_by_role.return_value.all.return_value = [radio]
+        events = []
+
+        def click(**kwargs):
+            events.append('Post')
+            self.assertEqual(self.store.record('R1')['status'], 'committing')
+            page.url = 'https://www.tiktok.com/@alice/video/101'
+
+        def verify(browser, record):
+            events.append('Profile verification')
+            self.assertEqual(events, ['Upload', 'video', 'Description', 'Post', 'Profile verification'])
+            self.assertEqual(record['post_id'], '101')
+            self.assertEqual(record['handle'], 'alice')
+            self.assertIsNone(record['baseline_json'])
+            return {'status': 'verified', 'post_url': page.url}
+
+        post.click.side_effect = click
+        with patch('platforms.tiktok.publish.validate_publish_source', return_value='video.mp4'), \
+             patch('platforms.tiktok.publish.logged_in_handle', return_value='alice'), \
+             patch('platforms.tiktok.publish.open_upload_page', side_effect=lambda p: (events.append('Upload') or p)), \
+             patch('platforms.tiktok.publish.upload_video', side_effect=lambda *args: events.append('video')), \
+             patch('platforms.tiktok.publish._caption', side_effect=lambda *args: events.append('Description')), \
+             patch('platforms.tiktok.publish.handle_known_upload_prompts'), \
+             patch('platforms.tiktok.publish.wait_post_ready', return_value=post), \
+             patch('platforms.tiktok.publish.assert_current_identity', return_value='alice'), \
+             patch('platforms.tiktok.publish.profile_observation') as baseline, \
+             patch('platforms.tiktok.publish.verify_published_video', side_effect=verify):
+            result = run_tiktok_publish(page, MagicMock(), self.store, 'R1')
+        baseline.assert_not_called()
+        post.click.assert_called_once()
+        self.assertEqual(result['status'], 'verified')
+        self.assertEqual(result['post_url'], 'https://www.tiktok.com/@alice/video/101')
+
+    def test_identity_change_still_blocks_submission_without_profile_navigation(self):
+        from platforms.tiktok.publish import assert_current_identity
+        browser = MagicMock(contexts=[MagicMock()])
+        with patch('platforms.tiktok.publish.logged_in_handle', return_value='bob'), \
+             patch('platforms.tiktok.publish.open_current_account_profile') as profile:
+            with self.assertRaises(PublishError) as caught:
+                assert_current_identity(browser, 'alice')
+        self.assertEqual(caught.exception.code, 'identity_mismatch')
+        profile.assert_not_called()
+        browser.contexts[0].new_page.return_value.close.assert_called_once()
+
+    def test_empty_profile_first_video_message_is_recognized_after_post(self):
+        from platforms.tiktok.publish import profile_observation
+        page = MagicMock()
+        page.get_by_role.return_value.count.return_value = 0
+        page.locator.return_value.first.wait_for.side_effect = TimeoutError('no videos')
+        page.locator.return_value.all.return_value = []
+        empty = MagicMock()
+        empty.is_visible.return_value = True
+
+        def text_nodes(expression):
+            self.assertIsNotNone(expression.fullmatch('Upload your first video'))
+            nodes = MagicMock()
+            nodes.all.return_value = [empty]
+            return nodes
+
+        page.get_by_text.side_effect = text_nodes
+        with patch('platforms.tiktok.publish.open_current_account_profile') as profile:
+            profile.return_value.__enter__.return_value = (page, 'alice')
+            result = profile_observation(MagicMock(), 'alice')
+        self.assertEqual(result['ids'], [])
+        self.assertEqual(result['handle'], 'alice')
 
     def test_unknown_task_never_becomes_fyp(self):
         from platforms.tiktok.runner import requested_tiktok_task

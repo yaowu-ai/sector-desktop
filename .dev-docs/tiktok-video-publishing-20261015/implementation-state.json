@@ -56887,7 +56887,7 @@
         {
           "path": "src/platforms/tiktok/publish.py",
           "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-          "after_sha256": "b49a99ac2e9855e5c45debb61f69380a84b5c5efe5122ecbadc0ae60b8bec0e1",
+          "after_sha256": "5de37ae10769b42efe9d16f7aefcc55f739986333a1421a1496ca48b91297f5e",
           "change_kind": "added"
         },
         {
@@ -56905,7 +56905,7 @@
         {
           "path": "src/platforms/tiktok/test_publish_unit.py",
           "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-          "after_sha256": "d0c03a2e7d21c24048dabd543517afaa559d7e0f44f0a7dd177202ffbf58dbb9",
+          "after_sha256": "a796ce697ce8937cd0d8d259bc347a3b995aa83252b00bd843f7d2ca3edf9ae7",
           "change_kind": "added"
         },
         {
@@ -57299,7 +57299,7 @@
       ]
     }
   ],
-  "updated_at": "2026-10-15T10:08:00.088863+00:00",
+  "updated_at": "2026-10-16T05:41:54.127067+00:00",
   "verification_handoff": {
     "source": "User instruction in this chat: user owns time-consuming tests and final packaging tests",
     "packaging": "user-owned; do not execute full Tauri or PyInstaller packaging",
@@ -57313,5 +57313,20 @@
     "packaging": "not run, user-owned",
     "real_app_mutations": "none; only disposable local test files/databases; sandbox-created empty temp directory removed"
   },
-  "completed_at": "2026-10-15T10:08:00.088863+00:00"
+  "completed_at": "2026-10-15T10:08:00.088863+00:00",
+  "flow_correction_20261016": {
+    "authority": "User in this chat: Upload first, own profile only after Post",
+    "note": "implementation/flow-correction-20261016.md",
+    "changed_paths": [
+      "src/platforms/tiktok/publish.py",
+      "src/platforms/tiktok/test_publish_unit.py"
+    ],
+    "focused_tests": {
+      "publishing": 20,
+      "schema": 5
+    },
+    "real_posting": "not run",
+    "packaging": "user-owned; rebuild embedded Python runtime",
+    "contract_note": "Original frozen BDD baseline requirement superseded by user; original full closure remains unclaimed"
+  }
 }

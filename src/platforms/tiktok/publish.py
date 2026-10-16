@@ -69,11 +69,24 @@ def handle_known_upload_prompts(page):
 
 
 def assert_current_identity(browser, expected_handle):
+    page = None
     try:
-        with open_current_account_profile(browser, 30, expected_handle) as (_, handle):
-            return handle
+        if len(browser.contexts) != 1:
+            raise ValueError('无法唯一确定浏览器会话')
+        # Studio may not expose Profile navigation. Read the cookie-backed
+        # account navigation on a temporary home tab, without visiting a profile.
+        page = browser.contexts[0].new_page()
+        page.goto('https://www.tiktok.com/?lang=en-GB',
+                  wait_until='domcontentloaded', timeout=60000)
+        handle = logged_in_handle(page, 30)
+        if handle != expected_handle:
+            raise ValueError('当前登录账号发生变化')
+        return handle
     except Exception as exc:
         raise PublishError('identity_mismatch','当前登录账号发生变化或无法确认') from exc
+    finally:
+        if page is not None:
+            page.close()
 
 
 def profile_observation(browser, expected_handle=None):
@@ -313,12 +326,10 @@ def run_tiktok_publish(page, browser, store, record_id, verify_only=False):
         return record
     try:
         source = validate_publish_source(record)
-        store.phase(record_id,'baseline')
-        observation = profile_observation(browser)
-        handle = observation['handle']
-        baseline = {key:value for key,value in observation.items() if key != 'urls'}
-        store.phase(record_id,'baseline',handle=handle,baseline_json=json.dumps(baseline))
-        assert_current_identity(browser,handle)
+        # The user's workflow starts with Upload, including a first-ever post.
+        # Only identify the signed-in account here; inspect its works after Post.
+        handle = logged_in_handle(page, 30)
+        store.phase(record_id,'authenticating',handle=handle)
         page = open_upload_page(page)
         store.phase(record_id,'uploading')
         def alive():
