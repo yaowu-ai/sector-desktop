@@ -8,6 +8,7 @@ export const SUPPORTED_CAPABILITIES: Record<PlatformCapability, CapabilityStatus
   accountManagement: 'supported',
   browserProfile: 'supported',
   warmupTask: 'supported',
+  videoPublishing: 'supported',
   targetEngagement: 'supported',
   scheduler: 'supported',
   comments: 'supported',
@@ -22,6 +23,7 @@ export const RESERVED_CAPABILITIES: Record<PlatformCapability, CapabilityStatus>
   accountManagement: 'reserved',
   browserProfile: 'reserved',
   warmupTask: 'reserved',
+  videoPublishing: 'not_supported',
   targetEngagement: 'reserved',
   scheduler: 'reserved',
   comments: 'reserved',
@@ -43,6 +45,7 @@ export const NOT_SUPPORTED_CAPABILITIES: Record<PlatformCapability, CapabilitySt
   accountManagement: 'not_supported',
   browserProfile: 'not_supported',
   warmupTask: 'not_supported',
+  videoPublishing: 'not_supported',
   targetEngagement: 'not_supported',
   scheduler: 'not_supported',
   comments: 'not_supported',
@@ -54,6 +57,7 @@ export const NOT_SUPPORTED_CAPABILITIES: Record<PlatformCapability, CapabilitySt
 }
 
 export const PLATFORM_CAPABILITIES: PlatformCapabilityDefinition[] = [
+  { key: 'videoPublishing', label: '视频作品发布', description: '本地视频发布、本人主页核验与逐账号发布记录' },
   {
     key: 'accountManagement',
     label: '账号配置',

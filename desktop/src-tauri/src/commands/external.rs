@@ -38,6 +38,25 @@ fn open_external_url(url: &str) -> Result<(), String> {
 
 fn validate_external_url(url: &str) -> Result<(), String> {
     let normalized = url.trim();
+    if let Ok(parsed) = reqwest::Url::parse(normalized) {
+        if matches!(parsed.host_str(), Some("tiktok.com" | "www.tiktok.com")) {
+            let path = parsed.path().strip_suffix('/').unwrap_or(parsed.path());
+            let segments: Vec<_> = path.split('/').collect();
+            if parsed.scheme() != "https"
+                || !parsed.username().is_empty()
+                || parsed.password().is_some()
+                || parsed.port().is_some()
+                || segments.len() != 4
+                || !segments[1].starts_with('@')
+                || segments[1].len() < 2
+                || segments[2] != "video"
+                || segments[3].is_empty()
+                || !segments[3].bytes().all(|c| c.is_ascii_digit())
+            {
+                return Err("仅支持 HTTPS TikTok 作品链接".into());
+            }
+        }
+    }
     if (normalized.starts_with("http://") || normalized.starts_with("https://"))
         && !normalized.contains('\n')
         && !normalized.contains('\r')
@@ -45,6 +64,21 @@ fn validate_external_url(url: &str) -> Result<(), String> {
         return Ok(());
     }
     Err("only http or https download links can be opened".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn tiktok_post_links_require_exact_https_post_path() {
+        assert!(validate_external_url("https://www.tiktok.com/@alice/video/101").is_ok());
+        assert!(validate_external_url("https://www.tiktok.com/@alice/video/101/").is_ok());
+        assert!(validate_external_url("https://www.tiktok.com/@alice/video/101//").is_err());
+        assert!(validate_external_url("http://www.tiktok.com/@alice/video/101").is_err());
+        assert!(validate_external_url("https://www.tiktok.com/@alice").is_err());
+        assert!(validate_external_url("https://www.tiktok.com/@alice/video/no-id").is_err());
+        assert!(validate_external_url("https://www.bitbrowser.cn/download").is_ok());
+    }
 }
 
 fn normalize_platform(platform: &str) -> &str {

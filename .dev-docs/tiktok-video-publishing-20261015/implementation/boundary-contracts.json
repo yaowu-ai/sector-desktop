@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "mode": "code-impl-boundary-contracts",
+  "plan_dir": "E:\\YAOWU\\yangHao\\account-matrix\\.dev-docs\\tiktok-video-publishing-20261015",
+  "contracts": [
+    {
+      "id": "BC-resource-boundary-001",
+      "status": "planned",
+      "object_kind": "image-resource",
+      "boundary_kind": "resource-object",
+      "unresolved_facets": [
+        "producer.endpoint"
+      ],
+      "producer": {
+        "path": null,
+        "endpoint": null,
+        "returns": {
+          "storage_identity_required": true,
+          "storage_scope": "T/OFN_NOCHANGEDIR",
+          "display_representation_required": true
+        }
+      },
+      "consumer": {
+        "path": null,
+        "endpoint": null,
+        "accepts": [
+          "image/png"
+        ],
+        "persists": "config.rs",
+        "preserves": []
+      },
+      "compatibility": "planned",
+      "required_action": "implement a production resource boundary that validates input type, creates the storage identity in the planned scope, persists only the contracted field when required, and returns a displayable representation when consumers render it",
+      "allowed_mock": [
+        "external upload provider, storage SDK, network service, time, nondeterminism"
+      ],
+      "forbidden_mock": [
+        "same-repo resource boundary success without production endpoint/producer anchors",
+        "generic resource directory or ideal response that is not tied to the planned storage scope"
+      ]
+    }
+  ]
+}

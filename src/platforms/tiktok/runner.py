@@ -76,14 +76,18 @@ def tiktok_network_error_detail(exc, action="navigation"):
 def requested_tiktok_task():
     value = os.environ.get("AM_TASK_TYPE", "").strip().lower()
     aliases = {
+        "tiktok_publish": "publish",
+        "tiktok_publish_verify": "publish_verify",
         "warmup": "fyp",
         "target": "target_engagement",
         "register": "tiktok_register",
         "registration": "tiktok_register",
     }
     value = aliases.get(value, value)
-    if value in {"fyp", "target_engagement", "tiktok_register", "full"}:
+    if value in {"fyp", "target_engagement", "tiktok_register", "full", "publish", "publish_verify"}:
         return value
+    if value:
+        raise ValueError(f"Unsupported TikTok task: {value}")
     return "full"
 
 
@@ -172,7 +176,8 @@ def detect_login_state(page):
     return result.logged_in, result.summary()
 
 
-def ensure_tiktok_authenticated(page, account, config, conn, session=None):
+def ensure_tiktok_authenticated(page, account, config, conn, session=None,
+                                publish_store=None, publish_record_id=None):
     account_id = account["id"]
     platform = account.get("platform", "tiktok")
     adapter = auth_adapter_for_platform(platform)
@@ -190,6 +195,10 @@ def ensure_tiktok_authenticated(page, account, config, conn, session=None):
             reason=auth_result.intervention.reason if auth_result.intervention else auth_result.state.value,
         )
         if auth_result.state == LoginState.LOGGED_IN:
+            if publish_store is not None:
+                row = publish_store.record(publish_record_id)
+                if row['status'] == 'intervention_required':
+                    publish_store.transition(publish_record_id,('intervention_required',),'running','authenticating')
             log_action(conn, platform, account_id, "login_check", "ok", detail)
             return auth_result
 
@@ -226,6 +235,8 @@ def ensure_tiktok_authenticated(page, account, config, conn, session=None):
             f"{account_id} | AUTH WAIT | state={auth_result.state.value}; manual intervention required",
             platform,
         )
+        if publish_store is not None:
+            publish_store.transition(publish_record_id,('running',),'intervention_required','authenticating')
         if session is not None and background_browser_enabled():
             set_browser_session_visibility(session, visible=True)
         action = wait_for_auth_intervention_action(account_id)
@@ -246,6 +257,8 @@ def run_session(account, config, conn):
     task_type = requested_tiktok_task()
     if task_type == "tiktok_register":
         return run_tiktok_registration(account, config, conn)
+    if task_type in {"publish", "publish_verify"}:
+        return run_tiktok_publication_session(account, config, conn, task_type)
 
     plan = build_fyp_plan(account, config) if task_type in {"fyp", "full"} else None
     duration = plan["duration"] if plan else 0.0
@@ -367,6 +380,93 @@ def run_session(account, config, conn):
             session_log(f"{account_id} | CLOSE SKIP | AM_AUTO_CLOSE_PROFILE=0", platform)
 
     return summary
+
+
+def run_tiktok_publication_session(account, config, conn, task_type):
+    """Own one publication record before opening any provider session."""
+    import json
+    from pathlib import Path
+    from browser_providers import builtin_user_data_dir, ixbrowser_profile_id
+    from platforms.tiktok.publish import run_tiktok_publish
+    from platforms.tiktok.publish_store import PublishStore
+
+    store = PublishStore(conn)
+    record = store.for_account(os.environ.get('AM_PUBLISH_BATCH_ID',''), account['id'])
+    record_id = record['id']
+    verify_only = task_type == 'publish_verify'
+    if os.environ.get('AM_PUBLISH_RECORD_ID') not in (None, '', record_id):
+        raise ValueError('发布记录与执行账号不一致')
+    if verify_only:
+        if record['status'] != 'pending_confirmation':
+            raise ValueError('仅待确认记录可重新核验')
+    elif not store.claim(record_id):
+        return publication_summary(store.record(record_id), task_type)
+
+    session = None
+    provider = None
+    manager = None
+    browser = None
+    try:
+        provider = provider_for_account(account,config)
+        binding = json.loads(record['profile_binding_json'])
+        if provider.name != record['provider']:
+            raise ValueError('binding_changed: 浏览器绑定已变化')
+        if provider.name == 'builtin_chromium':
+            matches = os.path.normcase(str(Path(binding.get('user_data_dir','')).resolve())) == os.path.normcase(str(builtin_user_data_dir(account).resolve()))
+        else:
+            current = ixbrowser_profile_id(account) if provider.name == 'ixbrowser' else bitbrowser_profile_id(account)
+            matches = str(binding.get('profile_id','')) == str(current)
+        if not matches:
+            raise ValueError('binding_changed: 浏览器绑定已变化')
+        provider.validate_account(account,config)
+        if not verify_only:
+            store.phase(record_id,'opening')
+        session = provider.start_session(account,config)
+        emit_browser_preview('opened',account['id'],session.profile_id,session.cdp_endpoint)
+        test_cdp_endpoint(session.cdp_endpoint,timeout=5)
+        manager, playwright = start_sync_playwright()
+        browser = playwright.chromium.connect_over_cdp(session.cdp_endpoint)
+        page = choose_tiktok_page(browser.contexts[0])
+        if not verify_only:
+            store.phase(record_id,'authenticating')
+        # Existing auth owns continue/skip and browser visibility.
+        auth = ensure_tiktok_authenticated(page,account,config,conn,session=session,
+                                            publish_store=store if not verify_only else None,
+                                            publish_record_id=record_id)
+        if auth.state != LoginState.LOGGED_IN:
+            if not verify_only:
+                current = store.record(record_id)
+                store.transition(record_id,(current['status'],),'skipped','finished',
+                                 error_code='auth_required',error_detail=redact_runtime_text(auth.summary()))
+        else:
+            run_tiktok_publish(page,browser,store,record_id,verify_only=verify_only)
+    except Exception as exc:
+        current = store.record(record_id)
+        status = current['status']
+        target = 'pending_confirmation' if verify_only or status in {'committing','verifying'} else 'failed'
+        if status in {'queued','running','intervention_required','committing','verifying','pending_confirmation'}:
+            store.transition(record_id,(status,),target,'finished',
+                             error_code='binding_changed' if 'binding_changed' in str(exc) else 'session_failed',
+                             error_detail=redact_runtime_text(str(exc)))
+    finally:
+        if browser is not None:
+            try:
+                browser.close()
+            except Exception:
+                pass
+        if manager is not None:
+            manager.__exit__()
+        if session is not None and auto_close_profile_enabled():
+            provider.close_session(session,config)
+            emit_browser_preview('closed',account['id'],session.profile_id)
+    return publication_summary(store.record(record_id),task_type)
+
+
+def publication_summary(record, task_type):
+    return {'account_id':record['account_id'],'platform':'tiktok','task_type':task_type,
+            'status':'ok' if record['status']=='verified' else 'error' if record['status']=='failed' else 'skip',
+            'publish_status':record['status'],'publish_record_id':record['id'],
+            'error':record.get('error_detail'),'videos':0,'duration_actual_min':0}
 
 
 def collect_profile_after_task(browser, account, summary, conn=None):

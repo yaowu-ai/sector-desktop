@@ -89,7 +89,7 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
       filterRoutesByPlatformAvailability(
         permittedRoutes,
         currentPlatformDefinition,
-      ),
+      ).filter((route) => route.capability !== 'videoPublishing' || currentPlatformDefinition.capabilities.videoPublishing === 'supported'),
     [currentPlatformDefinition, permittedRoutes],
   );
   const visibleRouteKeys = useMemo(
@@ -99,7 +99,7 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
   const availableAppRoutes = useMemo(
     () =>
       permittedAppRoutes.filter(
-        (route) => route.key === "platforms" || visibleRouteKeys.has(route.key),
+        (route) => route.key === "platforms" || route.capability === 'videoPublishing' || visibleRouteKeys.has(route.key),
       ),
     [permittedAppRoutes, visibleRouteKeys],
   );
@@ -110,7 +110,11 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
   );
   const siderMenuItems = useMemo(
     () =>
-      buildSiderMenuItems(visibleRoutes, desktopNotifications.unreadCount),
+      buildSiderMenuItems(visibleRoutes, desktopNotifications.unreadCount, (key) => {
+        setActiveKey(key);
+        // rc-menu also toggles the title; retain expansion after its click handler.
+        queueMicrotask(() => setOpenKeys(current => current.includes('publishing') ? current : [...current, 'publishing']));
+      }),
     [desktopNotifications.unreadCount, visibleRoutes],
   );
   const [openKeys, setOpenKeys] = useState<string[]>(() =>
@@ -470,6 +474,7 @@ function getInitialOpenKeys() {
 function buildSiderMenuItems(
   permittedRoutes: AppRoute[],
   notificationUnreadCount: number,
+  navigate?: (key: string) => void,
 ): MenuProps["items"] {
   const items: NonNullable<MenuProps["items"]> = [];
   const groupIndex = new Map<string, number>();
@@ -502,6 +507,9 @@ function buildSiderMenuItems(
       key: route.menuGroup.key,
       icon: <GroupIcon size={18} />,
       label: route.menuGroup.label,
+      onTitleClick: route.menuGroup.key === 'publishing' ? ({ domEvent }) => {
+        if (domEvent.type !== 'keydown') navigate?.('publish');
+      } : undefined,
       children: [item],
     });
   }

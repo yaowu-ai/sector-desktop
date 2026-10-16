@@ -22,6 +22,7 @@ import {
   Target,
   UserCog,
   UserRound,
+  Upload,
 } from 'lucide-react'
 
 import { AboutPage } from '../pages/AboutPage'
@@ -46,6 +47,8 @@ import {
   StatsPage,
   TargetEngagementPage,
   TaskPage,
+  PublishPage,
+  PublishRecordsPage,
 } from '../platforms/tiktok/pages'
 import type { PageScope } from './pageScope'
 import type { PlatformCapability } from '../platforms'
@@ -71,6 +74,8 @@ export const personalCenterMenuGroup: AppMenuGroup = {
   label: '个人中心',
   icon: UserRound,
 }
+
+export const publishingMenuGroup: AppMenuGroup = { key: 'publishing', label: '发布作品', icon: Upload }
 
 export const platformSettingsRoute: AppRoute = {
   key: 'platforms',
@@ -120,6 +125,8 @@ export const routes: AppRoute[] = [
     scope: 'current_platform',
     capability: 'warmupTask',
   },
+  { key: 'publish', label: '发布作品', icon: Upload, element: <PublishPage />, scope: 'current_platform', capability: 'videoPublishing', menuGroup: publishingMenuGroup },
+  { key: 'publish-records', label: '发布记录', icon: ClipboardList, element: <PublishRecordsPage />, scope: 'current_platform', capability: 'videoPublishing', menuGroup: publishingMenuGroup },
   {
     key: 'target-engagement',
     label: '目标号互动',

@@ -376,6 +376,50 @@ fn choose_log_save_path(_default_filename: &str) -> Result<Option<PathBuf>, Stri
     Err("custom log download location is only supported on Windows desktop builds".to_string())
 }
 
+#[tauri::command]
+pub fn select_publish_video() -> Result<Option<super::publishing::VideoSource>, String> {
+    choose_publish_video_path()?
+        .map(|p| super::publishing::video_source(&p.to_string_lossy()))
+        .transpose()
+}
+
+#[cfg(windows)]
+fn choose_publish_video_path() -> Result<Option<PathBuf>, String> {
+    use windows_sys::Win32::UI::Controls::Dialogs::{
+        CommDlgExtendedError, GetOpenFileNameW, OFN_FILEMUSTEXIST, OFN_NOCHANGEDIR,
+        OFN_PATHMUSTEXIST, OPENFILENAMEW,
+    };
+    let mut buffer = [0u16; 32768];
+    let filter: Vec<u16> = "Video (*.mp4;*.mov;*.webm)\0*.mp4;*.mov;*.webm\0\0"
+        .encode_utf16()
+        .collect();
+    let title: Vec<u16> = "选择发布视频\0".encode_utf16().collect();
+    let mut dialog = OPENFILENAMEW {
+        lStructSize: std::mem::size_of::<OPENFILENAMEW>() as u32,
+        lpstrFilter: filter.as_ptr(),
+        lpstrFile: buffer.as_mut_ptr(),
+        nMaxFile: buffer.len() as u32,
+        lpstrTitle: title.as_ptr(),
+        Flags: OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR,
+        ..OPENFILENAMEW::default()
+    };
+    if unsafe { GetOpenFileNameW(&mut dialog) } == 0 {
+        let error = unsafe { CommDlgExtendedError() };
+        if error == 0 {
+            return Ok(None);
+        }
+        return Err(format!("无法打开视频选择器：{error}"));
+    }
+    let len = buffer.iter().position(|v| *v == 0).unwrap_or(buffer.len());
+    Ok(Some(PathBuf::from(String::from_utf16_lossy(
+        &buffer[..len],
+    ))))
+}
+#[cfg(not(windows))]
+fn choose_publish_video_path() -> Result<Option<PathBuf>, String> {
+    Err("本地视频选择仅支持 Windows 桌面应用".into())
+}
+
 fn safe_default_filename(filename: &str) -> String {
     let cleaned: String = filename
         .chars()

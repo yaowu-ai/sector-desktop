@@ -1,0 +1,138 @@
+{
+  "version": 1,
+  "skill": "code-plan",
+  "terminal_state": "PASS",
+  "phase": "OUTPUT",
+  "proof_profile": "mixed-system",
+  "frontier_unknown": null,
+  "remaining_unknowns": [],
+  "committed_claims": [
+    {
+      "id": "C1",
+      "affects": [
+        "S1",
+        "S2",
+        "S3"
+      ],
+      "evidence_ids": [
+        "EV1"
+      ]
+    },
+    {
+      "id": "C2",
+      "affects": [
+        "S1",
+        "S3",
+        "VC1"
+      ],
+      "evidence_ids": [
+        "EV2",
+        "EV11"
+      ]
+    },
+    {
+      "id": "C3",
+      "affects": [
+        "S1",
+        "S2",
+        "SD1"
+      ],
+      "evidence_ids": [
+        "EV3"
+      ]
+    },
+    {
+      "id": "C4",
+      "affects": [
+        "S2",
+        "S3",
+        "ED1"
+      ],
+      "evidence_ids": [
+        "EV4"
+      ]
+    },
+    {
+      "id": "C5",
+      "affects": [
+        "S1",
+        "ED1"
+      ],
+      "evidence_ids": [
+        "EV5",
+        "EV9"
+      ]
+    },
+    {
+      "id": "C6",
+      "affects": [
+        "S1",
+        "S2",
+        "S3",
+        "DB1"
+      ],
+      "evidence_ids": [
+        "EV6",
+        "EV8"
+      ]
+    },
+    {
+      "id": "C7",
+      "affects": [
+        "S2",
+        "ED1"
+      ],
+      "evidence_ids": [
+        "EV1",
+        "EV7"
+      ]
+    },
+    {
+      "id": "C8",
+      "affects": [
+        "S2",
+        "S3",
+        "SD1"
+      ],
+      "evidence_ids": [
+        "EV8"
+      ]
+    },
+    {
+      "id": "C9",
+      "affects": [
+        "S1",
+        "S3",
+        "SD1"
+      ],
+      "evidence_ids": [
+        "EV10"
+      ]
+    }
+  ],
+  "artifacts": {
+    "design": "design.md",
+    "contracts": [
+      "contracts/S1-prepare-publication.feature",
+      "contracts/S1-prepare-publication.tech.feature",
+      "contracts/S2-publish-and-verify.feature",
+      "contracts/S2-publish-and-verify.tech.feature",
+      "contracts/S3-publication-records.feature",
+      "contracts/S3-publication-records.tech.feature"
+    ]
+  },
+  "blockers": [],
+  "recovery_point": null,
+  "validation": {
+    "required": [
+      "validate_source_destinations.py",
+      "validate_product_bdd_shape.py",
+      "validate_evidence_references.py",
+      "validate_closure_gate.py"
+    ],
+    "result": "passed",
+    "validated_on": "2026-10-15",
+    "product_scenarios": 54,
+    "technical_scenarios": 54
+  }
+}

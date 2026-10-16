@@ -1299,7 +1299,7 @@ fn builtin_account_dir(account_id: &str) -> Result<PathBuf, String> {
     Ok(builtin_data_root()?.join(safe_account_dir_name(account_id)))
 }
 
-fn builtin_user_data_dir(account_id: &str, configured: Option<&str>) -> Result<PathBuf, String> {
+pub(crate) fn builtin_user_data_dir(account_id: &str, configured: Option<&str>) -> Result<PathBuf, String> {
     if let Some(configured) = configured.map(str::trim).filter(|value| !value.is_empty()) {
         let path = PathBuf::from(configured);
         if path.is_absolute() {

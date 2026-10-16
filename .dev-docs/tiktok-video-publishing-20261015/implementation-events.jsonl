@@ -1,0 +1,18 @@
+{"ts": "2026-10-15T08:14:38.716330+00:00", "type": "phase_started", "summary": "Accept PASS plan", "ids": []}
+{"ts": "2026-10-15T08:14:38.716330+00:00", "type": "package_accepted", "summary": "Plan state PASS, no application changes at intake", "ids": []}
+{"ts": "2026-10-15T08:14:38.716330+00:00", "type": "obligations_compiled", "summary": "Compiled all local contract rows", "ids": []}
+{"ts": "2026-10-15T08:14:38.716330+00:00", "type": "targets_compiled", "summary": "Frozen compiler projections and SD1 DB1", "ids": []}
+{"ts": "2026-10-15T08:14:38.716330+00:00", "type": "claim_declared", "summary": "Claims split by Story and local proof surface", "ids": ["IC-001", "IC-002", "IC-003", "IC-004", "IC-005", "IC-006", "IC-007", "IC-008", "IC-009", "IC-010", "IC-011", "IC-012", "IC-013", "IC-014", "IC-015", "IC-016", "IC-017", "IC-018", "IC-019"]}
+{"ts": "2026-10-15T08:14:38.716330+00:00", "type": "authority_locked", "summary": "Repository exemplars and plan authority locked; no .dev-specs index exists", "ids": []}
+{"ts": "2026-10-15T08:45:31.668189+00:00", "type": "phase_started", "summary": "Claim TDD in parallel Server/UI surfaces under immutable BDD", "ids": []}
+{"ts": "2026-10-15T08:45:31.668189+00:00", "type": "command_ran", "summary": "Regression baseline: 16 existing profile tests pass", "ids": ["CMD-ROOT-PROFILE-BASELINE"]}
+{"ts": "2026-10-15T08:45:31.668189+00:00", "type": "command_ran", "summary": "Regression baseline: 2 existing runner tests pass", "ids": ["CMD-ROOT-RUNNER-BASELINE"]}
+{"ts": "2026-10-15T08:45:31.668189+00:00", "type": "command_ran", "summary": "Regression baseline: platform boundary checks pass", "ids": ["CMD-ROOT-PLATFORM-BASELINE"]}
+{"ts": "2026-10-15T08:45:31.668189+00:00", "type": "command_ran", "summary": "Environment failure: sandbox temp PermissionError; not behavior RED", "ids": ["CMD-ROOT-SCHEMA-ENV"]}
+{"ts": "2026-10-15T08:45:31.668189+00:00", "type": "command_ran", "summary": "Cross-language same-object proof: 5 tests consume actual Rust DDL and Python store; temporary SQLite/files cleaned", "ids": ["CMD-ROOT-SCHEMA-GREEN"]}
+{"ts": "2026-10-15T09:44:25.877567+00:00", "type": "authority_locked", "summary": "User assigned expensive/final packaging verification to themselves; continue implementation and focused checks; no full packaging or live posting.", "ids": []}
+{"ts": "2026-10-15T10:06:39.606496+00:00", "type": "phase_started", "summary": "Surrogate challenge: local positive checks do not close all compiled proof objects.", "ids": []}
+{"ts": "2026-10-15T10:06:39.606496+00:00", "type": "evidence_added", "summary": "Recorded exact implementation delta and qualified local test limits.", "ids": ["EV-LOCAL-CHECKS"]}
+{"ts": "2026-10-15T10:06:39.606496+00:00", "type": "evidence_added", "summary": "Recorded remaining component/runtime/boundary proof obligations without closing surrogates.", "ids": ["EV-LOCAL-PROOF-GAP"]}
+{"ts": "2026-10-15T10:06:39.606496+00:00", "type": "claim_blocked", "summary": "Compiled claims remain unclosed until compatible same-object evidence is available.", "ids": ["IC-001", "IC-002", "IC-003", "IC-004", "IC-005", "IC-006", "IC-007", "IC-008", "IC-009", "IC-010", "IC-011", "IC-012", "IC-013", "IC-014", "IC-015", "IC-016", "IC-017", "IC-018", "IC-019"]}
+{"ts": "2026-10-15T10:08:00.088863+00:00", "type": "terminal_declared", "summary": "BUDGET_GUARD: implementation and focused checks delivered, full proof closure not claimed. User owns final packaging/expensive verification; no live posting performed.", "ids": ["BG-LOCAL-PROOF"]}

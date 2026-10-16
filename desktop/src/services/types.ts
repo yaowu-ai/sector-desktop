@@ -8,6 +8,7 @@ export type PlatformCapabilityStatus = CapabilityStatus
 export type RunStatus =
   | 'idle'
   | 'starting'
+  | 'stopping'
   | 'running'
   | 'pause_pending'
   | 'intervention_required'
@@ -988,12 +989,31 @@ export interface ScriptRunResult {
 }
 
 export interface ProcessStartResult {
+  batchId?: string
   processId?: number
   command: string[]
   status: RunStatus
   taskType: string
   accountId?: string
 }
+
+export type PublishMode = 'single' | 'selected' | 'all'
+export interface PublishVideoSelection { path: string; fileName: string; sizeBytes: string; modifiedNs: string }
+export interface PublishRequest {
+  requestId: string; platform: 'tiktok'; mode: PublishMode; accountIds: string[]; videoPath: string; caption: string
+}
+export type PublishStatus = 'queued' | 'running' | 'intervention_required' | 'committing' | 'verifying' | 'verified' | 'pending_confirmation' | 'failed' | 'skipped' | 'cancelled'
+export interface PublishRecord {
+  id: string; batchId: string; accountId: string; platform: Platform; provider: BrowserProviderId;
+  videoPath: string; caption: string; createdAt: string; updatedAt: string;
+  status: PublishStatus; phase: string; ordinal: number; submittedAt?: string | null;
+  handle?: string | null; postId?: string | null; postUrl?: string | null;
+  errorCode?: string | null; errorDetail?: string | null; evidenceJson?: string | null; verifiedAt?: string | null;
+}
+export interface PublishRecordFilter {
+  platform: 'tiktok'; accountId?: string; status?: PublishStatus; from?: string; to?: string; page: number; pageSize: number
+}
+export interface PublishRecordPage { items: PublishRecord[]; total: number; page: number; pageSize: number }
 
 export interface ProcessLogChunk {
   offset: number
