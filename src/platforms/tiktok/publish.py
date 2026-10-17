@@ -273,17 +273,38 @@ def open_upload_page(page):
 
 
 def upload_video(page, source, alive):
-    inputs = page.locator('input[type="file"]')
-    candidates = [node for node in inputs.all() if any(
-        kind in (node.get_attribute('accept') or '').lower() for kind in ('video','mp4','mov','webm'))]
-    if len(candidates) == 1:
-        candidates[0].set_input_files(source,timeout=30000)
-    elif not candidates:
-        with page.expect_file_chooser(timeout=30000) as chooser:
-            unique_visible(page.get_by_role('button',name='Select video',exact=True),'Select video').click(timeout=30000)
-        chooser.value.set_files(source,timeout=30000)
-    else:
-        raise PublishError('unsupported_page','视频上传控件不唯一')
+    # DOMContentLoaded may precede Studio's client-rendered upload controls.
+    ready_deadline = time.monotonic()+60
+    while True:
+        alive()
+        inputs = page.locator('input[type="file"]').all()
+        candidates = [node for node in inputs if any(
+            kind in (node.get_attribute('accept') or '').lower()
+            for kind in ('video','mp4','mov','webm'))]
+        if not candidates and len(inputs) == 1:
+            accept = (inputs[0].get_attribute('accept') or '').strip().lower()
+            if accept in ('', '*', '*/*'):
+                candidates = inputs
+        if len(candidates) == 1:
+            candidates[0].set_input_files(source,timeout=30000)
+            break
+        if len(candidates) > 1:
+            raise PublishError('unsupported_page','视频上传控件不唯一')
+        selector = page.get_by_role('button',name=re.compile(r'^Select\s+video$', re.I))
+        buttons = [node for node in selector.all() if node.is_visible()]
+        if not buttons:
+            selector = page.get_by_text('Select video',exact=True)
+            buttons = [node for node in selector.all() if node.is_visible()]
+        if len(buttons) == 1 and buttons[0].is_enabled():
+            with page.expect_file_chooser(timeout=30000) as chooser:
+                buttons[0].click(timeout=30000)
+            chooser.value.set_files(source,timeout=30000)
+            break
+        if len(buttons) > 1:
+            raise PublishError('unsupported_page','Select video上传入口不唯一')
+        if time.monotonic() >= ready_deadline:
+            raise PublishError('upload_control_timeout','等待视频上传控件就绪超时')
+        page.wait_for_timeout(250)
     deadline = time.monotonic()+UPLOAD_TIMEOUT
     while time.monotonic()<deadline:
         alive()
