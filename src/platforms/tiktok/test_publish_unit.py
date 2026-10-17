@@ -329,11 +329,85 @@ class PublishSafetyTests(unittest.TestCase):
             uploaded.is_visible.return_value=False
             page.get_by_text.side_effect=lambda expression: type('Nodes',(),{'all':lambda self: [error] if 'upload failed' in expression.pattern else [uploaded]})()
             with patch('platforms.tiktok.publish.handle_known_upload_prompts'), \
-                 patch('platforms.tiktok.publish.time.monotonic',side_effect=[0,0,2000]):
+                 patch('platforms.tiktok.publish.time.monotonic',side_effect=[0,0,0,2000]):
                 with self.assertRaises(PublishError) as caught:
                     upload_video(page,'video.mp4',lambda:None)
             self.assertEqual(caught.exception.code,'upload_failed' if fail else 'upload_timeout')
             file_input.set_input_files.assert_called_once()
+
+    def test_upload_waits_for_delayed_hidden_file_input(self):
+        page = MagicMock()
+        node = MagicMock()
+        node.get_attribute.return_value = 'video/*'
+        page.locator.return_value.all.side_effect = [[], [node]]
+        page.get_by_role.return_value.all.return_value = []
+        page.get_by_text.side_effect = lambda expression, **kwargs: type('Nodes', (), {
+            'all': lambda self: [] if isinstance(expression, str) or 'upload failed' in expression.pattern
+            else [type('Uploaded', (), {'is_visible': lambda self: True})()]})()
+        with patch('platforms.tiktok.publish.handle_known_upload_prompts'):
+            upload_video(page, 'video.mp4', lambda: None)
+        node.set_input_files.assert_called_once_with('video.mp4', timeout=30000)
+        page.wait_for_timeout.assert_called_once_with(250)
+        page.expect_file_chooser.assert_not_called()
+
+    def test_upload_accepts_single_untyped_input(self):
+        page = MagicMock()
+        node = MagicMock()
+        node.get_attribute.return_value = None
+        page.locator.return_value.all.return_value = [node]
+        page.get_by_role.return_value.all.return_value = []
+        page.get_by_text.side_effect = lambda expression, **kwargs: type('Nodes', (), {
+            'all': lambda self: [] if isinstance(expression, str) or 'upload failed' in expression.pattern
+            else [type('Uploaded', (), {'is_visible': lambda self: True})()]})()
+        with patch('platforms.tiktok.publish.handle_known_upload_prompts'):
+            upload_video(page, 'video.mp4', lambda: None)
+        node.set_input_files.assert_called_once_with('video.mp4', timeout=30000)
+        page.expect_file_chooser.assert_not_called()
+
+    def test_upload_control_timeout_does_not_select_file(self):
+        page = MagicMock()
+        page.locator.return_value.all.return_value = []
+        page.get_by_role.return_value.all.return_value = []
+        page.get_by_text.return_value.all.return_value = []
+        with patch('platforms.tiktok.publish.time.monotonic', side_effect=[0, 61]):
+            with self.assertRaises(PublishError) as caught:
+                upload_video(page, 'video.mp4', lambda: None)
+        self.assertEqual(caught.exception.code, 'upload_control_timeout')
+        page.expect_file_chooser.assert_not_called()
+
+    def test_upload_does_not_choose_between_two_video_inputs(self):
+        page = MagicMock()
+        nodes = [MagicMock(), MagicMock()]
+        for node in nodes:
+            node.get_attribute.return_value = 'video/*'
+        page.locator.return_value.all.return_value = nodes
+        with self.assertRaises(PublishError) as caught:
+            upload_video(page, 'video.mp4', lambda: None)
+        self.assertEqual(caught.exception.code, 'unsupported_page')
+        for node in nodes:
+            node.set_input_files.assert_not_called()
+
+    def test_upload_uses_text_file_chooser_when_button_role_is_absent(self):
+        page = MagicMock()
+        page.locator.return_value.all.return_value = []
+        page.get_by_role.return_value.all.return_value = []
+        entry = MagicMock()
+        entry.is_visible.return_value = True
+        entry.is_enabled.return_value = True
+        uploaded = MagicMock()
+        uploaded.is_visible.return_value = True
+        def text_nodes(expression, **kwargs):
+            collection = MagicMock()
+            collection.all.return_value = ([entry] if isinstance(expression, str)
+                                           else [] if 'upload failed' in expression.pattern
+                                           else [uploaded])
+            return collection
+        page.get_by_text.side_effect = text_nodes
+        with patch('platforms.tiktok.publish.handle_known_upload_prompts'):
+            upload_video(page, 'video.mp4', lambda: None)
+        entry.click.assert_called_once_with(timeout=30000)
+        page.expect_file_chooser.return_value.__enter__.return_value.value.set_files.assert_called_once_with(
+            'video.mp4', timeout=30000)
 
 
 if __name__ == '__main__':
