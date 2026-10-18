@@ -2,6 +2,9 @@
 import json
 import re
 import time
+import sys
+import traceback
+from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -272,6 +275,24 @@ def open_upload_page(page):
     raise PublishError('unsupported_page','Upload未进入TikTok Studio上传页')
 
 
+@contextmanager
+def file_selection_step(operation, label):
+    print(f'[publish-upload] {operation} start: {label}', flush=True)
+    try:
+        yield
+    except PublishError:
+        # A nested click failure must not be reclassified as a chooser timeout.
+        raise
+    except Exception as exc:
+        from core.runtime import redact_runtime_text
+        detail = redact_runtime_text(str(exc))
+        print(f'[publish-upload] {operation} failed: {label}', flush=True)
+        print(redact_runtime_text(traceback.format_exc()), file=sys.stderr, flush=True)
+        raise PublishError(operation + '_failed', f'{label}失败：{detail}') from exc
+    else:
+        print(f'[publish-upload] {operation} complete: {label}', flush=True)
+
+
 def upload_video(page, source, alive):
     # DOMContentLoaded may precede Studio's client-rendered upload controls.
     ready_deadline = time.monotonic()+60
@@ -286,7 +307,8 @@ def upload_video(page, source, alive):
             if accept in ('', '*', '*/*'):
                 candidates = inputs
         if len(candidates) == 1:
-            candidates[0].set_input_files(source,timeout=30000)
+            with file_selection_step('file_input_set', '向网页文件控件传入视频'):
+                candidates[0].set_input_files(source,timeout=30000)
             break
         if len(candidates) > 1:
             raise PublishError('unsupported_page','视频上传控件不唯一')
@@ -296,9 +318,13 @@ def upload_video(page, source, alive):
             selector = page.get_by_text('Select video',exact=True)
             buttons = [node for node in selector.all() if node.is_visible()]
         if len(buttons) == 1 and buttons[0].is_enabled():
-            with page.expect_file_chooser(timeout=30000) as chooser:
-                buttons[0].click(timeout=30000)
-            chooser.value.set_files(source,timeout=30000)
+            with file_selection_step('file_chooser_wait', '等待浏览器文件选择事件'):
+                with page.expect_file_chooser(timeout=30000) as chooser:
+                    with file_selection_step('select_video_click', '点击Select video'):
+                        buttons[0].click(timeout=30000)
+                selected = chooser.value
+            with file_selection_step('file_chooser_set', '向文件选择事件传入视频'):
+                selected.set_files(source,timeout=30000)
             break
         if len(buttons) > 1:
             raise PublishError('unsupported_page','Select video上传入口不唯一')

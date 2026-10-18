@@ -1,5 +1,7 @@
 """Local publishing safety tests; browser fixtures do not prove TikTok acceptance."""
 import json
+import contextlib
+import io
 import sqlite3
 import tempfile
 import unittest
@@ -408,6 +410,38 @@ class PublishSafetyTests(unittest.TestCase):
         entry.click.assert_called_once_with(timeout=30000)
         page.expect_file_chooser.return_value.__enter__.return_value.value.set_files.assert_called_once_with(
             'video.mp4', timeout=30000)
+
+    def test_file_selection_errors_identify_exact_operation_without_retry(self):
+        for operation in ('file_input_set', 'select_video_click', 'file_chooser_wait', 'file_chooser_set'):
+            with self.subTest(operation=operation):
+                page = MagicMock()
+                node = MagicMock()
+                node.get_attribute.return_value = 'video/*'
+                node.is_visible.return_value = True
+                node.is_enabled.return_value = True
+                page.locator.return_value.all.return_value = [node] if operation == 'file_input_set' else []
+                page.get_by_role.return_value.all.return_value = [node]
+                chooser = page.expect_file_chooser.return_value
+                if operation == 'file_input_set':
+                    node.set_input_files.side_effect = TimeoutError('Timeout 30000ms exceeded. Call log: input upload')
+                elif operation == 'select_video_click':
+                    node.click.side_effect = TimeoutError('Timeout 30000ms exceeded. Call log: click')
+                elif operation == 'file_chooser_wait':
+                    chooser.__exit__.side_effect = TimeoutError('Timeout 30000ms exceeded. Call log: filechooser')
+                else:
+                    chooser.__enter__.return_value.value.set_files.side_effect = TimeoutError('Timeout 30000ms exceeded. Call log: set files')
+                stdout, stderr = io.StringIO(), io.StringIO()
+                with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                    with self.assertRaises(PublishError) as caught:
+                        upload_video(page, 'private-video.mp4', lambda: None)
+                self.assertEqual(caught.exception.code, operation + '_failed')
+                self.assertIn(operation, stdout.getvalue())
+                self.assertIn('Call log:', str(caught.exception))
+                self.assertIn('Traceback', stderr.getvalue())
+                self.assertIn('Call log:', stderr.getvalue())
+                self.assertNotIn('private-video.mp4', stdout.getvalue())
+                self.assertLessEqual(node.click.call_count, 1)
+                self.assertLessEqual(node.set_input_files.call_count, 1)
 
 
 if __name__ == '__main__':
