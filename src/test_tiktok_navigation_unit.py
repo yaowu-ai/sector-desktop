@@ -51,6 +51,8 @@ class TikTokNavigationTests(unittest.TestCase):
 
         navigate_tiktok_page(page, wait_for_domcontentloaded=True)
 
+        page.goto.assert_called_once_with(
+            'https://www.tiktok.com/foryou', timeout=30000, wait_until='domcontentloaded')
         page.wait_for_load_state.assert_called_once_with(
             "domcontentloaded",
             timeout=30000,

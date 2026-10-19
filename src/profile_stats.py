@@ -14,6 +14,16 @@ from profile_activity import read_activity
 
 
 DEFAULT_TIMEOUT = 30
+
+
+class ProfileIdentityMismatch(RuntimeError):
+    """Observed account or profile differs from the expected identity."""
+
+
+class ProfileIdentityUnavailable(RuntimeError):
+    """Account navigation could not be read; this does not prove a mismatch."""
+
+
 COUNT = r"(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?\s*[KMB万亿]?"
 STATS = re.compile(
     rf"^\s*(?P<following>{COUNT})\s+Following\s+"
@@ -107,11 +117,27 @@ def logged_in_handle(page, timeout):
                 if handle:
                     handles.add(handle)
         if len(handles) > 1:
-            raise RuntimeError("发现多个不同的个人资料入口，无法确定当前登录账号")
+            raise ProfileIdentityMismatch("发现多个不同的个人资料入口，无法确定当前登录账号")
         if handles:
             return handles.pop()
         page.wait_for_timeout(250)
-    raise RuntimeError("未识别到当前登录账号：请先登录 TikTok，并确认个人资料入口可见")
+    raise ProfileIdentityUnavailable("未识别到当前登录账号：请先登录 TikTok，并确认个人资料入口可见")
+
+
+def assert_own_profile_identity(page, handle, timeout):
+    if profile_handle(page.url) != handle:
+        raise ProfileIdentityMismatch("读取期间主页地址发生变化")
+    try:
+        actual = logged_in_handle(page, timeout)
+    except ProfileIdentityUnavailable:
+        # The own-profile Edit profile control is also owner-only evidence.
+        # A profile URL, display name or public Follow button alone is not.
+        edit = page.get_by_role('button', name='Edit profile', exact=True)
+        if any(node.is_visible() for node in edit.all()) and profile_handle(page.url) == handle:
+            return
+        raise
+    if actual != handle:
+        raise ProfileIdentityMismatch("读取期间登录账号发生变化")
 
 
 class LikedPages:
@@ -203,7 +229,7 @@ def open_current_account_profile(browser, timeout=DEFAULT_TIMEOUT, expected_hand
         except Exception:
             continue  # Closed, loading, or denied tabs have no usable login hint.
     if len(handles) > 1:
-        raise RuntimeError("已有 TikTok 标签页显示不同登录账号，请关闭过期标签后重试")
+        raise ProfileIdentityMismatch("已有 TikTok 标签页显示不同登录账号，请关闭过期标签后重试")
     handle = next(iter(handles), None) or expected_handle
     page = context.new_page()
     try:
@@ -214,12 +240,10 @@ def open_current_account_profile(browser, timeout=DEFAULT_TIMEOUT, expected_hand
         page.goto(f"https://www.tiktok.com/@{handle}?lang=en-GB",
                   wait_until="domcontentloaded", timeout=timeout * 1000)
         if expected_handle is not None and handle != expected_handle.lower():
-            raise RuntimeError("当前登录账号发生变化")
-        if profile_handle(page.url) != handle or logged_in_handle(page, timeout) != handle:
-            raise RuntimeError("读取期间登录账号或主页地址发生变化，请重试")
+            raise ProfileIdentityMismatch("当前登录账号发生变化")
+        assert_own_profile_identity(page, handle, timeout)
         yield page, handle
-        if profile_handle(page.url) != handle or logged_in_handle(page, timeout) != handle:
-            raise RuntimeError("读取期间登录账号或主页地址发生变化，请重试")
+        assert_own_profile_identity(page, handle, timeout)
     finally:
         page.close()
 

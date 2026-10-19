@@ -116,6 +116,66 @@ class PublishSafetyTests(unittest.TestCase):
         self.assertEqual(result['status'],'pending_confirmation')
         self.assertEqual(result['error_code'],'identity_mismatch')
 
+    def test_profile_read_failure_preserves_original_reason(self):
+        from platforms.tiktok.publish import profile_observation
+        from profile_stats import ProfileIdentityMismatch
+        for failure, code in ((TimeoutError('Profile link timeout'), 'profile_read_failed'),
+                              (ProfileIdentityMismatch('observed bob, expected alice'), 'identity_mismatch')):
+            with self.subTest(code=code), patch('platforms.tiktok.publish.open_current_account_profile') as own:
+                own.return_value.__enter__.side_effect = failure
+                with self.assertRaises(PublishError) as caught:
+                    profile_observation(MagicMock(), 'alice')
+                self.assertEqual(caught.exception.code, code)
+                self.assertIn(str(failure), str(caught.exception))
+
+    def test_temporary_profile_read_failure_is_retried_without_republishing(self):
+        record = {'handle':'alice', 'post_id':'101', 'caption':'sea'}
+        with patch('platforms.tiktok.publish.profile_observation', side_effect=[
+                PublishError('profile_read_failed', 'navigation timeout'),
+                {'ids':['101'], 'urls':{'101':'https://www.tiktok.com/@alice/video/101'}}]) as observation, \
+             patch('platforms.tiktok.publish.read_video_detail', return_value=('alice', 'sea')), \
+             patch('platforms.tiktok.publish.open_current_account_profile') as own, \
+             patch('platforms.tiktok.publish.time.sleep'), \
+             patch('platforms.tiktok.publish.upload_video') as upload:
+            own.return_value.__enter__.return_value = (MagicMock(), 'alice')
+            result = verify_published_video(MagicMock(), record)
+        self.assertEqual(result['status'], 'verified')
+        self.assertEqual(observation.call_count, 2)
+        upload.assert_not_called()
+
+    def test_missing_post_id_reports_correlation_gap(self):
+        with patch('platforms.tiktok.publish.profile_observation', return_value={'ids':['101'], 'urls':{}}):
+            result = verify_published_video(MagicMock(), {'handle':'alice', 'post_id':None}, timeout=0)
+        self.assertEqual(result['status'], 'pending_confirmation')
+        self.assertEqual(result['error_code'], 'post_id_unavailable')
+
+    def test_publication_auth_failure_distinguishes_load_failure_from_logout(self):
+        from auth_adapters import AuthResult, LoginState
+        from platforms.tiktok.runner import run_tiktok_publication_session
+        cases = [(LoginState.UNKNOWN, 'AUTH_TIKTOK_LOAD_FAILED', 'failed', 'page_load_failed'),
+                 (LoginState.UNKNOWN, None, 'failed', 'auth_state_unknown'),
+                 (LoginState.LOGGED_OUT, None, 'skipped', 'auth_required')]
+        for state, auth_code, status, error_code in cases:
+            with self.subTest(state=state, auth_code=auth_code), contextlib.ExitStack() as stack:
+                self.conn.execute("UPDATE publish_records SET status='queued', error_code=NULL WHERE id='R1'")
+                provider = MagicMock()
+                provider.name = 'bitbrowser'
+                stack.enter_context(patch.dict('os.environ', {'AM_PUBLISH_BATCH_ID':'B1', 'AM_PUBLISH_RECORD_ID':'R1'}))
+                stack.enter_context(patch('platforms.tiktok.runner.provider_for_account', return_value=provider))
+                stack.enter_context(patch('platforms.tiktok.runner.bitbrowser_profile_id', return_value=''))
+                stack.enter_context(patch('platforms.tiktok.runner.emit_browser_preview'))
+                stack.enter_context(patch('platforms.tiktok.runner.test_cdp_endpoint'))
+                stack.enter_context(patch('platforms.tiktok.runner.start_sync_playwright', return_value=(MagicMock(), MagicMock())))
+                stack.enter_context(patch('platforms.tiktok.runner.choose_tiktok_page', return_value=MagicMock()))
+                stack.enter_context(patch('platforms.tiktok.runner.ensure_tiktok_authenticated', return_value=AuthResult(
+                    platform='tiktok', state=state, detail='auth observation', error_code=auth_code)))
+                publish = stack.enter_context(patch('platforms.tiktok.publish.run_tiktok_publish'))
+                run_tiktok_publication_session({'id':'tiktok_1', 'platform':'tiktok'}, {}, self.conn, 'publish')
+                row = self.store.record('R1')
+                self.assertEqual(row['status'], status)
+                self.assertEqual(row['error_code'], error_code)
+                publish.assert_not_called()
+
     def test_terminal_verified_cannot_regress(self):
         self.store.claim('R1')
         self.store.transition('R1',('running',),'committing','submitting')
@@ -289,6 +349,7 @@ class PublishSafetyTests(unittest.TestCase):
         from platforms.tiktok.publish import profile_observation
         page = MagicMock()
         page.get_by_role.return_value.count.return_value = 0
+        page.get_by_role.return_value.all.return_value = [MagicMock()]
         page.locator.return_value.first.wait_for.side_effect = TimeoutError('no videos')
         page.locator.return_value.all.return_value = []
         empty = MagicMock()
@@ -306,6 +367,23 @@ class PublishSafetyTests(unittest.TestCase):
             result = profile_observation(MagicMock(), 'alice')
         self.assertEqual(result['ids'], [])
         self.assertEqual(result['handle'], 'alice')
+
+    def test_profile_verification_selects_videos_and_latest_without_tab_roles(self):
+        from platforms.tiktok.publish import profile_observation
+        page = MagicMock()
+        page.get_by_role.return_value.all.return_value = []
+        videos, latest = MagicMock(), MagicMock()
+        page.get_by_text.side_effect = lambda text, exact: type('Nodes', (), {
+            'all': lambda self: [videos if text == 'Videos' else latest]})()
+        link = MagicMock()
+        link.get_attribute.return_value = '/@alice/video/101'
+        page.locator.return_value.all.return_value = [link]
+        with patch('platforms.tiktok.publish.open_current_account_profile') as own:
+            own.return_value.__enter__.return_value = (page, 'alice')
+            result = profile_observation(MagicMock(), 'alice')
+        videos.click.assert_called_once_with(timeout=5000)
+        latest.click.assert_called_once_with(timeout=5000)
+        self.assertEqual(result['urls'], {'101':'https://www.tiktok.com/@alice/video/101'})
 
     def test_unknown_task_never_becomes_fyp(self):
         from platforms.tiktok.runner import requested_tiktok_task
@@ -358,7 +436,7 @@ class PublishSafetyTests(unittest.TestCase):
                 else:
                     control.click.assert_not_called()
                 if checked is None:
-                    control.set_checked.assert_called_once_with(False, timeout=5000)
+                    control.set_checked.assert_called_once_with(False, force=True, timeout=5000)
                 else:
                     control.set_checked.assert_not_called()
                     control.locator.return_value.wait_for.assert_called_once_with(state='attached', timeout=5000)
@@ -377,6 +455,22 @@ class PublishSafetyTests(unittest.TestCase):
         with self.assertRaises(TimeoutError):
             disable_content_check_lite(page)
         control.click.assert_called_once()
+
+    def test_content_check_lite_native_state_failure_propagates(self):
+        from platforms.tiktok.publish import disable_content_check_lite
+        page = MagicMock()
+        label = MagicMock()
+        label.is_visible.return_value = True
+        page.get_by_text.return_value.all.return_value = [label]
+        control = MagicMock()
+        control.is_visible.return_value = True
+        control.get_attribute.return_value = None
+        control.set_checked.side_effect = RuntimeError('checkbox state did not change')
+        label.locator.return_value.locator.return_value.all.return_value = [control]
+        with self.assertRaisesRegex(RuntimeError, 'checkbox state did not change'):
+            disable_content_check_lite(page)
+        control.set_checked.assert_called_once_with(False, force=True, timeout=5000)
+        control.click.assert_not_called()
 
     def test_processing_waits_until_post_enabled(self):
         page = MagicMock()

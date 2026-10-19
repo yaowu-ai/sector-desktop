@@ -46,6 +46,7 @@ def navigate_tiktok_page(
             page.goto(
                 TIKTOK_FORYOU_URL,
                 timeout=TIKTOK_NAVIGATION_TIMEOUT_MS,
+                wait_until='domcontentloaded' if wait_for_domcontentloaded else 'load',
             )
             if wait_for_domcontentloaded:
                 page.wait_for_load_state(

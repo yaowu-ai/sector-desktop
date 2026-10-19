@@ -12,6 +12,30 @@ from profile_stats import (
 
 
 class ProfileStatsTests(unittest.TestCase):
+    def test_owner_control_confirms_profile_when_navigation_missing(self):
+        from profile_stats import assert_own_profile_identity, ProfileIdentityUnavailable
+        page = MagicMock(url='https://www.tiktok.com/@alice')
+        page.get_by_role.return_value.all.return_value = [MagicMock()]
+        with patch('profile_stats.logged_in_handle', side_effect=ProfileIdentityUnavailable('no Profile nav')):
+            assert_own_profile_identity(page, 'alice', 1)
+        page.get_by_role.assert_called_once_with('button', name='Edit profile', exact=True)
+
+    def test_public_profile_without_owner_control_is_not_login_evidence(self):
+        from profile_stats import assert_own_profile_identity, ProfileIdentityUnavailable
+        page = MagicMock(url='https://www.tiktok.com/@alice')
+        page.get_by_role.return_value.all.return_value = []
+        with patch('profile_stats.logged_in_handle', side_effect=ProfileIdentityUnavailable('no Profile nav')):
+            with self.assertRaises(ProfileIdentityUnavailable):
+                assert_own_profile_identity(page, 'alice', 1)
+
+    def test_owner_control_does_not_override_observed_other_account(self):
+        from profile_stats import assert_own_profile_identity, ProfileIdentityMismatch
+        page = MagicMock(url='https://www.tiktok.com/@alice')
+        with patch('profile_stats.logged_in_handle', return_value='bob'):
+            with self.assertRaises(ProfileIdentityMismatch):
+                assert_own_profile_identity(page, 'alice', 1)
+        page.get_by_role.assert_not_called()
+
     def test_existing_login_avoids_denied_homepage(self):
         context = MagicMock()
         browser = MagicMock(contexts=[context])

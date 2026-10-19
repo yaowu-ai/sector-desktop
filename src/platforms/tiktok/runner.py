@@ -434,10 +434,13 @@ def run_tiktok_publication_session(account, config, conn, task_type):
                                             publish_store=store if not verify_only else None,
                                             publish_record_id=record_id)
         if auth.state != LoginState.LOGGED_IN:
-            if not verify_only:
-                current = store.record(record_id)
-                store.transition(record_id,(current['status'],),'skipped','finished',
-                                 error_code='auth_required',error_detail=redact_runtime_text(auth.summary()))
+            current = store.record(record_id)
+            unknown = auth.state == LoginState.UNKNOWN
+            error_code = ('page_load_failed' if auth.error_code == 'AUTH_TIKTOK_LOAD_FAILED'
+                          else 'auth_state_unknown') if unknown else 'auth_required'
+            target = 'pending_confirmation' if verify_only else ('failed' if unknown else 'skipped')
+            store.transition(record_id,(current['status'],),target,'finished',
+                             error_code=error_code,error_detail=redact_runtime_text(auth.summary()))
         else:
             run_tiktok_publish(page,browser,store,record_id,verify_only=verify_only)
     except Exception as exc:

@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from profile_stats import logged_in_handle, open_current_account_profile
+from profile_stats import logged_in_handle, open_current_account_profile, ProfileIdentityMismatch
 from platforms.tiktok.publish_store import utc_now
 
 UPLOAD_TIMEOUT = 20 * 60
@@ -96,8 +96,15 @@ def profile_observation(browser, expected_handle=None):
     try:
         with open_current_account_profile(browser,30,expected_handle) as (page, handle):
             tabs = page.get_by_role('tab',name='Videos',exact=True)
-            if tabs.count():
-                unique_visible(tabs,'Videos').click(timeout=5000)
+            if not any(node.is_visible() for node in tabs.all()):
+                tabs = page.get_by_text('Videos', exact=True)
+            unique_visible(tabs,'Videos').click(timeout=5000)
+            # The profile can retain Popular/Oldest from an earlier visit.
+            latest = page.get_by_role('button', name='Latest', exact=True)
+            if not any(node.is_visible() for node in latest.all()):
+                latest = page.get_by_text('Latest', exact=True)
+            if any(node.is_visible() for node in latest.all()):
+                unique_visible(latest, 'Latest').click(timeout=5000)
             # An empty profile is accepted only with a visible explicit empty state.
             links = page.locator('a[href*="/video/"]')
             try:
@@ -121,7 +128,10 @@ def profile_observation(browser, expected_handle=None):
     except PublishError:
         raise
     except Exception as exc:
-        raise PublishError('identity_mismatch','本人主页账号不一致或无法确认') from exc
+        from core.runtime import redact_runtime_text
+        code = 'identity_mismatch' if isinstance(exc, ProfileIdentityMismatch) else 'profile_read_failed'
+        raise PublishError(code, '本人主页核验失败：' + redact_runtime_text(
+            type(exc).__name__ + ': ' + str(exc))) from exc
 
 
 def read_video_detail(browser, url, expected_handle, caption):
@@ -176,6 +186,9 @@ def verify_published_video(browser, record, timeout=VERIFY_TIMEOUT):
             observation = profile_observation(browser,record.get('handle'))
             evidence['candidate_ids'] = observation['ids'][:30]
             post_id = record.get('post_id')
+            if not post_id:
+                code = 'post_id_unavailable'
+                error = '本人主页已读取，但未获取本次提交的作品ID，不能仅凭相同文案确认成功'
             baseline = json.loads(record.get('baseline_json') or '{}')
             evidence['baseline_complete'] = bool(baseline.get('complete'))
             if post_id and post_id not in baseline.get('ids',[]) and post_id in observation['urls']:
@@ -190,8 +203,10 @@ def verify_published_video(browser, record, timeout=VERIFY_TIMEOUT):
                     return {'status':'verified','post_url':url,'verified_at':utc_now(),
                             'error_code':None,'error_detail':None,'evidence_json':json.dumps(evidence,ensure_ascii=False)}
         except Exception as exc:
+            from core.runtime import redact_runtime_text
             code = getattr(exc,'code','verification_unavailable')
-            error = str(exc)
+            error = redact_runtime_text(str(exc))
+            print('[publish-verify] ' + code + ': ' + error, flush=True)
             if code == 'identity_mismatch':
                 break
         if time.monotonic() >= deadline:
@@ -601,8 +616,9 @@ def disable_content_check_lite(page):
             control.click(timeout=5000)
         control.locator('xpath=self::*[@aria-checked="false"]').wait_for(state='attached', timeout=5000)
     else:
-        # Native checkbox: set the desired state rather than toggling blindly.
-        control.set_checked(False, timeout=5000)
+        # Studio overlays the native input with its own thumb. Skip pointer
+        # interception checks; set_checked still verifies the resulting state.
+        control.set_checked(False, force=True, timeout=5000)
     print('[publish-upload] content_check_lite: 已关闭', flush=True)
 
 
