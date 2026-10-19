@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { PlatformProvider } from './PlatformContext'
 import { DesktopAuthGate, DesktopAuthProvider } from './DesktopAuthContext'
 import { DesktopNotificationsProvider } from './DesktopNotificationsContext'
+import { DesktopAccountStatsReporter } from './DesktopAccountStatsReporter'
 import { AppShell } from '../components/AppShell'
 
 type ThemeMode = 'light' | 'dark'
@@ -50,6 +51,7 @@ export function App() {
       <AntdApp>
         <DesktopAuthProvider>
           <DesktopAuthGate>
+            <DesktopAccountStatsReporter />
             <PlatformProvider>
               <DesktopNotificationsProvider>
                 <AppShell themeMode={themeMode} onThemeModeChange={setThemeMode} />

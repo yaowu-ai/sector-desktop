@@ -448,6 +448,16 @@ export interface ProfileStatsSummary {
   totalLiked: number
 }
 
+export interface AccountCoverage {
+  accountCount: number
+  successCount: number
+  commentEvidenceCount: number
+  followingCount: number
+  followersCount: number
+  likedCount: number
+  likesCount: number
+}
+
 export interface ResetTargetWatermarkRequest {
   accountId?: string
   handle?: string

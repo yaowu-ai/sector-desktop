@@ -1,4 +1,14 @@
-import type { AiCommentGenerationResult, AiCommentSettings, Platform } from './types'
+import type { AccountCoverage, AiCommentGenerationResult, AiCommentSettings, Platform } from './types'
+
+export function reportDesktopAccountStats(params: {
+  session: DesktopSession; apiBaseUrl: string; metrics: AccountCoverage; observedAt: string
+}) {
+  return desktopApiRequest<{ recorded: boolean; metricDate: string }>(params.apiBaseUrl, '/account-stats/report', {
+    method: 'POST', token: params.session.accessToken,
+    body: { deviceFingerprint: getDeviceFingerprint(), observedAt: params.observedAt, metrics: params.metrics },
+    timeoutMs: 15_000,
+  })
+}
 
 const API_BASE_STORAGE_KEY = 'account-matrix-desktop-api-base-url'
 const SESSION_STORAGE_KEY = 'account-matrix-desktop-session'
@@ -575,12 +585,14 @@ async function desktopApiRequest<T>(
     method: 'GET' | 'POST'
     token?: string
     body?: unknown
+    timeoutMs?: number
   },
 ) {
   let response: Response
   try {
     response = await fetch(`${normalizeApiBaseUrl(apiBaseUrl)}${path}`, {
       method: options.method,
+      ...(options.timeoutMs ? { signal: AbortSignal.timeout(options.timeoutMs) } : {}),
       headers: {
         Accept: 'application/json',
         ...(options.body ? { 'Content-Type': 'application/json' } : {}),

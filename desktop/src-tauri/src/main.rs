@@ -98,6 +98,7 @@ fn main() {
             commands::stats::query_profile_stats_history,
             commands::stats::query_profile_stats_detail,
             commands::stats::query_profile_stats_summary,
+            commands::account_stats::query_account_coverage,
             commands::stats::query_fyp_stats,
             commands::stats::query_action_logs,
             commands::stats::query_fyp_video_views,

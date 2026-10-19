@@ -34,6 +34,7 @@ import { usePlatformContext } from "../../../app/PlatformContext";
 import { PageHeader } from "../../../components/PageHeader";
 import {
   getSqliteStatus,
+  queryAccountCoverage,
   loadConfig,
 } from "../../../services/api";
 import {
@@ -156,7 +157,7 @@ export function ProfileStatsPage() {
     setLoading(true);
     try {
       const queryFilter = toProfileStatsFilter(currentPlatform, sourceFilters);
-      const [config, sqlite, latest, history, nextSummary] = await Promise.all([
+      const [config, sqlite, latest, history, nextSummary, coverage] = await Promise.all([
         loadConfig(),
         getSqliteStatus(),
         queryProfileStatsLatest({ ...queryFilter, limit: 10000 }),
@@ -165,12 +166,13 @@ export function ProfileStatsPage() {
           limit: 500,
         }),
         queryProfileStatsSummary({ platform: currentPlatform }),
+        queryAccountCoverage(currentPlatform),
       ]);
       setAccounts(config.accounts);
       setSqliteStatus(sqlite);
       setLatestSnapshots(latest);
       setHistorySnapshots(history);
-      setSummary(nextSummary);
+      setSummary({ ...nextSummary, successCount: coverage.successCount });
     } catch (error) {
       message.error(formatError(error));
     } finally {
