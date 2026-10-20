@@ -60,6 +60,11 @@ class SafeTextStream:
 
 
 def install_safe_stdio():
+    # Frozen Windows runtimes may inherit a legacy code page for redirected
+    # pipes. The desktop reader consumes UTF-8, including diagnostic messages.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, 'reconfigure'):
+            stream.reconfigure(encoding='utf-8', errors='backslashreplace')
     sys.stdout = SafeTextStream(sys.stdout)
     sys.stderr = SafeTextStream(sys.stderr)
 

@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core'
 import type { PublishRequest, PublishVideoSelection, PublishRecordFilter, PublishRecordPage } from './types'
 
 import type {
+  AccountCoverage,
   AccountSummary,
   AppReleaseContext,
   ApiStatus,
@@ -237,6 +238,10 @@ export function queryActionLogs(filter: ActionLogFilter) {
 
 export function queryFypVideoViews(filter: FypVideoViewFilter) {
   return invoke<FypVideoViewRecord[]>('query_fyp_video_views', { filter })
+}
+
+export function queryAccountCoverage(platform = 'tiktok') {
+  return invoke<AccountCoverage>('query_account_coverage', { platform })
 }
 
 export function queryProfileStatsLatest(filter: ProfileStatsFilter = { platform: 'tiktok' }) {

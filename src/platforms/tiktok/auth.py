@@ -5,6 +5,7 @@ import re
 import os
 import time
 from typing import Any, Mapping
+from urllib.parse import urlsplit
 
 from auth_adapters import AuthResult, InterventionState, LoginState
 from platforms.tiktok.navigation import (
@@ -114,6 +115,16 @@ class TikTokAuthAdapter:
                 post_load_wait_seconds=TIKTOK_POST_LOAD_WAIT_SECONDS,
             )
         except Exception as exc:
+            # A navigation timeout does not prove the session is logged out.
+            # Only inspect a real TikTok page, never an unrelated/old origin.
+            if (any(kind.__name__ == 'TimeoutError' for kind in type(exc).__mro__)
+                    and urlsplit(getattr(page, 'url', '') or '').hostname in {'www.tiktok.com', 'tiktok.com'}):
+                try:
+                    observed = classify_tiktok_page(page, account_id=account_id)
+                    if observed.state != LoginState.UNKNOWN:
+                        return observed
+                except Exception:
+                    pass
             return AuthResult(
                 platform=self.platform,
                 account_id=account_id,

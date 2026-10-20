@@ -1404,6 +1404,8 @@ fn spawn_process_with_env_inner(
         .current_dir(&current_dir)
         .env("PYTHONUNBUFFERED", "1")
         .envs(env_vars.iter())
+        .env("PYTHONIOENCODING", "utf-8:backslashreplace")
+        .env("PYTHONUTF8", "1")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     hide_console_window(&mut command_builder);
@@ -1636,11 +1638,22 @@ where
     R: std::io::Read + Send + 'static,
 {
     thread::spawn(move || {
-        let reader = BufReader::new(reader);
-        for line in reader.lines() {
-            let Ok(line) = line else {
-                break;
-            };
+        let mut reader = BufReader::new(reader);
+        let mut bytes = Vec::new();
+        loop {
+            bytes.clear();
+            match reader.read_until(b'\n', &mut bytes) {
+                Ok(0) | Err(_) => break,
+                Ok(_) => {}
+            }
+            // A legacy/non-UTF-8 line must not discard every subsequent log.
+            if bytes.last() == Some(&b'\n') {
+                bytes.pop();
+                if bytes.last() == Some(&b'\r') {
+                    bytes.pop();
+                }
+            }
+            let line = String::from_utf8_lossy(&bytes);
             if let Ok(mut run) = run_state.lock() {
                 if stdout && apply_browser_preview_event(&mut run, &line) {
                     continue;
@@ -2501,6 +2514,34 @@ fn now() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn output_reader_continues_after_non_utf8_line() {
+        let run = Arc::new(Mutex::new(RunState::default()));
+        let bytes = b"AM_PUBLISH_EVENT start\n[publish-upload] \xca\xd3\xc6\xb5\nreceipt_probe complete\n";
+        spawn_output_reader(run.clone(), std::io::Cursor::new(bytes.to_vec()), true);
+        for _ in 0..100 {
+            if run.lock().unwrap().stdout.contains("receipt_probe complete") {
+                break;
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+        let output = run.lock().unwrap().stdout.clone();
+        assert!(output.contains("AM_PUBLISH_EVENT start"));
+        assert!(output.contains("[publish-upload]"));
+        assert!(output.contains("receipt_probe complete"), "reader stopped: {output}");
+    }
+
+    #[test]
+    fn output_reader_preserves_utf8_chinese_on_stderr() {
+        let run = Arc::new(Mutex::new(RunState::default()));
+        spawn_output_reader(run.clone(), std::io::Cursor::new("上传检查失败\r\ncomplete\n".as_bytes().to_vec()), false);
+        for _ in 0..100 {
+            if run.lock().unwrap().stderr.contains("complete") { break; }
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(run.lock().unwrap().stderr, "上传检查失败\ncomplete\n");
+    }
 
     #[test]
     fn publication_tasks_never_fall_back_to_warmup() {

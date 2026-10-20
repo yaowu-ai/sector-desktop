@@ -1,5 +1,7 @@
 """Local publishing safety tests; browser fixtures do not prove TikTok acceptance."""
 import json
+import contextlib
+import io
 import sqlite3
 import tempfile
 import unittest
@@ -33,6 +35,12 @@ class PublishSafetyTests(unittest.TestCase):
     def setUp(self):
         self.conn = fixture_db()
         self.store = PublishStore(self.conn)
+        # Other fixtures describe pages without a recovery prompt. Exercise the
+        # real recovery handler separately below, including its upload ordering.
+        if not self._testMethodName.startswith('test_unsaved_edit_'):
+            recovery = patch('platforms.tiktok.publish.discard_unsaved_edit')
+            recovery.start()
+            self.addCleanup(recovery.stop)
 
     def tearDown(self):
         self.conn.close()
@@ -107,6 +115,66 @@ class PublishSafetyTests(unittest.TestCase):
             result = verify_published_video(MagicMock(), {'handle':'alice','post_id':'101'}, timeout=0)
         self.assertEqual(result['status'],'pending_confirmation')
         self.assertEqual(result['error_code'],'identity_mismatch')
+
+    def test_profile_read_failure_preserves_original_reason(self):
+        from platforms.tiktok.publish import profile_observation
+        from profile_stats import ProfileIdentityMismatch
+        for failure, code in ((TimeoutError('Profile link timeout'), 'profile_read_failed'),
+                              (ProfileIdentityMismatch('observed bob, expected alice'), 'identity_mismatch')):
+            with self.subTest(code=code), patch('platforms.tiktok.publish.open_current_account_profile') as own:
+                own.return_value.__enter__.side_effect = failure
+                with self.assertRaises(PublishError) as caught:
+                    profile_observation(MagicMock(), 'alice')
+                self.assertEqual(caught.exception.code, code)
+                self.assertIn(str(failure), str(caught.exception))
+
+    def test_temporary_profile_read_failure_is_retried_without_republishing(self):
+        record = {'handle':'alice', 'post_id':'101', 'caption':'sea'}
+        with patch('platforms.tiktok.publish.profile_observation', side_effect=[
+                PublishError('profile_read_failed', 'navigation timeout'),
+                {'ids':['101'], 'urls':{'101':'https://www.tiktok.com/@alice/video/101'}}]) as observation, \
+             patch('platforms.tiktok.publish.read_video_detail', return_value=('alice', 'sea')), \
+             patch('platforms.tiktok.publish.open_current_account_profile') as own, \
+             patch('platforms.tiktok.publish.time.sleep'), \
+             patch('platforms.tiktok.publish.upload_video') as upload:
+            own.return_value.__enter__.return_value = (MagicMock(), 'alice')
+            result = verify_published_video(MagicMock(), record)
+        self.assertEqual(result['status'], 'verified')
+        self.assertEqual(observation.call_count, 2)
+        upload.assert_not_called()
+
+    def test_missing_post_id_reports_correlation_gap(self):
+        with patch('platforms.tiktok.publish.profile_observation', return_value={'ids':['101'], 'urls':{}}):
+            result = verify_published_video(MagicMock(), {'handle':'alice', 'post_id':None}, timeout=0)
+        self.assertEqual(result['status'], 'pending_confirmation')
+        self.assertEqual(result['error_code'], 'post_id_unavailable')
+
+    def test_publication_auth_failure_distinguishes_load_failure_from_logout(self):
+        from auth_adapters import AuthResult, LoginState
+        from platforms.tiktok.runner import run_tiktok_publication_session
+        cases = [(LoginState.UNKNOWN, 'AUTH_TIKTOK_LOAD_FAILED', 'failed', 'page_load_failed'),
+                 (LoginState.UNKNOWN, None, 'failed', 'auth_state_unknown'),
+                 (LoginState.LOGGED_OUT, None, 'skipped', 'auth_required')]
+        for state, auth_code, status, error_code in cases:
+            with self.subTest(state=state, auth_code=auth_code), contextlib.ExitStack() as stack:
+                self.conn.execute("UPDATE publish_records SET status='queued', error_code=NULL WHERE id='R1'")
+                provider = MagicMock()
+                provider.name = 'bitbrowser'
+                stack.enter_context(patch.dict('os.environ', {'AM_PUBLISH_BATCH_ID':'B1', 'AM_PUBLISH_RECORD_ID':'R1'}))
+                stack.enter_context(patch('platforms.tiktok.runner.provider_for_account', return_value=provider))
+                stack.enter_context(patch('platforms.tiktok.runner.bitbrowser_profile_id', return_value=''))
+                stack.enter_context(patch('platforms.tiktok.runner.emit_browser_preview'))
+                stack.enter_context(patch('platforms.tiktok.runner.test_cdp_endpoint'))
+                stack.enter_context(patch('platforms.tiktok.runner.start_sync_playwright', return_value=(MagicMock(), MagicMock())))
+                stack.enter_context(patch('platforms.tiktok.runner.choose_tiktok_page', return_value=MagicMock()))
+                stack.enter_context(patch('platforms.tiktok.runner.ensure_tiktok_authenticated', return_value=AuthResult(
+                    platform='tiktok', state=state, detail='auth observation', error_code=auth_code)))
+                publish = stack.enter_context(patch('platforms.tiktok.publish.run_tiktok_publish'))
+                run_tiktok_publication_session({'id':'tiktok_1', 'platform':'tiktok'}, {}, self.conn, 'publish')
+                row = self.store.record('R1')
+                self.assertEqual(row['status'], status)
+                self.assertEqual(row['error_code'], error_code)
+                publish.assert_not_called()
 
     def test_terminal_verified_cannot_regress(self):
         self.store.claim('R1')
@@ -201,6 +269,12 @@ class PublishSafetyTests(unittest.TestCase):
         page.close.assert_called_once()
 
     def test_post_precedes_own_profile_verification_without_baseline(self):
+        self._assert_post_flow(False)
+
+    def test_post_now_confirmation_precedes_profile_verification(self):
+        self._assert_post_flow(True)
+
+    def _assert_post_flow(self, confirmation):
         self.store.claim('R1')
         page = MagicMock(url='https://www.tiktok.com/tiktokstudio/upload')
         post = MagicMock()
@@ -208,15 +282,29 @@ class PublishSafetyTests(unittest.TestCase):
         radio.is_visible.return_value = True
         page.get_by_role.return_value.all.return_value = [radio]
         events = []
+        title = MagicMock()
+        title.is_visible.side_effect = lambda: events == ['Upload', 'video', 'Description', 'Content check off', 'Post']
+        confirm = MagicMock()
+        confirm.is_visible.return_value = True
+        title.locator.return_value.get_by_role.return_value.all.return_value = [confirm]
+        page.get_by_text.return_value.all.return_value = [title] if confirmation else []
+
+        def confirm_click(**kwargs):
+            events.append('Post now')
+            page.url = 'https://www.tiktok.com/@alice/video/101'
+
+        confirm.click.side_effect = confirm_click
 
         def click(**kwargs):
             events.append('Post')
             self.assertEqual(self.store.record('R1')['status'], 'committing')
-            page.url = 'https://www.tiktok.com/@alice/video/101'
+            if not confirmation:
+                page.url = 'https://www.tiktok.com/@alice/video/101'
 
         def verify(browser, record):
             events.append('Profile verification')
-            self.assertEqual(events, ['Upload', 'video', 'Description', 'Post', 'Profile verification'])
+            self.assertEqual(events, ['Upload', 'video', 'Description', 'Content check off', 'Post'] +
+                             (['Post now'] if confirmation else []) + ['Profile verification'])
             self.assertEqual(record['post_id'], '101')
             self.assertEqual(record['handle'], 'alice')
             self.assertIsNone(record['baseline_json'])
@@ -226,9 +314,10 @@ class PublishSafetyTests(unittest.TestCase):
         with patch('platforms.tiktok.publish.validate_publish_source', return_value='video.mp4'), \
              patch('platforms.tiktok.publish.logged_in_handle', return_value='alice'), \
              patch('platforms.tiktok.publish.open_upload_page', side_effect=lambda p: (events.append('Upload') or p)), \
-             patch('platforms.tiktok.publish.upload_video', side_effect=lambda *args: events.append('video')), \
+             patch('platforms.tiktok.publish.upload_video', side_effect=lambda *args, **kwargs: events.append('video')), \
              patch('platforms.tiktok.publish._caption', side_effect=lambda *args: events.append('Description')), \
              patch('platforms.tiktok.publish.handle_known_upload_prompts'), \
+             patch('platforms.tiktok.publish.disable_content_check_lite', side_effect=lambda p: events.append('Content check off')), \
              patch('platforms.tiktok.publish.wait_post_ready', return_value=post), \
              patch('platforms.tiktok.publish.assert_current_identity', return_value='alice'), \
              patch('platforms.tiktok.publish.profile_observation') as baseline, \
@@ -236,6 +325,12 @@ class PublishSafetyTests(unittest.TestCase):
             result = run_tiktok_publish(page, MagicMock(), self.store, 'R1')
         baseline.assert_not_called()
         post.click.assert_called_once()
+        if confirmation:
+            confirm.click.assert_called_once_with(timeout=10000)
+            page.get_by_text.assert_called_with('Continue to post?', exact=True)
+            title.locator.return_value.get_by_role.assert_called_with('button', name='Post now', exact=True)
+        else:
+            confirm.click.assert_not_called()
         self.assertEqual(result['status'], 'verified')
         self.assertEqual(result['post_url'], 'https://www.tiktok.com/@alice/video/101')
 
@@ -254,6 +349,7 @@ class PublishSafetyTests(unittest.TestCase):
         from platforms.tiktok.publish import profile_observation
         page = MagicMock()
         page.get_by_role.return_value.count.return_value = 0
+        page.get_by_role.return_value.all.return_value = [MagicMock()]
         page.locator.return_value.first.wait_for.side_effect = TimeoutError('no videos')
         page.locator.return_value.all.return_value = []
         empty = MagicMock()
@@ -271,6 +367,23 @@ class PublishSafetyTests(unittest.TestCase):
             result = profile_observation(MagicMock(), 'alice')
         self.assertEqual(result['ids'], [])
         self.assertEqual(result['handle'], 'alice')
+
+    def test_profile_verification_selects_videos_and_latest_without_tab_roles(self):
+        from platforms.tiktok.publish import profile_observation
+        page = MagicMock()
+        page.get_by_role.return_value.all.return_value = []
+        videos, latest = MagicMock(), MagicMock()
+        page.get_by_text.side_effect = lambda text, exact: type('Nodes', (), {
+            'all': lambda self: [videos if text == 'Videos' else latest]})()
+        link = MagicMock()
+        link.get_attribute.return_value = '/@alice/video/101'
+        page.locator.return_value.all.return_value = [link]
+        with patch('platforms.tiktok.publish.open_current_account_profile') as own:
+            own.return_value.__enter__.return_value = (page, 'alice')
+            result = profile_observation(MagicMock(), 'alice')
+        videos.click.assert_called_once_with(timeout=5000)
+        latest.click.assert_called_once_with(timeout=5000)
+        self.assertEqual(result['urls'], {'101':'https://www.tiktok.com/@alice/video/101'})
 
     def test_unknown_task_never_becomes_fyp(self):
         from platforms.tiktok.runner import requested_tiktok_task
@@ -303,6 +416,61 @@ class PublishSafetyTests(unittest.TestCase):
             handle_known_upload_prompts(page)
             self.assertEqual(clicks,initial)
             self.assertEqual(state,[])
+
+    def test_content_check_lite_only_clicks_enabled_switch(self):
+        from platforms.tiktok.publish import disable_content_check_lite
+        for checked in ('true', 'false', None):
+            with self.subTest(checked=checked):
+                page = MagicMock()
+                label = MagicMock()
+                label.is_visible.return_value = True
+                page.get_by_text.return_value.all.return_value = [label]
+                control = MagicMock()
+                control.is_visible.return_value = True
+                control.get_attribute.return_value = checked
+                label.locator.return_value.locator.return_value.all.return_value = [control]
+                disable_content_check_lite(page)
+                page.get_by_text.assert_called_once_with('Content check lite', exact=True)
+                if checked == 'true':
+                    control.click.assert_called_once_with(timeout=5000)
+                else:
+                    control.click.assert_not_called()
+                if checked is None:
+                    control.set_checked.assert_called_once_with(False, force=True, timeout=5000)
+                else:
+                    control.set_checked.assert_not_called()
+                    control.locator.return_value.wait_for.assert_called_once_with(state='attached', timeout=5000)
+
+    def test_content_check_lite_unconfirmed_off_blocks_post(self):
+        from platforms.tiktok.publish import disable_content_check_lite
+        page = MagicMock()
+        label = MagicMock()
+        label.is_visible.return_value = True
+        page.get_by_text.return_value.all.return_value = [label]
+        control = MagicMock()
+        control.is_visible.return_value = True
+        control.get_attribute.return_value = 'true'
+        control.locator.return_value.wait_for.side_effect = TimeoutError('switch remained on')
+        label.locator.return_value.locator.return_value.all.return_value = [control]
+        with self.assertRaises(TimeoutError):
+            disable_content_check_lite(page)
+        control.click.assert_called_once()
+
+    def test_content_check_lite_native_state_failure_propagates(self):
+        from platforms.tiktok.publish import disable_content_check_lite
+        page = MagicMock()
+        label = MagicMock()
+        label.is_visible.return_value = True
+        page.get_by_text.return_value.all.return_value = [label]
+        control = MagicMock()
+        control.is_visible.return_value = True
+        control.get_attribute.return_value = None
+        control.set_checked.side_effect = RuntimeError('checkbox state did not change')
+        label.locator.return_value.locator.return_value.all.return_value = [control]
+        with self.assertRaisesRegex(RuntimeError, 'checkbox state did not change'):
+            disable_content_check_lite(page)
+        control.set_checked.assert_called_once_with(False, force=True, timeout=5000)
+        control.click.assert_not_called()
 
     def test_processing_waits_until_post_enabled(self):
         page = MagicMock()
@@ -408,6 +576,455 @@ class PublishSafetyTests(unittest.TestCase):
         entry.click.assert_called_once_with(timeout=30000)
         page.expect_file_chooser.return_value.__enter__.return_value.value.set_files.assert_called_once_with(
             'video.mp4', timeout=30000)
+
+    def test_copyright_explanations_do_not_abort_upload_or_processing(self):
+        descriptions = [
+            'We will check your video for copyright and other potential violations.',
+            'No copyright issues found',
+            'Check for copyright issues before posting',
+        ]
+        for processing in (False, True):
+            with self.subTest(processing=processing):
+                page = MagicMock()
+                node = MagicMock()
+                node.get_attribute.return_value = 'video/*'
+                node.is_visible.return_value = True
+                node.is_enabled.return_value = True
+                page.locator.return_value.all.return_value = [node]
+                page.get_by_role.return_value.all.return_value = [node]
+                observations = iter([descriptions, ['Uploaded (36.49MB)']])
+                current = descriptions
+
+                def texts(expression):
+                    nonlocal current
+                    if expression.pattern.startswith('^Uploaded'):
+                        current = next(observations)
+                        # First progress observation has no completed upload.
+                        if current == descriptions:
+                            current = ['Uploaded (36.49MB)']
+                            matched = []
+                        else:
+                            matched = current
+                    else:
+                        matched = [text for text in current if expression.search(text)]
+                    collection = MagicMock()
+                    nodes = []
+                    for text in matched:
+                        item = MagicMock()
+                        item.is_visible.return_value = True
+                        item.inner_text.return_value = text
+                        nodes.append(item)
+                    collection.all.return_value = nodes
+                    return collection
+
+                page.get_by_text.side_effect = texts
+                with patch('platforms.tiktok.publish.handle_known_upload_prompts'):
+                    if processing:
+                        self.assertIs(wait_post_ready(page, lambda: None), node)
+                    else:
+                        upload_video(page, 'video.mp4', lambda: None)
+                        page.wait_for_timeout.assert_called_once_with(500)
+
+    def test_explicit_upload_and_processing_error_preserves_actual_message(self):
+        for processing, message in ((False, 'Upload failed: network disconnected'),
+                                    (True, 'Processing failed: unsupported format')):
+            with self.subTest(processing=processing):
+                page = MagicMock()
+                file_input = MagicMock()
+                file_input.get_attribute.return_value = 'video/*'
+                page.locator.return_value.all.return_value = [file_input]
+                error = MagicMock()
+                error.is_visible.return_value = True
+                error.inner_text.return_value = message
+                page.get_by_text.return_value.all.return_value = [error]
+                with patch('platforms.tiktok.publish.handle_known_upload_prompts'):
+                    with self.assertRaises(PublishError) as caught:
+                        if processing:
+                            wait_post_ready(page, lambda: None)
+                        else:
+                            upload_video(page, 'video.mp4', lambda: None)
+                self.assertEqual(caught.exception.code, 'upload_failed')
+                self.assertIn(message, str(caught.exception))
+                page.get_by_role.assert_not_called()
+
+    def test_set_files_timeout_continues_only_when_current_video_is_received(self):
+        for direct in (False, True):
+            with self.subTest(direct=direct):
+                page = MagicMock()
+                node = MagicMock()
+                node.get_attribute.return_value = 'video/*'
+                node.is_visible.return_value = True
+                node.is_enabled.return_value = True
+                page.locator.return_value.all.return_value = [node] if direct else []
+                page.get_by_role.return_value.all.return_value = [node]
+                setter = node.set_input_files if direct else page.expect_file_chooser.return_value.__enter__.return_value.value.set_files
+                setter.side_effect = TimeoutError('Timeout 30000ms exceeded')
+                filename = MagicMock()
+                filename.is_visible.return_value = True
+                card = MagicMock()
+                card.inner_text.return_value = 'video.mp4\n3.6MB/36.49MB\n9.89%\nCancel'
+                filename.locator.return_value.all.return_value = [card]
+                page.locator.return_value.inner_text.return_value = card.inner_text.return_value
+                uploaded = MagicMock()
+                uploaded.is_visible.return_value = True
+                def text_nodes(expression, **kwargs):
+                    collection = MagicMock()
+                    collection.all.return_value = [filename] if expression == 'video.mp4' else (
+                        [uploaded] if not isinstance(expression, str) and expression.pattern.startswith('^Uploaded') else [])
+                    return collection
+                page.get_by_text.side_effect = text_nodes
+                with patch('platforms.tiktok.publish.handle_known_upload_prompts'):
+                    upload_video(page, 'video.mp4', lambda: None)
+                setter.assert_called_once_with('video.mp4', timeout=30000)
+
+    def test_receipt_requires_current_filename_and_upload_status(self):
+        from platforms.tiktok.publish import video_received
+        page = MagicMock()
+        page.get_by_text.return_value.all.return_value = []
+        page.locator.return_value.inner_text.return_value = ''
+        self.assertFalse(video_received(page, 'video.mp4'))
+        node = MagicMock()
+        node.is_visible.return_value = True
+        page.get_by_text.return_value.all.return_value = [node]
+        card = MagicMock()
+        node.locator.return_value.all.return_value = [card]
+        card.inner_text.return_value = 'video.mp4\nSelect video'
+        page.locator.return_value.inner_text.return_value = card.inner_text.return_value
+        self.assertFalse(video_received(page, 'video.mp4'))
+        card.inner_text.return_value = 'video.mp4\nUploaded (36.49MB)\nReplace'
+        page.locator.return_value.inner_text.return_value = card.inner_text.return_value
+        self.assertTrue(video_received(page, 'video.mp4'))
+
+    def test_receipt_progress_does_not_depend_on_cancel_button_tag(self):
+        from platforms.tiktok.publish import video_received
+        page = MagicMock()
+        filename = MagicMock()
+        filename.is_visible.return_value = True
+        page.get_by_text.return_value.all.return_value = [filename]
+        card = MagicMock()
+        card.inner_text.return_value = '1.mp4\n1080P\n11.96MB/36.49MB\n16 seconds left\n32.79%\nCancel'
+        page.locator.return_value.inner_text.return_value = card.inner_text.return_value
+        def ancestors(selector):
+            if 'button' in selector:
+                raise RuntimeError('Cancel is not a native button')
+            collection = MagicMock()
+            collection.all.return_value = [card]
+            return collection
+        filename.locator.side_effect = ancestors
+        self.assertTrue(video_received(page, '1.mp4'))
+        page.get_by_text.assert_not_called()
+
+    def test_file_selection_errors_identify_exact_operation_without_retry(self):
+        for operation in ('file_input_set', 'select_video_click', 'file_chooser_wait', 'file_chooser_set'):
+            with self.subTest(operation=operation):
+                page = MagicMock()
+                node = MagicMock()
+                node.get_attribute.return_value = 'video/*'
+                node.is_visible.return_value = True
+                node.is_enabled.return_value = True
+                page.locator.return_value.all.return_value = [node] if operation == 'file_input_set' else []
+                page.get_by_role.return_value.all.return_value = [node]
+                page.locator.return_value.inner_text.return_value = ''
+                chooser = page.expect_file_chooser.return_value
+                if operation == 'file_input_set':
+                    node.set_input_files.side_effect = TimeoutError('Timeout 30000ms exceeded. Call log: input upload')
+                elif operation == 'select_video_click':
+                    node.click.side_effect = TimeoutError('Timeout 30000ms exceeded. Call log: click')
+                elif operation == 'file_chooser_wait':
+                    chooser.__exit__.side_effect = TimeoutError('Timeout 30000ms exceeded. Call log: filechooser')
+                else:
+                    chooser.__enter__.return_value.value.set_files.side_effect = TimeoutError('Timeout 30000ms exceeded. Call log: set files')
+                stdout, stderr = io.StringIO(), io.StringIO()
+                with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                    with self.assertRaises(PublishError) as caught:
+                        upload_video(page, 'private-video.mp4', lambda: None)
+                self.assertEqual(caught.exception.code, operation + '_failed')
+                self.assertIn(operation, stdout.getvalue())
+                self.assertIn('Call log:', str(caught.exception))
+                self.assertIn('Traceback', stderr.getvalue())
+                self.assertIn('Call log:', stderr.getvalue())
+                self.assertNotIn('private-video.mp4', stdout.getvalue())
+                self.assertLessEqual(node.click.call_count, 1)
+                self.assertLessEqual(node.set_input_files.call_count, 1)
+
+    def test_receipt_reads_visible_upload_text_without_filename_locator(self):
+        from platforms.tiktok.publish import video_received
+        page = MagicMock()
+        page.get_by_text.side_effect = RuntimeError('exact-text selector unavailable')
+        page.locator.return_value.inner_text.return_value = (
+            'TikTok Studio\n1.mp4\n1080P\nCancel\n3.48MB/36.49MB\n'
+            'Duration: 0m40s\n50 seconds left\n9.54%\nDetails\nDescription\n1')
+        self.assertTrue(video_received(page, '1.mp4'))
+        page.get_by_text.assert_not_called()
+
+    def test_receipt_rejects_other_file_or_unrelated_percentage(self):
+        from platforms.tiktok.publish import video_received
+        page = MagicMock()
+        for text in ('other.mp4\n3.48MB/36.49MB\n9.54%',
+                     '1.mp4\nDetails\nDescription\n99% discount',
+                     '1.mp4\nSelect video', '1.mp4\n1080P\n50%'):
+            with self.subTest(text=text):
+                page.locator.return_value.inner_text.return_value = text
+                self.assertFalse(video_received(page, '1.mp4'))
+
+    def test_receipt_probe_errors_are_reported(self):
+        from platforms.tiktok.publish import video_received
+        page = MagicMock()
+        page.locator.return_value.inner_text.side_effect = RuntimeError('CDP read failed')
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertFalse(video_received(page, '1.mp4'))
+        self.assertIn('CDP read failed', output.getvalue())
+
+    def test_file_receipt_only_recovers_timeout_not_other_errors(self):
+        from platforms.tiktok.publish import file_selection_step
+        class DriverTimeout(TimeoutError):
+            pass
+        received = MagicMock(return_value=True)
+        with file_selection_step('file_chooser_set', 'select', received=received):
+            raise DriverTimeout('Timeout 30000ms exceeded')
+        received.assert_called_once()
+        received.reset_mock()
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(PublishError):
+                with file_selection_step('file_chooser_set', 'select', received=received):
+                    raise RuntimeError('file permission denied')
+        received.assert_not_called()
+
+    def test_receipt_diagnostic_preserves_read_text_and_match_result(self):
+        from platforms.tiktok.publish import video_received
+        page = MagicMock(url='https://www.tiktok.com/tiktokstudio/upload')
+        raw = 'TikTok Studio\n1.mp41080P\r\n5.01MB/36.49MB\n13.74%'
+        page.locator.return_value.inner_text.return_value = raw
+        with patch('platforms.tiktok.publish.Path.mkdir'), \
+             patch('platforms.tiktok.publish.Path.write_text') as write:
+            self.assertFalse(video_received(page, '1.mp4', record_id='batch_0'))
+        report = json.loads(write.call_args.args[0])
+        self.assertEqual(report['body_text'], raw)
+        self.assertEqual(report['expected_filename'], '1.mp4')
+        self.assertFalse(report['received'])
+        self.assertFalse(report['filename_matched'])
+        self.assertTrue(report['checked_at'])
+        self.assertTrue(report['finished_at'])
+        self.assertEqual(write.call_args.kwargs['encoding'], 'utf-8')
+
+    def test_unsaved_edit_discard_is_scoped_to_recovery_prompt(self):
+        from platforms.tiktok.publish import discard_unsaved_edit
+        page = MagicMock()
+        prompt = MagicMock()
+        prompt.is_visible.return_value = True
+        page.get_by_text.return_value.all.return_value = [prompt]
+        discard = MagicMock()
+        discard.is_visible.return_value = True
+        prompt.locator.return_value.get_by_role.return_value.all.return_value = [discard]
+        discard_unsaved_edit(page)
+        pattern = page.get_by_text.call_args.args[0]
+        self.assertIsNotNone(pattern.fullmatch('A video you were editing wasn’t saved. Continue editing?'))
+        discard.click.assert_called_once_with(timeout=10000)
+        prompt.wait_for.assert_called_once_with(state='hidden', timeout=10000)
+        prompt.locator.return_value.get_by_role.assert_called_once_with('button', name='Discard', exact=True)
+
+    def test_unsaved_edit_absent_does_not_click_discard(self):
+        from platforms.tiktok.publish import discard_unsaved_edit
+        page = MagicMock()
+        page.get_by_text.return_value.all.return_value = []
+        discard_unsaved_edit(page)
+        page.get_by_role.assert_not_called()
+
+    def test_unsaved_edit_is_discarded_before_file_assignment(self):
+        page = MagicMock()
+        events = []
+        prompt, discard, file_input, uploaded = (MagicMock() for _ in range(4))
+        for node in (prompt, discard, uploaded):
+            node.is_visible.return_value = True
+        prompt.locator.return_value.get_by_role.return_value.all.return_value = [discard]
+        discard.click.side_effect = lambda **kwargs: events.append('discard')
+        prompt.wait_for.side_effect = lambda **kwargs: events.append('prompt_hidden')
+        file_input.get_attribute.return_value = 'video/*'
+        file_input.set_input_files.side_effect = lambda *args, **kwargs: events.append('file_set')
+        page.locator.return_value.all.return_value = [file_input]
+        def nodes(expression, **kwargs):
+            result = MagicMock()
+            result.all.return_value = ([prompt] if 'Continue editing' in expression.pattern else
+                                      [uploaded] if expression.pattern.startswith('^Uploaded') else [])
+            return result
+        page.get_by_text.side_effect = nodes
+        with patch('platforms.tiktok.publish.handle_known_upload_prompts'):
+            upload_video(page, 'video.mp4', lambda: None)
+        self.assertEqual(events, ['discard', 'prompt_hidden', 'file_set'])
+        file_input.set_input_files.assert_called_once_with('video.mp4', timeout=30000)
+
+    def test_receipt_diagnostic_records_read_error_without_changing_result(self):
+        from platforms.tiktok.publish import video_received
+        page = MagicMock(url='https://www.tiktok.com/tiktokstudio/upload')
+        page.locator.return_value.inner_text.side_effect = RuntimeError('CDP read failed')
+        with patch('platforms.tiktok.publish.Path.mkdir'), \
+             patch('platforms.tiktok.publish.Path.write_text') as write:
+            self.assertFalse(video_received(page, '1.mp4', record_id='batch_0'))
+        report = json.loads(write.call_args.args[0])
+        self.assertIsNone(report['body_text'])
+        self.assertIn('CDP read failed', report['read_error'])
+
+    def test_locator_read_failure_accepts_same_video_from_cdp(self):
+        from platforms.tiktok.publish import video_received
+        page = MagicMock(url='https://www.tiktok.com/tiktokstudio/upload')
+        page.main_frame.url = page.url
+        page.frames = [page.main_frame]
+        page.locator.return_value.inner_text.side_effect = TimeoutError('waiting for body')
+        session = page.context.new_cdp_session.return_value
+        snapshot = {'url': page.url, 'document_url': page.url, 'ready_state': 'complete',
+                    'has_body': True, 'body_text': '1.mp4\n5.01MB/36.49MB\n13.74%',
+                    'body_truncated': False}
+        session.send.return_value = {'result': {'type': 'object', 'value': snapshot}}
+        with patch('platforms.tiktok.publish.Path.mkdir'), \
+             patch('platforms.tiktok.publish.Path.write_text') as write:
+            self.assertTrue(video_received(page, '1.mp4', record_id='batch_0'))
+        report = json.loads(write.call_args.args[0])
+        self.assertIn('waiting for body', report['read_error'])
+        self.assertEqual(report['cdp_comparison']['snapshot'], snapshot)
+        self.assertEqual(report['cdp_comparison']['page_url'], page.url)
+        page.context.new_cdp_session.assert_called_once_with(page)
+        method, params = session.send.call_args.args
+        self.assertEqual(method, 'Runtime.evaluate')
+        self.assertEqual(params['timeout'], 2000)
+        self.assertTrue(params['returnByValue'])
+        session.detach.assert_called_once()
+        self.assertTrue(report['received'])
+        self.assertEqual(report['accepted_via'], 'cdp')
+
+    def test_cdp_comparison_failure_is_saved_and_session_detached(self):
+        from platforms.tiktok.publish import video_received
+        page = MagicMock(url='https://www.tiktok.com/tiktokstudio/upload')
+        page.frames = []
+        page.locator.return_value.inner_text.side_effect = TimeoutError('waiting for body')
+        session = page.context.new_cdp_session.return_value
+        session.send.side_effect = RuntimeError('CDP context unavailable')
+        with patch('platforms.tiktok.publish.Path.mkdir'), \
+             patch('platforms.tiktok.publish.Path.write_text') as write:
+            self.assertFalse(video_received(page, '1.mp4', record_id='batch_0'))
+        report = json.loads(write.call_args.args[0])
+        self.assertIn('CDP context unavailable', report['cdp_comparison']['error'])
+        self.assertEqual(session.detach.call_count, 3)
+
+    def test_readable_initial_page_is_cross_checked_with_cdp(self):
+        from platforms.tiktok.publish import video_received
+        page = MagicMock(url='https://www.tiktok.com/tiktokstudio/upload')
+        page.locator.return_value.inner_text.return_value = 'Videos\nPhotos\nSelect video to upload'
+        page.context.new_cdp_session.return_value.send.return_value = {'result': {'value': {
+            'url': page.url, 'has_body': True, 'body_text': '1.mp4\n1080P\n0B/36.49MB\n0%'}}}
+        self.assertTrue(video_received(page, '1.mp4'))
+        page.context.new_cdp_session.assert_called_once_with(page)
+
+    def test_receipt_poll_accepts_delayed_upload_without_reselecting(self):
+        from platforms.tiktok.publish import video_received
+        page = MagicMock(url='https://www.tiktok.com/tiktokstudio/upload')
+        page.locator.return_value.inner_text.side_effect = [
+            'Select video to upload', '1.mp4\n1080P\n5.01MB/36.49MB\n13.74%']
+        with patch('platforms.tiktok.publish.cdp_receipt_comparison', return_value={
+                'snapshot': {'url': page.url, 'has_body': True, 'body_text': 'Select video to upload'}}) as compare:
+            self.assertTrue(video_received(page, '1.mp4'))
+        compare.assert_called_once()
+        page.wait_for_timeout.assert_called_once_with(500)
+        page.expect_file_chooser.assert_not_called()
+
+    def test_uploaded_detection_uses_same_video_cdp_when_locator_misses(self):
+        page = MagicMock(url='https://www.tiktok.com/tiktokstudio/upload')
+        file_input = MagicMock()
+        file_input.get_attribute.return_value = 'video/*'
+        page.locator.return_value.all.return_value = [file_input]
+        page.get_by_text.return_value.all.return_value = []
+        snapshot = {'url': page.url, 'has_body': True,
+                    'body_text': '1.mp4\n1080P\nUploaded\n(36.49MB)\nReplace\nDetails\nDescription\n1'}
+        with patch('platforms.tiktok.publish.handle_known_upload_prompts'), \
+             patch('platforms.tiktok.publish.cdp_receipt_comparison', return_value={'snapshot': snapshot}) as compare, \
+             patch('platforms.tiktok.publish.time.monotonic', side_effect=[0, 0, 0, 0, 2000]):
+            upload_video(page, '1.mp4', lambda: None)
+        compare.assert_called_once()
+        page.wait_for_timeout.assert_not_called()
+        file_input.set_input_files.assert_called_once()
+
+    def test_uploaded_text_requires_completion_in_current_file_card(self):
+        from platforms.tiktok.publish import match_uploaded_video
+        self.assertTrue(match_uploaded_video('1.mp4\n1080P\nUploaded (36.49MB)\nDetails', '1.mp4'))
+        for text in ('1.mp4\nUploading...\n36.49MB/36.49MB\n100%',
+                     'other.mp4\nUploaded (36.49MB)',
+                     '1.mp4\nDetails\nDescription\nUploaded (36.49MB)',
+                     '1.mp4\nNot Uploaded'):
+            self.assertFalse(match_uploaded_video(text, '1.mp4'))
+
+    def test_cdp_uploaded_detection_advances_record_to_caption(self):
+        self.store.claim('R1')
+        page = MagicMock(url='https://www.tiktok.com/tiktokstudio/upload')
+        file_input = MagicMock()
+        file_input.get_attribute.return_value = 'video/*'
+        page.locator.return_value.all.return_value = [file_input]
+        page.get_by_text.return_value.all.return_value = []
+        snapshot = {'url': page.url, 'has_body': True,
+                    'body_text': '1.mp4\n1080P\nUploaded (36.49MB)\nDetails\nDescription\n1'}
+        def caption_step(current_page, caption):
+            self.assertIs(current_page, page)
+            self.assertEqual(caption, '海边\n#旅行')
+            self.assertEqual(self.store.record('R1')['phase'], 'caption')
+            raise PublishError('caption_probe', 'stop test before any Post')
+        with patch('platforms.tiktok.publish.validate_publish_source', return_value='1.mp4'), \
+             patch('platforms.tiktok.publish.logged_in_handle', return_value='alice'), \
+             patch('platforms.tiktok.publish.open_upload_page', return_value=page), \
+             patch('platforms.tiktok.publish.handle_known_upload_prompts'), \
+             patch('platforms.tiktok.publish.cdp_receipt_comparison', return_value={'snapshot': snapshot}), \
+             patch('platforms.tiktok.publish._caption', side_effect=caption_step) as caption:
+            result = run_tiktok_publish(page, MagicMock(), self.store, 'R1')
+        caption.assert_called_once()
+        self.assertEqual(result['error_code'], 'caption_probe')
+        self.assertIsNone(result['submitted_at'])
+
+    def test_receipt_poll_stops_after_three_unconfirmed_reads(self):
+        from platforms.tiktok.publish import video_received
+        page = MagicMock(url='https://www.tiktok.com/tiktokstudio/upload')
+        page.locator.return_value.inner_text.return_value = 'Select video to upload'
+        with patch('platforms.tiktok.publish.cdp_receipt_comparison', return_value={
+                'snapshot': {'url': page.url, 'has_body': True, 'body_text': 'other.mp4\n5MB/36MB'}}) as compare:
+            self.assertFalse(video_received(page, '1.mp4'))
+        self.assertEqual(compare.call_count, 3)
+        self.assertEqual(page.wait_for_timeout.call_count, 2)
+
+    def test_uploaded_header_does_not_require_text_line_boundaries(self):
+        from platforms.tiktok.publish import match_uploaded_video
+        for text in ('1.mp41080PUploaded (36.49MB)Replace\nDetails',
+                     '1.mp4 1080P Replace Uploaded\u00a0(36.49 MB) Details',
+                     '1.mp4\n1080P\nUploaded\n(\n36.49\nMB\n)\nDetails'):
+            self.assertTrue(match_uploaded_video(text, '1.mp4'), text)
+        self.assertFalse(match_uploaded_video('other1.mp4 Uploaded (36MB) Details', '1.mp4'))
+
+    def test_rendered_completion_snapshot_uses_browser_layout_text(self):
+        from platforms.tiktok.publish import rendered_upload_snapshot
+        page = MagicMock()
+        session = page.context.new_cdp_session.return_value
+        session.send.return_value = {
+            'strings': ['https://www.tiktok.com/tiktokstudio/upload', '1.mp4', '1080P',
+                        'Uploaded', '(36.49MB)', 'Details', 'visible', '1', 'hidden'],
+            'documents': [{'documentURL': 0, 'layout': {
+                'text': [1, 2, 3, 4, 5], 'styles': [[6, 7]] * 5}}]}
+        snapshot = rendered_upload_snapshot(page)
+        self.assertEqual(snapshot['body_text'], '1.mp4\n1080P\nUploaded\n(36.49MB)\nDetails')
+        self.assertEqual(session.send.call_args.args[0], 'DOMSnapshot.captureSnapshot')
+        session.detach.assert_called_once()
+
+    def test_completion_uses_rendered_snapshot_if_script_text_is_stale(self):
+        page = MagicMock(url='https://www.tiktok.com/tiktokstudio/upload')
+        file_input = MagicMock()
+        file_input.get_attribute.return_value = 'video/*'
+        page.locator.return_value.all.return_value = [file_input]
+        page.get_by_text.return_value.all.return_value = []
+        with patch('platforms.tiktok.publish.handle_known_upload_prompts'), \
+             patch('platforms.tiktok.publish.cdp_receipt_comparison', return_value={'snapshot': {
+                 'url': page.url, 'has_body': True, 'body_text': 'Select video to upload'}}), \
+             patch('platforms.tiktok.publish.rendered_upload_snapshot', return_value={
+                 'url': page.url, 'has_body': True, 'body_text': '1.mp41080PUploaded (36.49MB) Details'}) as rendered, \
+             patch('platforms.tiktok.publish.time.monotonic', side_effect=[0, 0, 0, 2000]):
+            upload_video(page, '1.mp4', lambda: None)
+        rendered.assert_called_once_with(page)
+        page.wait_for_timeout.assert_not_called()
+        file_input.set_input_files.assert_called_once()
 
 
 if __name__ == '__main__':
