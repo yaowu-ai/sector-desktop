@@ -128,6 +128,12 @@ export function TargetEngagementPage({
     const selected = new Set(selectedParticipants);
     return executableAccounts.filter((account) => selected.has(account.id));
   }, [executableAccounts, selectedParticipants]);
+  const selectAllParticipants = useCallback(() => {
+    form.setFieldValue(
+      "participants",
+      executableAccounts.map((account) => account.id),
+    );
+  }, [executableAccounts, form]);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -442,6 +448,17 @@ export function TargetEngagementPage({
                     <Form.Item
                       name="participants"
                       label="参与账号"
+                      extra={
+                        <Button
+                          type="link"
+                          size="small"
+                          icon={<Users size={14} />}
+                          onClick={selectAllParticipants}
+                          disabled={executableAccounts.length === 0}
+                        >
+                          全部可执行账号（{executableAccounts.length}）
+                        </Button>
+                      }
                       rules={[
                         { required: true, message: "请至少选择一个参与账号" },
                       ]}
@@ -450,7 +467,7 @@ export function TargetEngagementPage({
                         mode="multiple"
                         showSearch
                         options={participantOptions}
-                        placeholder="选择可执行启用账号"
+                        placeholder="选择参与账号"
                       />
                     </Form.Item>
                   </Col>
