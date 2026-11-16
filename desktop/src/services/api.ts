@@ -58,6 +58,7 @@ import type {
   SaveCommentPoolsRequest,
   SaveCommentPoolsResult,
   SchedulerHealth,
+  SchedulerSnapshot,
   SchedulerJobRunFilter,
   SchedulerJobRunRecord,
   SchedulerProcessStatus,
@@ -128,6 +129,10 @@ export function loadAccounts(platform: Platform | 'all' = 'all') {
 
 export function loadConfig() {
   return invoke<ConfigSnapshot>('load_config')
+}
+
+export function loadSchedulerConfig() {
+  return invoke<ConfigSnapshot>('load_scheduler_config')
 }
 
 export function validateConfig(payload: ConfigPayload) {
@@ -470,6 +475,10 @@ export function getSchedulerProcessStatus() {
 
 export function getSchedulerHealth() {
   return invoke<SchedulerHealth>('get_scheduler_health')
+}
+
+export function getSchedulerSnapshot() {
+  return invoke<SchedulerSnapshot>('get_scheduler_snapshot')
 }
 
 export function clearRunLock() {

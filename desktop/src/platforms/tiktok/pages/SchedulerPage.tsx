@@ -29,20 +29,18 @@ import {
   TimerReset,
   Trash2,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { useBrowserStatuses } from "../../../app/BrowserStatusContext";
+import { createRefreshQueue } from "../../../services/refreshQueue";
 import { confirmDanger } from "../../../components/ConfirmDanger";
 import { PageHeader } from "../../../components/PageHeader";
 import { StatusTag } from "../../../components/StatusTag";
 import { useDesktopAuth } from "../../../app/DesktopAuthContext";
 import { usePlatformContext } from "../../../app/PlatformContext";
 import {
-  checkBitbrowserApi,
-  checkIxbrowserApi,
   clearRunLock,
-  getSchedulerHealth,
-  getSchedulerProcessStatus,
-  loadConfig,
+  getSchedulerSnapshot,
 } from "../../../services/api";
 import {
   querySchedulerJobRuns,
@@ -110,8 +108,9 @@ export function SchedulerPage() {
   const { license } = useDesktopAuth();
   const licenseLimits = readDesktopLicenseLimits(license);
   const [form] = Form.useForm<ActiveHoursFormValues>();
-  const [bitbrowser, setBitbrowser] = useState<ApiStatus | null>(null);
-  const [ixbrowser, setIxbrowser] = useState<ApiStatus | null>(null);
+  const { bitbrowser, ixbrowser, refresh: refreshBrowserStatuses } = useBrowserStatuses();
+  const refreshQueue = useRef(createRefreshQueue());
+  const scopeRef = useRef("");
   const [health, setHealth] = useState<SchedulerHealth>(EMPTY_HEALTH);
   const [processStatus, setProcessStatus] =
     useState<SchedulerProcessStatus>(EMPTY_PROCESS);
@@ -119,6 +118,8 @@ export function SchedulerPage() {
   const [runHistory, setRunHistory] = useState<SchedulerJobRunRecord[]>([]);
   const [runHistoryDays, setRunHistoryDays] = useState<RunHistoryRange>(1);
   const [firesPerDay, setFiresPerDay] = useState(3);
+  const scope = `${currentPlatform}:${runHistoryDays}`;
+  scopeRef.current = scope;
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -199,7 +200,8 @@ export function SchedulerPage() {
   }, [schedulableRows]);
 
   const refresh = useCallback(
-    async (options: { showLoading?: boolean } = {}) => {
+    (options: { showLoading?: boolean } = {}) => refreshQueue.current(async () => {
+      if (scopeRef.current !== scope) return;
       const showLoading = options.showLoading ?? false;
       if (showLoading) {
         setLoading(true);
@@ -210,59 +212,50 @@ export function SchedulerPage() {
         const historyStartTs = dayjs()
           .subtract(runHistoryDays, "day")
           .format("YYYY-MM-DDTHH:mm:ss");
-        const [
-          snapshot,
-          nextProcess,
-          nextHealth,
-          nextBitbrowser,
-          nextIxbrowser,
-          nextRunHistory,
-        ] = await Promise.all([
-          loadConfig(),
-          getSchedulerProcessStatus(),
-          getSchedulerHealth(),
-          checkBitbrowserApi(),
-          checkIxbrowserApi(),
-          querySchedulerJobRuns({
-            platform: currentPlatform,
-            startTs: historyStartTs,
-            limit: 120,
-          }),
+        const [snapshotResult, historyResult] = await Promise.allSettled([
+          getSchedulerSnapshot(),
+          querySchedulerJobRuns({ platform: currentPlatform, startTs: historyStartTs, limit: 120 }),
         ]);
+        if (scopeRef.current !== scope) return;
+        if (snapshotResult.status === "rejected") throw snapshotResult.reason;
+        if (historyResult.status === "rejected") throw historyResult.reason;
+        const snapshot = snapshotResult.value;
+        const nextRunHistory = historyResult.value;
+        const { config, process: nextProcess, health: nextHealth } = snapshot;
         setRows(
-          snapshot.accounts
+          config.accounts
             .filter((account) => account.platform === currentPlatform)
             .map(accountToRow),
         );
         setRunHistory(nextRunHistory);
         setFiresPerDay(
-          snapshot.schedulerSettings?.firesPerDay ??
+          config.schedulerSettings?.firesPerDay ??
             nextHealth.firesPerDay ??
             3,
         );
         setProcessStatus(nextProcess);
         setHealth(nextHealth);
-        setBitbrowser(nextBitbrowser);
-        setIxbrowser(nextIxbrowser);
       } catch (error) {
-        message.error(formatError(error));
+        if (scopeRef.current === scope) message.error(formatError(error));
       } finally {
-        if (showLoading) {
+        if (scopeRef.current === scope) {
           setLoading(false);
-        } else {
           setRefreshing(false);
         }
       }
-    },
-    [currentPlatform, runHistoryDays],
+    }),
+    [currentPlatform, runHistoryDays, scope],
   );
 
   useEffect(() => {
-    void refresh({ showLoading: true });
-    const timer = window.setInterval(() => {
-      void refresh();
-    }, 10000);
-    return () => window.clearInterval(timer);
+    let stopped = false;
+    let timer: number;
+    const poll = async (showLoading = false) => {
+      await refresh({ showLoading });
+      if (!stopped) timer = window.setTimeout(() => void poll(), 10000);
+    };
+    void poll(true);
+    return () => { stopped = true; window.clearTimeout(timer); };
   }, [refresh]);
 
   const start = async () => {
@@ -419,7 +412,10 @@ export function SchedulerPage() {
             <Button
               icon={<RefreshCw size={16} />}
               loading={loading || refreshing}
-              onClick={() => void refresh({ showLoading: true })}
+              onClick={() => {
+                void refresh({ showLoading: true });
+                void refreshBrowserStatuses().catch((error) => message.error(formatError(error)));
+              }}
             >
               刷新
             </Button>

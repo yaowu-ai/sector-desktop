@@ -3,6 +3,7 @@
 mod commands;
 mod paths;
 mod security;
+mod sqlite;
 mod state;
 
 use tauri::Manager;
@@ -22,11 +23,20 @@ fn main() {
                 tauri::Error::Anyhow(anyhow::anyhow!("failed to lock initialization state"))
             })?;
             *init_status = Some(status);
+            tauri::async_runtime::spawn_blocking(move || {
+                let result = paths::project_paths().and_then(|paths| {
+                    sqlite::prepare_actions_db(std::path::Path::new(&paths.actions_db_path))
+                });
+                if let Err(error) = result {
+                    eprintln!("SQLite performance setup: {}", error);
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::config::get_project_paths,
             commands::config::load_config,
+            commands::config::load_scheduler_config,
             commands::config::load_accounts,
             commands::config::validate_config,
             commands::config::backup_config,
@@ -120,6 +130,7 @@ fn main() {
             commands::scheduler::stop_scheduler,
             commands::scheduler::get_scheduler_process_status,
             commands::scheduler::get_scheduler_health,
+            commands::scheduler::get_scheduler_snapshot,
             commands::scheduler::clear_run_lock,
             commands::process::run_account_script
         ])

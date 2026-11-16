@@ -5,7 +5,9 @@ import re
 import sqlite3
 import subprocess
 import sys
+import threading
 import time
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -30,6 +32,9 @@ LOG_DB = DATA_DIR / "actions.db"
 SESSION_LOG = DATA_DIR / "sessions.log"
 LOCK_FILE = DATA_DIR / "run.lock"
 STOP_AFTER_CURRENT_FILE = DATA_DIR / "stop_after_current.flag"
+_DB_SCHEMA_READY = set()
+_DB_INIT_LOCK = threading.RLock()
+_SCHEDULER_BATCH = threading.local()
 DATA_DIR.mkdir(exist_ok=True)
 
 BROWSER_PREVIEW_PREFIX = "AM_BROWSER_PREVIEW "
@@ -90,6 +95,8 @@ def configure_runtime(config_path=None):
     SESSION_LOG = DATA_DIR / "sessions.log"
     LOCK_FILE = DATA_DIR / "run.lock"
     STOP_AFTER_CURRENT_FILE = DATA_DIR / "stop_after_current.flag"
+    with _DB_INIT_LOCK:
+        _DB_SCHEMA_READY.clear()
 
 
 def pid_alive(pid):
@@ -136,9 +143,20 @@ def release_lock():
 
 
 def init_db():
-    conn = sqlite3.connect(LOG_DB)
-    initialize_db_schema(conn)
-    return conn
+    conn = sqlite3.connect(LOG_DB, timeout=2)
+    try:
+        conn.execute("PRAGMA busy_timeout=2000")
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=FULL")
+        schema_key = str(Path(LOG_DB).resolve())
+        with _DB_INIT_LOCK:
+            if schema_key not in _DB_SCHEMA_READY:
+                initialize_db_schema(conn)
+                _DB_SCHEMA_READY.add(schema_key)
+        return conn
+    except Exception:
+        conn.close()
+        raise
 
 
 def initialize_db_schema(conn):
@@ -176,6 +194,14 @@ def initialize_db_schema(conn):
             ended_at TEXT,
             detail TEXT
         )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_scheduler_runs_platform_time
+        ON scheduler_job_runs(platform, COALESCE(started_at, scheduled_run, created_at) DESC, job_id DESC)
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_scheduler_runs_time
+        ON scheduler_job_runs(COALESCE(started_at, scheduled_run, created_at) DESC, job_id DESC)
     """)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS fyp_video_views (
@@ -313,9 +339,27 @@ def require_platform(platform):
 
 def record_scheduler_job_scheduled(job_id, platform, account_id, scheduled_run):
     platform = require_platform(platform)
-    conn = init_db()
+    conn = getattr(_SCHEDULER_BATCH, "connection", None)
+    owns_connection = conn is None
+    if owns_connection:
+        conn = init_db()
     try:
-        conn.execute(
+        _record_scheduler_job_scheduled_row(
+            conn, job_id, platform, account_id, scheduled_run,
+        )
+        if owns_connection:
+            conn.commit()
+    except Exception:
+        if owns_connection:
+            conn.rollback()
+        raise
+    finally:
+        if owns_connection:
+            conn.close()
+
+
+def _record_scheduler_job_scheduled_row(conn, job_id, platform, account_id, scheduled_run):
+    conn.execute(
             "INSERT OR IGNORE INTO scheduler_job_runs "
             "(job_id, platform, account_id, scheduled_run, status, created_at) "
             "VALUES (?,?,?,?,?,?)",
@@ -328,15 +372,29 @@ def record_scheduler_job_scheduled(job_id, platform, account_id, scheduled_run):
                 datetime.now().isoformat(),
             ),
         )
-        conn.execute(
+    conn.execute(
             "UPDATE scheduler_job_runs "
             "SET platform=?, account_id=?, scheduled_run=? "
             "WHERE job_id=? AND status='pending'",
             (platform, account_id, scheduled_run, job_id),
         )
-        conn.commit()
+
+
+@contextmanager
+def scheduler_job_schedule_batch():
+    """Commit pending schedule rows once, while keeping per-row API compatibility."""
+    if getattr(_SCHEDULER_BATCH, "connection", None) is not None:
+        raise RuntimeError("nested scheduler schedule batch")
+    _SCHEDULER_BATCH.connection = init_db()
+    try:
+        yield
+        _SCHEDULER_BATCH.connection.commit()
+    except Exception:
+        _SCHEDULER_BATCH.connection.rollback()
+        raise
     finally:
-        conn.close()
+        _SCHEDULER_BATCH.connection.close()
+        _SCHEDULER_BATCH.connection = None
 
 
 def record_scheduler_job_started(job_id, platform, account_id):

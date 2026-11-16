@@ -770,6 +770,14 @@ pub fn load_config() -> Result<ConfigSnapshot, String> {
     config_snapshot(paths, raw_yaml)
 }
 
+#[tauri::command(async)]
+pub fn load_scheduler_config() -> Result<ConfigSnapshot, String> {
+    let paths = project_paths()?;
+    let raw_yaml = fs::read_to_string(&paths.config_path)
+        .map_err(|err| format!("failed to read {}: {}", paths.config_path, err))?;
+    config_snapshot_without_recent_runs(paths, raw_yaml)
+}
+
 #[tauri::command]
 pub fn load_accounts(platform: Option<String>) -> Result<Vec<Account>, String> {
     let platform = normalized_platform_filter(platform.as_deref())?;
@@ -1531,6 +1539,12 @@ pub fn query_account_logs(
 }
 
 fn config_snapshot(paths: ProjectPaths, raw_yaml: String) -> Result<ConfigSnapshot, String> {
+    let mut snapshot = config_snapshot_without_recent_runs(paths, raw_yaml)?;
+    enrich_accounts_with_recent_runs(&mut snapshot.accounts, &snapshot.paths.actions_db_path);
+    Ok(snapshot)
+}
+
+fn config_snapshot_without_recent_runs(paths: ProjectPaths, raw_yaml: String) -> Result<ConfigSnapshot, String> {
     let config_value: Value = serde_yaml::from_str(&raw_yaml)
         .map_err(|err| format!("failed to parse {}: {}", paths.config_path, err))?;
     let config: ConfigYaml = serde_yaml::from_str(&raw_yaml)
@@ -1541,11 +1555,10 @@ fn config_snapshot(paths: ProjectPaths, raw_yaml: String) -> Result<ConfigSnapsh
     validation.valid = validation.errors.is_empty();
 
     let default_browser_provider = config_default_browser_provider(&config);
-    let mut accounts = map_accounts(
+    let accounts = map_accounts(
         config.accounts.as_deref().unwrap_or(&[]),
         &default_browser_provider,
     );
-    enrich_accounts_with_recent_runs(&mut accounts, &paths.actions_db_path);
 
     Ok(ConfigSnapshot {
         paths,
@@ -2533,14 +2546,7 @@ fn backup_actions_db(actions_db_path: &str) -> Result<Option<String>, String> {
     })?;
     let filename = format!("actions.{}.db", Local::now().format("%Y%m%d-%H%M%S"));
     let target = backup_dir.join(filename);
-    fs::copy(&source, &target).map_err(|err| {
-        format!(
-            "failed to backup {} to {}: {}",
-            actions_db_path,
-            normalize(&target),
-            err
-        )
-    })?;
+    crate::sqlite::backup_database(&source, &target)?;
     Ok(Some(normalize(&target)))
 }
 
@@ -4673,6 +4679,47 @@ accounts:
             .iter()
             .map(|issue| issue.path.clone())
             .collect()
+    }
+
+    #[test]
+    fn scheduler_snapshot_reuses_health_and_preserves_stopped_running_and_mismatch_states() {
+        use crate::commands::scheduler::scheduler_snapshot_with_health;
+        for (status, mismatch) in [("running", false), ("error", true), ("stopped", false)] {
+            let paths = test_paths();
+            let config = config_snapshot_without_recent_runs(paths.clone(), minimal_yaml(valid_account_yaml())).unwrap();
+            let calls = std::cell::Cell::new(0);
+            let state = AppState::default();
+            let snapshot = scheduler_snapshot_with_health(&state, &paths, config, || {
+                calls.set(calls.get() + 1);
+                if status == "stopped" { return Err("connection refused".into()); }
+                Ok(serde_json::from_value(serde_json::json!({
+                    "status": "ok", "process_id": std::process::id(),
+                    "config_path": if mismatch { "wrong/config.yaml" } else { paths.config_path.as_str() },
+                    "jobs": [ { "id": "fire_acct_1_20261116_100000", "next_run": "2026-11-16T10:00:00" },
+                              { "id": "fire_unconfigured_20261116_110000", "next_run": "2026-11-16T11:00:00" } ],
+                    "lock_held_externally": false,
+                })).unwrap())
+            }).unwrap();
+            assert_eq!(calls.get(), 1);
+            let json = serde_json::to_value(snapshot).unwrap();
+            assert_eq!(json["process"]["status"], status);
+            assert_eq!(json["health"]["status"], status);
+            assert_eq!(json["health"]["jobs"].as_array().unwrap().len(), usize::from(status == "running"));
+            if status == "running" { assert_eq!(json["health"]["nextAccountId"], "acct_1"); }
+        }
+    }
+
+    #[test]
+    fn scheduler_config_keeps_account_configuration_without_querying_recent_runs() {
+        let paths = test_paths();
+        let raw = minimal_yaml(valid_account_yaml());
+        let regular = config_snapshot(paths.clone(), raw.clone()).unwrap();
+        let lightweight = config_snapshot_without_recent_runs(paths, raw).unwrap();
+        assert_eq!(serde_json::to_value(&regular.config).unwrap(), serde_json::to_value(&lightweight.config).unwrap());
+        assert_eq!(regular.accounts[0].id(), lightweight.accounts[0].id());
+        assert_eq!(regular.accounts[0].active_hours(), lightweight.accounts[0].active_hours());
+        assert_eq!(regular.scheduler_fires_per_day(), lightweight.scheduler_fires_per_day());
+        assert!(lightweight.accounts[0].last_run_at.is_none());
     }
 
     #[test]
