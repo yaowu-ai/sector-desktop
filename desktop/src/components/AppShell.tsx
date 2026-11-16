@@ -14,6 +14,7 @@ import type { MenuProps } from "antd";
 import { Bell, LogOut, Moon, RefreshCw, Sun, UserRound } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { BrowserStatusContext } from "../app/BrowserStatusContext";
 import { useDesktopAuth } from "../app/DesktopAuthContext";
 import { useDesktopNotifications } from "../app/DesktopNotificationsContext";
 import {
@@ -29,6 +30,7 @@ import {
   checkBitbrowserApi,
   checkIxbrowserApi,
   getCurrentRunStatus,
+  loadSchedulerConfig,
 } from "../services/api";
 import {
   reportDesktopUsage,
@@ -70,6 +72,8 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
   const [ixbrowserStatus, setIxbrowserStatus] = useState<ApiStatus | null>(
     null,
   );
+  const [usedProviders, setUsedProviders] = useState({ bitbrowser: false, ixbrowser: false });
+  const browserRefreshRef = useRef<Promise<void> | null>(null);
   const [processStatus, setProcessStatus] = useState<ProcessStatus | null>(
     null,
   );
@@ -130,15 +134,32 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
     [activeKey, availableAppRoutes, visibleRoutes],
   );
 
-  const refreshBrowserStatuses = useCallback(async () => {
-    const [nextBitbrowserStatus, nextIxbrowserStatus] = await Promise.all([
-      checkBitbrowserApi(),
-      checkIxbrowserApi(),
-    ]);
-    setBitbrowserStatus(nextBitbrowserStatus);
-    setIxbrowserStatus(nextIxbrowserStatus);
-    return [nextBitbrowserStatus, nextIxbrowserStatus];
+  const refreshBrowserStatuses = useCallback(() => {
+    if (browserRefreshRef.current) return browserRefreshRef.current;
+    const request = (async () => {
+      const config = await loadSchedulerConfig();
+      const providers = new Set(config.accounts.map(account => account.browserProvider));
+      const uses = { bitbrowser: providers.has("bitbrowser"), ixbrowser: providers.has("ixbrowser") };
+      const [bitResult, ixResult] = await Promise.allSettled([
+        uses.bitbrowser ? checkBitbrowserApi() : null,
+        uses.ixbrowser ? checkIxbrowserApi() : null,
+      ]);
+      if (bitResult.status === "rejected") throw bitResult.reason;
+      if (ixResult.status === "rejected") throw ixResult.reason;
+      setUsedProviders(uses);
+      setBitbrowserStatus(bitResult.value);
+      setIxbrowserStatus(ixResult.value);
+    })();
+    browserRefreshRef.current = request;
+    const clearPending = () => { browserRefreshRef.current = null; };
+    void request.then(clearPending, clearPending);
+    return request;
   }, []);
+  const browserStatuses = useMemo(() => ({
+    bitbrowser: bitbrowserStatus, ixbrowser: ixbrowserStatus,
+    usesBitbrowser: usedProviders.bitbrowser, usesIxbrowser: usedProviders.ixbrowser,
+    refresh: refreshBrowserStatuses,
+  }), [bitbrowserStatus, ixbrowserStatus, usedProviders, refreshBrowserStatuses]);
 
   const reportTerminalUsageIfNeeded = useCallback(
     (nextStatus: ProcessStatus) => {
@@ -280,10 +301,15 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
   }, [refreshTask]);
 
   useEffect(() => {
-    const id = window.setInterval(() => {
-      void refreshBrowserStatuses().catch(handleBackgroundError(setShellError));
-    }, BROWSER_STATUS_POLL_MS);
-    return () => window.clearInterval(id);
+    let stopped = false;
+    let timer: number;
+    const poll = async () => {
+      try { await refreshBrowserStatuses(); }
+      catch (error) { handleBackgroundError(setShellError)(error); }
+      if (!stopped) timer = window.setTimeout(poll, BROWSER_STATUS_POLL_MS);
+    };
+    timer = window.setTimeout(poll, BROWSER_STATUS_POLL_MS);
+    return () => { stopped = true; window.clearTimeout(timer); };
   }, [refreshBrowserStatuses]);
 
   return (
@@ -354,7 +380,7 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
                 <span>
                   <StatusTag
                     status={bitbrowserTone(bitbrowserStatus)}
-                    label={bitbrowserLabel(bitbrowserStatus)}
+                    label={usedProviders.bitbrowser ? bitbrowserLabel(bitbrowserStatus) : "Bit浏览器未配置"}
                   />
                 </span>
               </Tooltip>
@@ -362,7 +388,7 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
                 <span>
                   <StatusTag
                     status={ixbrowserTone(ixbrowserStatus)}
-                    label={ixbrowserLabel(ixbrowserStatus)}
+                    label={usedProviders.ixbrowser ? ixbrowserLabel(ixbrowserStatus) : "ix浏览器未配置"}
                   />
                 </span>
               </Tooltip>
@@ -441,7 +467,9 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
             scope={activeRoute.scope}
             capability={activeRoute.capability}
           >
-            {activeRoute.element}
+            <BrowserStatusContext.Provider value={browserStatuses}>
+              {activeRoute.element}
+            </BrowserStatusContext.Provider>
           </RouteScopeFrame>
         </Content>
       </Layout>

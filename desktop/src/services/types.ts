@@ -511,6 +511,12 @@ export interface SchedulerProcessStatus {
   error?: string
 }
 
+export interface SchedulerSnapshot {
+  config: ConfigSnapshot
+  process: SchedulerProcessStatus
+  health: SchedulerHealth
+}
+
 export interface ApiStatus {
   available: boolean
   apiUrl: string

@@ -7,11 +7,14 @@ use std::net::TcpStream;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 use std::process::{Command, Stdio};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
+use tauri::Manager;
 use tauri::State;
 
-use crate::commands::config::{load_config, read_login_password_for_runtime};
+use crate::commands::config::{
+    load_config, load_scheduler_config, read_login_password_for_runtime, ConfigSnapshot,
+};
 use crate::paths::{normalize, project_paths, project_root, python_command_parts, ProjectPaths};
 use crate::state::{AppState, LicenseEntitlements};
 
@@ -84,7 +87,7 @@ pub struct RunLockStatus {
     active: bool,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct IpGroupConflict {
     ip_group: i64,
@@ -117,7 +120,7 @@ struct RawHealthJob {
 }
 
 #[derive(Debug, Deserialize)]
-struct RawHealth {
+pub(crate) struct RawHealth {
     status: String,
     process_id: Option<u32>,
     config_path: Option<String>,
@@ -410,114 +413,146 @@ pub fn stop_scheduler(state: State<'_, AppState>) -> Result<SchedulerStopResult,
     })
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SchedulerSnapshot {
+    config: ConfigSnapshot,
+    process: SchedulerProcessStatus,
+    health: SchedulerHealth,
+}
+
+#[tauri::command]
+pub async fn get_scheduler_snapshot(app: tauri::AppHandle) -> Result<SchedulerSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || read_scheduler_snapshot(&app.state::<AppState>()))
+        .await
+        .map_err(|err| err.to_string())?
+}
+
 #[tauri::command]
 pub fn get_scheduler_process_status(
     state: State<'_, AppState>,
 ) -> Result<SchedulerProcessStatus, String> {
-    let process_id = {
-        let scheduler = state
-            .scheduler_process
-            .lock()
-            .map_err(|_| "failed to lock scheduler state".to_string())?;
-        *scheduler
-    };
+    let paths = project_paths()?;
+    scheduler_process_status(&state, &paths, &read_health_endpoint())
+}
 
-    match process_id {
-        Some(process_id) if process_is_alive(process_id) => {
-            let paths = project_paths()?;
-            match scheduler_health_matches_paths(&paths) {
-                Ok(()) => Ok(SchedulerProcessStatus {
-                    status: "running".to_string(),
-                    process_id: Some(process_id),
-                    command: scheduler_command_for_paths(&paths)?.0,
-                    health_url: health_url(),
-                    error: None,
-                }),
-                Err(error) => Ok(SchedulerProcessStatus {
-                    status: "error".to_string(),
-                    process_id: Some(process_id),
-                    command: scheduler_command_for_paths(&paths)?.0,
-                    health_url: health_url(),
-                    error: Some(error),
-                }),
-            }
-        }
-        Some(process_id) => {
-            let mut scheduler = state
+fn scheduler_process_status(
+    state: &AppState,
+    paths: &ProjectPaths,
+    raw: &Result<RawHealth, String>,
+) -> Result<SchedulerProcessStatus, String> {
+    let tracked = *state
+        .scheduler_process
+        .lock()
+        .map_err(|_| "failed to lock scheduler state".to_string())?;
+    let command = scheduler_command_for_paths(paths)?.0;
+    let mut result = SchedulerProcessStatus {
+        status: "stopped".to_string(),
+        process_id: tracked,
+        command,
+        health_url: health_url(),
+        error: None,
+    };
+    if let Some(pid) = tracked {
+        if !process_is_alive(pid) {
+            *state
                 .scheduler_process
                 .lock()
-                .map_err(|_| "failed to lock scheduler state".to_string())?;
-            *scheduler = None;
-            Ok(SchedulerProcessStatus {
-                status: "stopped".to_string(),
-                process_id: Some(process_id),
-                command: scheduler_command()?,
-                health_url: health_url(),
-                error: Some("tracked scheduler process is no longer alive".to_string()),
-            })
+                .map_err(|_| "failed to lock scheduler state".to_string())? = None;
+            result.error = Some("tracked scheduler process is no longer alive".to_string());
+            return Ok(result);
         }
-        None => match read_health_endpoint() {
-            Ok(raw) => {
-                let paths = project_paths()?;
-                let discovered_pid = raw.process_id.or_else(scheduler_port_process_id);
+        result.status = "error".to_string();
+        match raw {
+            Ok(raw)
                 if raw
                     .config_path
                     .as_deref()
-                    .map(|path| same_path(path, &paths.config_path))
-                    .unwrap_or(false)
-                {
-                    if let Some(process_id) = discovered_pid.filter(|pid| process_is_alive(*pid)) {
-                        let mut scheduler = state
-                            .scheduler_process
-                            .lock()
-                            .map_err(|_| "failed to lock scheduler state".to_string())?;
-                        *scheduler = Some(process_id);
-                        return Ok(SchedulerProcessStatus {
-                            status: "running".to_string(),
-                            process_id: Some(process_id),
-                            command: scheduler_command_for_paths(&paths)?.0,
-                            health_url: health_url(),
-                            error: None,
-                        });
-                    }
-                }
-                Ok(SchedulerProcessStatus {
-                    status: "error".to_string(),
-                    process_id: discovered_pid,
-                    command: scheduler_command_for_paths(&paths)?.0,
-                    health_url: health_url(),
-                    error: Some(
-                        "an untracked scheduler is using port 9601 with a different or unknown config path"
-                            .to_string(),
-                    ),
-                })
+                    .map(|p| same_path(p, &paths.config_path))
+                    .unwrap_or(false) =>
+            {
+                result.status = "running".to_string();
             }
-            Err(_) => Ok(SchedulerProcessStatus {
-                status: "stopped".to_string(),
-                process_id: None,
-                command: scheduler_command()?,
-                health_url: health_url(),
-                error: None,
-            }),
-        },
+            Ok(raw) => {
+                result.error = Some(format!(
+                    "scheduler health endpoint is using {}, but the app is using {}",
+                    raw.config_path.as_deref().unwrap_or("an unknown config"),
+                    paths.config_path
+                ))
+            }
+            Err(error) => result.error = Some(error.clone()),
+        }
+        return Ok(result);
     }
+    if let Ok(raw) = raw {
+        result.process_id = raw.process_id.or_else(scheduler_port_process_id);
+        if raw
+            .config_path
+            .as_deref()
+            .map(|p| same_path(p, &paths.config_path))
+            .unwrap_or(false)
+            && result.process_id.map(process_is_alive).unwrap_or(false)
+        {
+            *state
+                .scheduler_process
+                .lock()
+                .map_err(|_| "failed to lock scheduler state".to_string())? = result.process_id;
+            result.status = "running".to_string();
+        } else {
+            result.status = "error".to_string();
+            result.error = Some(
+                "an untracked scheduler is using port 9601 with a different or unknown config path"
+                    .to_string(),
+            );
+        }
+    }
+    Ok(result)
 }
 
 #[tauri::command]
 pub fn get_scheduler_health(state: State<'_, AppState>) -> Result<SchedulerHealth, String> {
-    let process = get_scheduler_process_status(state)?;
-    let config = load_config()?;
-    let fires_per_day = config.scheduler_fires_per_day().unwrap_or(3).max(0);
-    let run_lock = read_run_lock_status()?;
-    let ip_group_conflicts = detect_ip_group_conflicts()?;
+    Ok(read_scheduler_snapshot(&state)?.health)
+}
 
-    match read_health_endpoint() {
+fn read_scheduler_snapshot(state: &AppState) -> Result<SchedulerSnapshot, String> {
+    let paths = project_paths()?;
+    let config = load_scheduler_config()?;
+    scheduler_snapshot_with_health(state, &paths, config, read_health_endpoint)
+}
+
+pub(crate) fn scheduler_snapshot_with_health(
+    state: &AppState,
+    paths: &ProjectPaths,
+    config: ConfigSnapshot,
+    read_health: impl FnOnce() -> Result<RawHealth, String>,
+) -> Result<SchedulerSnapshot, String> {
+    let raw = read_health();
+    let process = scheduler_process_status(state, paths, &raw)?;
+    let health = scheduler_health(paths, &config, &process, raw)?;
+    Ok(SchedulerSnapshot {
+        config,
+        process,
+        health,
+    })
+}
+
+fn scheduler_health(
+    paths: &ProjectPaths,
+    config: &ConfigSnapshot,
+    process: &SchedulerProcessStatus,
+    raw: Result<RawHealth, String>,
+) -> Result<SchedulerHealth, String> {
+    let fires_per_day = config.scheduler_fires_per_day().unwrap_or(3).max(0);
+    let run_lock = read_run_lock_status_for_paths(paths);
+    let ip_group_conflicts = detect_ip_group_conflicts(config)?;
+
+    match raw {
         Ok(raw) => {
-            let expected_config_path = project_paths()?.config_path;
+            let expected_config_path = &paths.config_path;
             if raw
                 .config_path
                 .as_deref()
-                .map(|path| !same_path(path, &expected_config_path))
+                .map(|path| !same_path(path, expected_config_path))
                 .unwrap_or(false)
             {
                 return Ok(SchedulerHealth {
@@ -603,14 +638,14 @@ pub fn get_scheduler_health(state: State<'_, AppState>) -> Result<SchedulerHealt
                 fires_per_day,
                 run_lock,
                 ip_group_conflicts,
-                error: process.error,
+                error: process.error.clone(),
             })
         }
         Err(error) => Ok(SchedulerHealth {
             status: if process.status == "running" {
                 "error".to_string()
             } else {
-                process.status
+                process.status.clone()
             },
             process_id: process.process_id,
             jobs: vec![],
@@ -656,10 +691,6 @@ pub fn clear_run_lock() -> Result<ClearRunLockResult, String> {
         cleared: true,
         message: "stale run.lock cleared".to_string(),
     })
-}
-
-fn scheduler_command() -> Result<Vec<String>, String> {
-    Ok(scheduler_command_for_paths(&project_paths()?)?.0)
 }
 
 fn scheduler_command_for_paths(
@@ -758,7 +789,8 @@ fn scheduler_health_matches_paths(paths: &ProjectPaths) -> Result<(), String> {
 
 fn read_health_endpoint() -> Result<RawHealth, String> {
     let address = format!("{}:{}", SCHEDULER_HOST, SCHEDULER_PORT);
-    let mut stream = TcpStream::connect(address.as_str())
+    let socket = std::net::SocketAddr::from(([127, 0, 0, 1], SCHEDULER_PORT));
+    let mut stream = TcpStream::connect_timeout(&socket, Duration::from_secs(2))
         .map_err(|err| format!("scheduler health endpoint is not reachable: {}", err))?;
     stream
         .set_read_timeout(Some(Duration::from_secs(2)))
@@ -851,58 +883,108 @@ fn scheduler_port_process_id() -> Option<u32> {
 
 fn read_run_lock_status() -> Result<RunLockStatus, String> {
     let paths = project_paths()?;
+    Ok(read_run_lock_status_for_paths(&paths))
+}
+
+fn read_run_lock_status_for_paths(paths: &ProjectPaths) -> RunLockStatus {
     let lock_path = std::path::PathBuf::from(&paths.lock_file_path);
     if !lock_path.exists() {
-        return Ok(RunLockStatus {
-            path: paths.lock_file_path,
+        return RunLockStatus {
+            path: paths.lock_file_path.clone(),
             exists: false,
             pid: None,
             active: false,
-        });
+        };
     }
 
     let raw_pid = std::fs::read_to_string(&lock_path).unwrap_or_default();
     let pid = raw_pid.trim().parse::<u32>().ok();
-    Ok(RunLockStatus {
-        path: paths.lock_file_path,
+    RunLockStatus {
+        path: paths.lock_file_path.clone(),
         exists: true,
         pid,
         active: pid.map(process_is_alive).unwrap_or(false),
-    })
+    }
 }
 
-fn detect_ip_group_conflicts() -> Result<Vec<IpGroupConflict>, String> {
-    let config = load_config()?;
+#[derive(Clone, PartialEq)]
+struct ConflictAccount {
+    id: String,
+    ip_group: i64,
+    active_hours: Vec<[f64; 2]>,
+}
+
+#[derive(Default)]
+struct ConflictCache {
+    accounts: Option<Vec<ConflictAccount>>,
+    conflicts: Vec<IpGroupConflict>,
+}
+
+impl ConflictCache {
+    fn get(&mut self, accounts: Vec<ConflictAccount>) -> Vec<IpGroupConflict> {
+        if self.accounts.as_ref() == Some(&accounts) {
+            return self.conflicts.clone();
+        }
+        self.conflicts = calculate_ip_group_conflicts(&accounts);
+        self.accounts = Some(accounts);
+        self.conflicts.clone()
+    }
+}
+
+fn detect_ip_group_conflicts(config: &ConfigSnapshot) -> Result<Vec<IpGroupConflict>, String> {
+    static CACHE: OnceLock<Mutex<ConflictCache>> = OnceLock::new();
     let accounts = config
         .accounts()
         .iter()
         .filter(|account| account.enabled() && account.scheduled())
-        .collect::<Vec<_>>();
-    let mut conflicts = Vec::new();
+        .filter_map(|account| {
+            account.ip_group().map(|ip_group| ConflictAccount {
+                id: account.id().to_string(),
+                ip_group,
+                active_hours: account.active_hours().to_vec(),
+            })
+        })
+        .collect();
+    Ok(CACHE
+        .get_or_init(|| Mutex::new(ConflictCache::default()))
+        .lock()
+        .map_err(|_| "failed to lock IP conflict cache".to_string())?
+        .get(accounts))
+}
 
-    for left_index in 0..accounts.len() {
-        for right_index in (left_index + 1)..accounts.len() {
-            let left = accounts[left_index];
-            let right = accounts[right_index];
-            let (Some(left_group), Some(right_group)) = (left.ip_group(), right.ip_group()) else {
-                continue;
-            };
-            if left_group != right_group {
-                continue;
-            }
-            if active_hours_overlap(left.active_hours(), right.active_hours()) {
-                conflicts.push(IpGroupConflict {
-                    ip_group: left_group,
-                    left_account_id: left.id().to_string(),
-                    right_account_id: right.id().to_string(),
-                    left_active_hours: left.active_hours().to_vec(),
-                    right_active_hours: right.active_hours().to_vec(),
-                });
+fn calculate_ip_group_conflicts(accounts: &[ConflictAccount]) -> Vec<IpGroupConflict> {
+    let mut groups: HashMap<i64, Vec<usize>> = HashMap::new();
+    for (index, account) in accounts.iter().enumerate() {
+        groups.entry(account.ip_group).or_default().push(index);
+    }
+    let mut conflicts = Vec::new();
+    for members in groups.values() {
+        for (offset, &left_index) in members.iter().enumerate() {
+            for &right_index in &members[offset + 1..] {
+                let left = &accounts[left_index];
+                let right = &accounts[right_index];
+                if active_hours_overlap(&left.active_hours, &right.active_hours) {
+                    conflicts.push((
+                        left_index,
+                        right_index,
+                        IpGroupConflict {
+                            ip_group: left.ip_group,
+                            left_account_id: left.id.clone(),
+                            right_account_id: right.id.clone(),
+                            left_active_hours: left.active_hours.clone(),
+                            right_active_hours: right.active_hours.clone(),
+                        },
+                    ));
+                }
             }
         }
     }
-
-    Ok(conflicts)
+    // Preserve the previous account-pair order, regardless of HashMap iteration order.
+    conflicts.sort_by_key(|(left, right, _)| (*left, *right));
+    conflicts
+        .into_iter()
+        .map(|(_, _, conflict)| conflict)
+        .collect()
 }
 
 fn active_hours_overlap(left: &[[f64; 2]], right: &[[f64; 2]]) -> bool {
@@ -992,7 +1074,39 @@ fn stop_process(process_id: u32) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{account_id_from_job_id, same_path};
+    use super::*;
+
+    #[test]
+    fn conflict_grouping_and_cache_keep_pair_order_and_invalidate_on_changes() {
+        let account = |id: &str, group, start, end| ConflictAccount {
+            id: id.to_string(),
+            ip_group: group,
+            active_hours: vec![[start, end]],
+        };
+        let mut accounts = vec![
+            account("a", 2, 9., 12.),
+            account("b", 1, 9., 12.),
+            account("c", 2, 10., 11.),
+            account("d", 1, 10., 11.),
+            account("touching", 2, 12., 14.),
+        ];
+        let mut cache = ConflictCache::default();
+        let first = cache.get(accounts.clone());
+        assert_eq!(
+            first
+                .iter()
+                .map(|r| (r.left_account_id.as_str(), r.right_account_id.as_str()))
+                .collect::<Vec<_>>(),
+            vec![("a", "c"), ("b", "d")]
+        );
+        assert_eq!(cache.get(accounts.clone()), first);
+        accounts[2].active_hours = vec![[14., 16.]];
+        let changed = cache.get(accounts.clone());
+        assert_eq!(changed.len(), 1);
+        assert_eq!(changed[0].left_account_id, "b");
+        accounts.remove(3);
+        assert!(cache.get(accounts).is_empty());
+    }
 
     #[test]
     fn parses_account_ids_with_underscores() {

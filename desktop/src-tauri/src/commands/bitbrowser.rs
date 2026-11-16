@@ -248,7 +248,7 @@ pub struct SyncApplyResult {
     save_result: SaveResult,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn check_bitbrowser_api() -> ApiStatus {
     let checked_at = Local::now().to_rfc3339();
     let api_url = bitbrowser_api_url();
@@ -269,7 +269,7 @@ pub fn check_bitbrowser_api() -> ApiStatus {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn check_ixbrowser_api() -> ApiStatus {
     let checked_at = Local::now().to_rfc3339();
     let api_url = ixbrowser_api_url();

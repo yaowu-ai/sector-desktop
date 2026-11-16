@@ -136,9 +136,15 @@ def release_lock():
 
 
 def init_db():
-    conn = sqlite3.connect(LOG_DB)
-    initialize_db_schema(conn)
-    return conn
+    conn = sqlite3.connect(LOG_DB, timeout=2)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=FULL")
+        initialize_db_schema(conn)
+        return conn
+    except Exception:
+        conn.close()
+        raise
 
 
 def initialize_db_schema(conn):
@@ -176,6 +182,14 @@ def initialize_db_schema(conn):
             ended_at TEXT,
             detail TEXT
         )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_scheduler_runs_platform_time
+        ON scheduler_job_runs(platform, COALESCE(started_at, scheduled_run, created_at) DESC, job_id DESC)
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_scheduler_runs_time
+        ON scheduler_job_runs(COALESCE(started_at, scheduled_run, created_at) DESC, job_id DESC)
     """)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS fyp_video_views (

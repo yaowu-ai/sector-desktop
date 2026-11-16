@@ -340,8 +340,7 @@ pub fn get_sqlite_status() -> Result<SqliteStatus, String> {
         });
     }
 
-    let conn = Connection::open(&db_path)
-        .map_err(|err| format!("failed to open {}: {}", paths.actions_db_path, err))?;
+    let conn = crate::sqlite::open_readonly(&db_path)?;
     Ok(SqliteStatus {
         path: paths.actions_db_path,
         exists: true,
@@ -432,8 +431,7 @@ pub fn query_fyp_stats(filter: StatsScopeRequest) -> Result<FypStatsSummary, Str
         });
     }
 
-    let conn = Connection::open(&db_path)
-        .map_err(|err| format!("failed to open {}: {}", paths.actions_db_path, err))?;
+    let conn = crate::sqlite::open_readonly(&db_path)?;
     if !table_exists(&conn, "action_log")? {
         return Ok(FypStatsSummary {
             scope,
@@ -545,8 +543,7 @@ pub fn query_action_logs(filter: ActionLogFilter) -> Result<Vec<ActionLogRecord>
         return Ok(vec![]);
     }
 
-    let conn = Connection::open(&db_path)
-        .map_err(|err| format!("failed to open {}: {}", paths.actions_db_path, err))?;
+    let conn = crate::sqlite::open_readonly(&db_path)?;
     if !table_exists(&conn, "action_log")? {
         return Ok(vec![]);
     }
@@ -610,8 +607,7 @@ pub fn query_fyp_video_views(
         return Ok(vec![]);
     }
 
-    let conn = Connection::open(&db_path)
-        .map_err(|err| format!("failed to open {}: {}", paths.actions_db_path, err))?;
+    let conn = crate::sqlite::open_readonly(&db_path)?;
     if !table_exists(&conn, "fyp_video_views")? {
         return Ok(vec![]);
     }
@@ -739,7 +735,7 @@ fn normalized_dedupe_text(value: &str) -> String {
     value.trim().to_lowercase()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn query_scheduler_job_runs(
     filter: SchedulerJobRunFilter,
 ) -> Result<Vec<SchedulerJobRunRecord>, String> {
@@ -749,55 +745,28 @@ pub fn query_scheduler_job_runs(
         return Ok(vec![]);
     }
 
-    let conn = Connection::open(&db_path)
-        .map_err(|err| format!("failed to open {}: {}", paths.actions_db_path, err))?;
+    let conn = crate::sqlite::open_readonly(&db_path)?;
     if !table_exists(&conn, "scheduler_job_runs")? {
         return Ok(vec![]);
     }
 
-    let platform = normalized_platform_filter(filter.platform.as_deref())?;
-    let account_id = optional_trim(filter.account_id.as_deref());
-    let start_ts = optional_trim(filter.start_ts.as_deref());
-    let end_ts = optional_trim(filter.end_ts.as_deref());
-    let include_pending = filter.include_pending.unwrap_or(false);
-    let limit = normalized_limit(filter.limit) as i64;
-
-    let query = "
-        SELECT job_id, platform, account_id, scheduled_run, status, started_at, ended_at, detail
-        FROM scheduler_job_runs
-        WHERE (?1 IS NULL OR platform = ?1)
-          AND (?2 IS NULL OR account_id = ?2)
-          AND (?3 IS NULL OR COALESCE(started_at, scheduled_run, created_at) >= ?3)
-          AND (?4 IS NULL OR COALESCE(started_at, scheduled_run, created_at) <= ?4)
-          AND (?5 OR status <> 'pending')
-        ORDER BY COALESCE(started_at, scheduled_run, created_at) DESC, job_id DESC
-        LIMIT ?6";
+    let (query, values) = scheduler_run_query(&filter)?;
     let mut stmt = conn
-        .prepare(query)
+        .prepare(&query)
         .map_err(|err| format!("failed to prepare scheduler_job_runs query: {}", err))?;
     let rows = stmt
-        .query_map(
-            params![
-                platform,
-                account_id,
-                start_ts,
-                end_ts,
-                include_pending,
-                limit
-            ],
-            |row| {
-                Ok(SchedulerJobRunRecord {
-                    job_id: row.get(0)?,
-                    platform: row.get(1)?,
-                    account_id: row.get(2)?,
-                    scheduled_run: row.get(3)?,
-                    status: row.get(4)?,
-                    started_at: row.get(5)?,
-                    ended_at: row.get(6)?,
-                    detail: redact_line(&row.get::<_, Option<String>>(7)?.unwrap_or_default(), &[]),
-                })
-            },
-        )
+        .query_map(rusqlite::params_from_iter(values), |row| {
+            Ok(SchedulerJobRunRecord {
+                job_id: row.get(0)?,
+                platform: row.get(1)?,
+                account_id: row.get(2)?,
+                scheduled_run: row.get(3)?,
+                status: row.get(4)?,
+                started_at: row.get(5)?,
+                ended_at: row.get(6)?,
+                detail: redact_line(&row.get::<_, Option<String>>(7)?.unwrap_or_default(), &[]),
+            })
+        })
         .map_err(|err| format!("failed to query scheduler_job_runs: {}", err))?;
 
     let mut result = Vec::new();
@@ -805,6 +774,45 @@ pub fn query_scheduler_job_runs(
         result.push(row.map_err(|err| format!("failed to read scheduler_job_runs row: {}", err))?);
     }
     Ok(result)
+}
+
+fn scheduler_run_query(
+    filter: &SchedulerJobRunFilter,
+) -> Result<(String, Vec<rusqlite::types::Value>), String> {
+    let mut query = String::from("SELECT job_id, platform, account_id, scheduled_run, status, started_at, ended_at, detail FROM scheduler_job_runs WHERE 1=1");
+    let mut values = Vec::new();
+    let platform = normalized_platform_filter(filter.platform.as_deref())?;
+    for (column, value) in [
+        ("platform", platform.as_deref()),
+        ("account_id", optional_trim(filter.account_id.as_deref())),
+    ] {
+        if let Some(value) = value {
+            query.push_str(&format!(" AND {} = ?", column));
+            values.push(rusqlite::types::Value::Text(value.to_string()));
+        }
+    }
+    for (operator, value) in [
+        (">=", optional_trim(filter.start_ts.as_deref())),
+        ("<=", optional_trim(filter.end_ts.as_deref())),
+    ] {
+        if let Some(value) = value {
+            query.push_str(&format!(
+                " AND COALESCE(started_at, scheduled_run, created_at) {} ?",
+                operator
+            ));
+            values.push(rusqlite::types::Value::Text(value.to_string()));
+        }
+    }
+    if !filter.include_pending.unwrap_or(false) {
+        query.push_str(" AND status <> 'pending'");
+    }
+    query.push_str(
+        " ORDER BY COALESCE(started_at, scheduled_run, created_at) DESC, job_id DESC LIMIT ?",
+    );
+    values.push(rusqlite::types::Value::Integer(
+        normalized_limit(filter.limit) as i64,
+    ));
+    Ok((query, values))
 }
 
 #[tauri::command]
@@ -817,8 +825,7 @@ pub fn query_target_engagements(
         return Ok(vec![]);
     }
 
-    let conn = Connection::open(&db_path)
-        .map_err(|err| format!("failed to open {}: {}", paths.actions_db_path, err))?;
+    let conn = crate::sqlite::open_readonly(&db_path)?;
     if !table_exists(&conn, "target_engagements")? {
         return Ok(vec![]);
     }
@@ -878,8 +885,7 @@ pub fn query_target_follows(filter: TargetRecordFilter) -> Result<Vec<TargetFoll
         return Ok(vec![]);
     }
 
-    let conn = Connection::open(&db_path)
-        .map_err(|err| format!("failed to open {}: {}", paths.actions_db_path, err))?;
+    let conn = crate::sqlite::open_readonly(&db_path)?;
     if !table_exists(&conn, "target_follows")? {
         return Ok(vec![]);
     }
@@ -940,8 +946,7 @@ pub fn query_target_watermarks(
         return Ok(vec![]);
     }
 
-    let conn = Connection::open(&db_path)
-        .map_err(|err| format!("failed to open {}: {}", paths.actions_db_path, err))?;
+    let conn = crate::sqlite::open_readonly(&db_path)?;
     if !table_exists(&conn, "target_engagements")? {
         return Ok(vec![]);
     }
@@ -1050,8 +1055,7 @@ pub fn query_target_stats(filter: StatsScopeRequest) -> Result<TargetStatsSummar
         });
     }
 
-    let conn = Connection::open(&db_path)
-        .map_err(|err| format!("failed to open {}: {}", paths.actions_db_path, err))?;
+    let conn = crate::sqlite::open_readonly(&db_path)?;
     let watermarks = if table_exists(&conn, "target_engagements")? {
         query_target_engagement_rows(
             &conn,
@@ -1244,8 +1248,7 @@ fn read_today_db_stats(today: &str, platform: &str) -> Result<TodayDbStats, Stri
         return Ok(TodayDbStats::default());
     }
 
-    let conn = Connection::open(&db_path)
-        .map_err(|err| format!("failed to open {}: {}", paths.actions_db_path, err))?;
+    let conn = crate::sqlite::open_readonly(&db_path)?;
     let day_prefix = format!("{}%", today);
     let action_log_platform_expr = platform_select_expr(&conn, "action_log", "account_id")?;
     let target_platform_expr = platform_select_expr(&conn, "target_engagements", "our_account")?;
@@ -1389,9 +1392,7 @@ fn open_actions_db_if_exists() -> Result<Option<Connection>, String> {
     if !db_path.exists() {
         return Ok(None);
     }
-    Connection::open(&db_path)
-        .map(Some)
-        .map_err(|err| format!("failed to open {}: {}", paths.actions_db_path, err))
+    crate::sqlite::open_readonly(&db_path).map(Some)
 }
 
 fn query_profile_stats_latest_rows(
@@ -1832,6 +1833,77 @@ fn sorted_set(values: HashSet<String>) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn scheduler_filters_match_legacy_query_for_every_optional_filter() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE scheduler_job_runs (job_id TEXT PRIMARY KEY, platform TEXT, account_id TEXT, scheduled_run TEXT, status TEXT, created_at TEXT, started_at TEXT, ended_at TEXT, detail TEXT);
+            INSERT INTO scheduler_job_runs VALUES
+            ('a','tiktok','one','2026-01-02','success','2026-01-01','2026-01-03',NULL,''),
+            ('b','tiktok','two','2026-01-04','pending','2026-01-01',NULL,NULL,''),
+            ('c','instagram','one',NULL,'failed','2026-01-02',NULL,NULL,''),
+            ('d','tiktok','one',NULL,'skipped','2026-01-02',NULL,NULL,'');").unwrap();
+        for platform in [None, Some("tiktok"), Some("all")] {
+            for account in [None, Some("one"), Some("missing")] {
+                for start in [None, Some("2026-01-02")] {
+                    for end in [None, Some("2026-01-03")] {
+                        for pending in [false, true] {
+                            for limit in [1, 120] {
+                                let filter = super::SchedulerJobRunFilter {
+                                    platform: platform.map(String::from),
+                                    account_id: account.map(String::from),
+                                    start_ts: start.map(String::from),
+                                    end_ts: end.map(String::from),
+                                    include_pending: Some(pending),
+                                    limit: Some(limit),
+                                };
+                                let (sql, values) = super::scheduler_run_query(&filter).unwrap();
+                                let rows = conn
+                                    .prepare(&sql)
+                                    .unwrap()
+                                    .query_map(rusqlite::params_from_iter(values), |r| {
+                                        r.get::<_, String>(0)
+                                    })
+                                    .unwrap()
+                                    .collect::<Result<Vec<_>, _>>()
+                                    .unwrap();
+                                let normalized =
+                                    super::normalized_platform_filter(platform).unwrap();
+                                let old = "SELECT job_id FROM scheduler_job_runs WHERE (?1 IS NULL OR platform=?1) AND (?2 IS NULL OR account_id=?2) AND (?3 IS NULL OR COALESCE(started_at,scheduled_run,created_at)>=?3) AND (?4 IS NULL OR COALESCE(started_at,scheduled_run,created_at)<=?4) AND (?5 OR status <> 'pending') ORDER BY COALESCE(started_at,scheduled_run,created_at) DESC, job_id DESC LIMIT ?6";
+                                let expected = conn
+                                    .prepare(old)
+                                    .unwrap()
+                                    .query_map(
+                                        rusqlite::params![
+                                            normalized,
+                                            account,
+                                            start,
+                                            end,
+                                            pending,
+                                            limit as i64
+                                        ],
+                                        |r| r.get::<_, String>(0),
+                                    )
+                                    .unwrap()
+                                    .collect::<Result<Vec<_>, _>>()
+                                    .unwrap();
+                                assert_eq!(rows, expected);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let filter = super::SchedulerJobRunFilter {
+            platform: Some("tiktok' OR 1=1".into()),
+            account_id: None,
+            start_ts: None,
+            end_ts: None,
+            include_pending: None,
+            limit: None,
+        };
+        assert!(super::scheduler_run_query(&filter).is_err());
+    }
+
     use super::*;
 
     #[test]
