@@ -8,6 +8,9 @@ from core import runtime
 
 
 class SchedulerSqliteTests(unittest.TestCase):
+    def setUp(self):
+        runtime._DB_SCHEMA_READY.clear()
+
     def test_runtime_enables_wal_without_relaxing_durability_or_losing_rows(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "actions.db"
@@ -54,6 +57,36 @@ class SchedulerSqliteTests(unittest.TestCase):
             self.assertNotIn("TEMP B-TREE", plan)
         finally:
             conn.close()
+
+    def test_schema_initialization_runs_once_per_database_path(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            path = Path(directory) / "actions.db"
+            with patch.object(runtime, "LOG_DB", path), patch.object(
+                runtime, "initialize_db_schema", wraps=runtime.initialize_db_schema
+            ) as initialize:
+                first = runtime.init_db()
+                first.close()
+                second = runtime.init_db()
+                second.close()
+                self.assertEqual(initialize.call_count, 1)
+
+    def test_scheduler_schedule_batch_commits_all_rows_or_none(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+            path = Path(directory) / "actions.db"
+            with patch.object(runtime, "LOG_DB", path):
+                with runtime.scheduler_job_schedule_batch():
+                    runtime.record_scheduler_job_scheduled("job-a", "tiktok", "a", "2026-11-16T10:00:00")
+                    runtime.record_scheduler_job_scheduled("job-b", "tiktok", "b", "2026-11-16T11:00:00")
+                conn = sqlite3.connect(path)
+                self.assertEqual(conn.execute("SELECT COUNT(*) FROM scheduler_job_runs").fetchone()[0], 2)
+                conn.close()
+                with self.assertRaises(ValueError):
+                    with runtime.scheduler_job_schedule_batch():
+                        runtime.record_scheduler_job_scheduled("job-c", "tiktok", "c", "2026-11-16T12:00:00")
+                        runtime.record_scheduler_job_scheduled("job-d", "unsupported", "d", "2026-11-16T13:00:00")
+                conn = sqlite3.connect(path)
+                self.assertEqual(conn.execute("SELECT COUNT(*) FROM scheduler_job_runs").fetchone()[0], 2)
+                conn.close()
 
 
 if __name__ == "__main__":

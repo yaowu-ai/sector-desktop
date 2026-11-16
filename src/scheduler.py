@@ -382,30 +382,31 @@ def schedule_today_fires():
     now = datetime.now()
     total = 0
 
-    for acc in accounts:
-        acc_id = acc["id"]
-        group = acc.get("ip_group")
-        active_hours = resolve_active_hours(acc, cfg)
+    with main_runtime.scheduler_job_schedule_batch():
+        for acc in accounts:
+            acc_id = acc["id"]
+            group = acc.get("ip_group")
+            active_hours = resolve_active_hours(acc, cfg)
 
-        fires = [f for f in generate_fire_times(active_hours, fires_per_day) if f > now]
-        for f in fires:
-            job_id = f"fire_{acc_id}_{f.strftime('%Y%m%d_%H%M%S')}"
-            scheduler.add_job(
-                account_session_task,
-                trigger="date",
-                run_date=f,
-                id=job_id,
-                args=[acc_id, job_id],
-                replace_existing=True,
-            )
-            main_runtime.record_scheduler_job_scheduled(
-                job_id,
-                account_platform(acc),
-                acc_id,
-                f.isoformat(),
-            )
-            logger.info(f"Scheduled {acc_id} at {f.isoformat()} (ip_group={group})")
-        total += len(fires)
+            fires = [f for f in generate_fire_times(active_hours, fires_per_day) if f > now]
+            for f in fires:
+                job_id = f"fire_{acc_id}_{f.strftime('%Y%m%d_%H%M%S')}"
+                scheduler.add_job(
+                    account_session_task,
+                    trigger="date",
+                    run_date=f,
+                    id=job_id,
+                    args=[acc_id, job_id],
+                    replace_existing=True,
+                )
+                main_runtime.record_scheduler_job_scheduled(
+                    job_id,
+                    account_platform(acc),
+                    acc_id,
+                    f.isoformat(),
+                )
+                logger.info(f"Scheduled {acc_id} at {f.isoformat()} (ip_group={group})")
+            total += len(fires)
 
     if total == 0:
         logger.warning("No fires scheduled for today (active_hours already past)")
