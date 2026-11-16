@@ -116,8 +116,6 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
     () =>
       buildSiderMenuItems(visibleRoutes, desktopNotifications.unreadCount, (key) => {
         setActiveKey(key);
-        // rc-menu also toggles the title; retain expansion after its click handler.
-        queueMicrotask(() => setOpenKeys(current => current.includes('publishing') ? current : [...current, 'publishing']));
       }),
     [desktopNotifications.unreadCount, visibleRoutes],
   );
