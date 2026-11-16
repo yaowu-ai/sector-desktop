@@ -23,7 +23,7 @@ assert.match(
   'reserved modules should use the shared entry factory',
 )
 
-for (const platform of ['instagram', 'whatsapp', 'douyin']) {
+for (const platform of ['instagram', 'douyin']) {
   const moduleSource = read('platforms', platform, 'index.ts')
   const pageSource = read('platforms', platform, 'pages', 'index.ts')
   const serviceSource = read('platforms', platform, 'services', 'index.ts')

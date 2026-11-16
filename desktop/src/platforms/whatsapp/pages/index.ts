@@ -1,3 +1,2 @@
-import { createReservedPlatformEntry } from '../../common/reservedModule'
-
-export const whatsappPageEntry = createReservedPlatformEntry('WhatsApp', '页面')
+export { WhatsAppWorkspace } from './WhatsAppWorkspace'
+export const whatsappPageEntry = { implemented: true, integration: 'hosted_web' } as const

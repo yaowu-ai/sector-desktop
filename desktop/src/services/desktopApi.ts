@@ -32,6 +32,7 @@ export interface DesktopApiEnvelope<T> {
 
 export interface DesktopSession {
   accessToken: string
+  whatsappContext?: string
   refreshToken?: string
   expiresAt: number
   schedulerCredential?: DesktopSchedulerCredential
@@ -227,12 +228,13 @@ export function loadDesktopSession(): DesktopSession | null {
     }
     const normalized: DesktopSession = {
       ...session,
+      whatsappContext: session.whatsappContext || crypto.randomUUID(),
       userId: session.userId || '',
       userName: session.userName || session.username,
       phone: session.phone || '',
       userRole: normalizeUserRole(session.userRole),
     }
-    if (typeof _email !== 'undefined' || typeof _mail !== 'undefined' || typeof _userEmail !== 'undefined') {
+    if (!session.whatsappContext || typeof _email !== 'undefined' || typeof _mail !== 'undefined' || typeof _userEmail !== 'undefined') {
       saveDesktopSession(normalized)
     }
     return normalized
@@ -252,6 +254,7 @@ export function clearDesktopSession() {
 
 export function buildDesktopSession(username: string, response: DesktopAuthResponse): DesktopSession {
   return {
+    whatsappContext: crypto.randomUUID(),
     username,
     userId: response.user?.userId || '',
     userName: response.user?.userName || username,
@@ -269,6 +272,7 @@ export function applyDesktopAuthResponse(
 ): DesktopSession {
   return {
     ...buildDesktopSession(session.username, response),
+    whatsappContext: session.whatsappContext || crypto.randomUUID(),
     refreshToken: response.refreshToken || session.refreshToken,
     schedulerCredential: session.schedulerCredential,
   }
@@ -334,6 +338,23 @@ export function desktopRefresh(session: DesktopSession, apiBaseUrl = getDesktopA
       body: { refreshToken: session.refreshToken },
     },
   )
+}
+
+export async function issueDesktopWhatsAppTicket(params: {
+  session: DesktopSession; apiBaseUrl: string; nonce: string; workspaceOrigin: string; parentOrigin: string
+}) {
+  const result = await desktopApiRequest<{ ticket: string; expiresAt: number }>(
+    params.apiBaseUrl, '/whatsapp/ticket', {
+      method: 'POST', token: params.session.accessToken, timeoutMs: 10000,
+      body: { nonce: params.nonce, workspaceOrigin: params.workspaceOrigin,
+        parentOrigin: params.parentOrigin, deviceFingerprint: getDeviceFingerprint() },
+    },
+  )
+  if (!result || typeof result.ticket !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(result.ticket) ||
+      !Number.isFinite(result.expiresAt) || result.expiresAt <= Date.now()) {
+    throw new Error('统一登录票据无效或已过期，请重新连接')
+  }
+  return result
 }
 
 export function issueDesktopSchedulerCredential(

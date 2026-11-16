@@ -39,6 +39,7 @@ import {
 const ENTITLEMENT_POLL_MS = 10 * 1000;
 const SCHEDULER_CREDENTIAL_MIN_VALID_MS = 60 * 1000;
 const ACCESS_TOKEN_REFRESH_AHEAD_MS = 60 * 1000;
+const AUTH_SUPERSEDED = "桌面登录状态已变更";
 
 interface DesktopAuthContextValue {
   apiBaseUrl: string;
@@ -69,7 +70,7 @@ interface EntitlementRequestEntry {
   request: Promise<EntitlementHydrationResult>;
 }
 
-const DesktopAuthContext = createContext<DesktopAuthContextValue | null>(null);
+export const DesktopAuthContext = createContext<DesktopAuthContextValue | null>(null);
 
 export function DesktopAuthProvider({
   children,
@@ -90,6 +91,8 @@ export function DesktopAuthProvider({
     null,
   );
   const entitlementRequestRef = useRef<EntitlementRequestEntry | null>(null);
+  const authEpoch = useRef(0);
+  const loggingOut = useRef(false);
   const sessionRef = useRef<DesktopSession | null>(null);
   sessionRef.current = session;
 
@@ -102,6 +105,8 @@ export function DesktopAuthProvider({
 
   const refreshSessionIfNeeded = useCallback(
     async (current: DesktopSession, nextApiBaseUrl = apiBaseUrl) => {
+      if (loggingOut.current) throw new Error(AUTH_SUPERSEDED);
+      const epoch = authEpoch.current;
       const remainingMs = current.expiresAt - Date.now();
       if (remainingMs > ACCESS_TOKEN_REFRESH_AHEAD_MS) {
         return current;
@@ -114,6 +119,7 @@ export function DesktopAuthProvider({
       }
 
       const auth = await desktopRefresh(current, nextApiBaseUrl);
+      if (epoch !== authEpoch.current) throw new Error(AUTH_SUPERSEDED);
       const nextSession = applyDesktopAuthResponse(current, auth);
       saveDesktopSession(nextSession);
       setSession(nextSession);
@@ -124,6 +130,8 @@ export function DesktopAuthProvider({
 
   const hydrateEntitlement = useCallback(
     async (nextSession: DesktopSession, nextApiBaseUrl = apiBaseUrl) => {
+      if (loggingOut.current) throw new Error(AUTH_SUPERSEDED);
+      const epoch = authEpoch.current;
       const freshSession = await refreshSessionIfNeeded(
         nextSession,
         nextApiBaseUrl,
@@ -138,6 +146,7 @@ export function DesktopAuthProvider({
           freshSession,
           nextApiBaseUrl,
         );
+        if (epoch !== authEpoch.current) throw new Error(AUTH_SUPERSEDED);
         setSubscription(nextSubscription);
 
         if (nextSubscription.status !== "active") {
@@ -180,6 +189,7 @@ export function DesktopAuthProvider({
             schedulerCredential: undefined,
           };
         }
+        if (epoch !== authEpoch.current) throw new Error(AUTH_SUPERSEDED);
         saveDesktopSession(nextSessionWithCredential);
         setSession(nextSessionWithCredential);
         setDevice(nextDevice);
@@ -202,7 +212,12 @@ export function DesktopAuthProvider({
     [apiBaseUrl, refreshSessionIfNeeded],
   );
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
+    if (loggingOut.current) return;
+    loggingOut.current = true;
+    authEpoch.current++;
+    clearDesktopSession();
+    await signOutEmbeddedWorkspaces();
     clearDesktopSession();
     clearRuntimeState();
     setError(null);
@@ -236,6 +251,7 @@ export function DesktopAuthProvider({
     try {
       await hydrateEntitlement(session, apiBaseUrl);
     } catch (error) {
+      if (error instanceof Error && error.message === AUTH_SUPERSEDED) return;
       const message = formatError(error);
       if (isDesktopAuthExpiredError(message)) {
         logout();
@@ -260,6 +276,8 @@ export function DesktopAuthProvider({
       password: string;
     }) => {
       const nextApiBaseUrl = values.apiBaseUrl.trim();
+      loggingOut.current = false;
+      const epoch = ++authEpoch.current;
       setLoading(true);
       setError(null);
       setEntitlementWarning(null);
@@ -271,6 +289,7 @@ export function DesktopAuthProvider({
           values.password,
           nextApiBaseUrl,
         );
+        if (epoch !== authEpoch.current) throw new Error(AUTH_SUPERSEDED);
         const nextSession = buildDesktopSession(values.username, auth);
         saveDesktopSession(nextSession);
         setSession(nextSession);
@@ -284,6 +303,7 @@ export function DesktopAuthProvider({
             entitlement.license.status === "active",
         };
       } catch (error) {
+        if (error instanceof Error && error.message === AUTH_SUPERSEDED) return { authorized: false };
         clearDesktopSession();
         clearRuntimeState();
         const message = formatError(error);
@@ -308,6 +328,7 @@ export function DesktopAuthProvider({
       try {
         await hydrateEntitlement(saved, apiBaseUrl);
       } catch (error) {
+        if (error instanceof Error && error.message === AUTH_SUPERSEDED) return;
         const message = formatError(error);
         if (isDesktopAuthExpiredError(message)) {
           clearDesktopSession();
@@ -331,12 +352,13 @@ export function DesktopAuthProvider({
 
     const pollEntitlement = async () => {
       const current = sessionRef.current;
-      if (!current) return;
+      if (!current || loggingOut.current) return;
       try {
         await hydrateEntitlement(current, apiBaseUrl);
         setEntitlementWarning(null);
         setError(null);
       } catch (error) {
+        if (error instanceof Error && error.message === AUTH_SUPERSEDED) return;
         const message = formatError(error);
         if (isDesktopAuthExpiredError(message)) {
           logout();
@@ -405,6 +427,17 @@ export function DesktopAuthProvider({
       {children}
     </DesktopAuthContext.Provider>
   );
+}
+
+export async function signOutEmbeddedWorkspaces() {
+  const tasks: Promise<unknown>[] = [];
+  window.dispatchEvent(new CustomEvent("account-matrix:before-logout", { detail: { tasks } }));
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([Promise.allSettled(tasks), new Promise(resolve => {
+      timeout = setTimeout(resolve, 3000);
+    })]);
+  } finally { clearTimeout(timeout); }
 }
 
 export function DesktopAuthGate({ children }: { children: React.ReactNode }) {

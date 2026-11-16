@@ -1,4 +1,6 @@
 :root {
+  --wa-workspace-surface: #ffffff;
+  --wa-workspace-border: #dbe7f6;
   color: #172033;
   background: #f3f6fb;
   font-synthesis: none;
@@ -8,8 +10,56 @@
 }
 
 :root[data-theme="dark"] {
+  --wa-workspace-surface: #111d31;
+  --wa-workspace-border: #2a3c58;
   color: #e5e7eb;
   background: #0f172a;
+}
+
+.app-content.app-content-embedded {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+
+.wa-workspace {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.wa-workspace[hidden] { display: none; }
+.wa-workspace-toolbar {
+  display: flex;
+  flex: 0 0 48px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 24px;
+  background: var(--wa-workspace-surface);
+  border-bottom: 1px solid var(--wa-workspace-border);
+}
+.wa-workspace-body { position: relative; flex: 1 1 auto; min-height: 0; }
+.wa-workspace-frame { display: block; width: 100%; height: 100%; border: 0; }
+.wa-workspace-loading,
+.wa-workspace-placeholder,
+.wa-workspace-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--wa-workspace-surface);
+}
+.wa-workspace-placeholder { flex: 1; padding: 32px; }
+.wa-workspace-loading { position: absolute; inset: 0; }
+.wa-workspace-error {
+  position: absolute;
+  inset: 0;
+  flex-direction: column;
+  gap: 24px;
+  padding: 32px;
 }
 
 * {

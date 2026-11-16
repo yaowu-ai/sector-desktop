@@ -76,7 +76,7 @@ assert.match(
 )
 assert.match(routes, /scope: 'system'/, 'system routes should remain system scoped')
 
-for (const platform of ['instagram', 'whatsapp', 'douyin']) {
+for (const platform of ['instagram', 'douyin']) {
   const moduleSource = read('platforms', platform, 'index.ts')
   assert.match(moduleSource, /implementation: 'reserved'|createReservedPlatformModule/)
   assert.doesNotMatch(moduleSource, /platforms\/tiktok|from ['"][^'"]*tiktok/)
