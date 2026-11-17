@@ -23,7 +23,8 @@ import {
   filterRoutesByPlatformAvailability,
   normalizeDesktopUserRole,
 } from "../app/routePermissions";
-import { appRoutes, routes, type AppRoute } from "../app/routes";
+import { appRoutes, routes, whatsappRoutes, whatsappViewByRoute, type AppRoute } from "../app/routes";
+import { WhatsAppWorkspace } from "../platforms/whatsapp/pages";
 import { usePlatformContext } from "../app/PlatformContext";
 import {
   PROCESS_STARTED_EVENT,
@@ -33,6 +34,7 @@ import {
   loadSchedulerConfig,
 } from "../services/api";
 import {
+  issueDesktopWhatsAppTicket,
   reportDesktopUsage,
   type DesktopSession,
 } from "../services/desktopApi";
@@ -55,13 +57,17 @@ const BROWSER_STATUS_POLL_MS = 10000;
 interface AppShellProps {
   themeMode: "light" | "dark";
   onThemeModeChange: (mode: "light" | "dark") => void;
+  whatsappWorkspaceUrl?: string;
 }
 
-export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
+export function AppShell({ themeMode, onThemeModeChange, whatsappWorkspaceUrl }: AppShellProps) {
   const contentRef = useRef<HTMLElement>(null);
   const desktopAuth = useDesktopAuth();
   const desktopNotifications = useDesktopNotifications();
   const { currentPlatformDefinition } = usePlatformContext();
+  const isWhatsApp = currentPlatformDefinition.integration === "hosted_web";
+  const [whatsappVisited, setWhatsappVisited] = useState(isWhatsApp);
+  const platformRoutes = isWhatsApp ? whatsappRoutes : routes;
   const startupReportedRef = useRef<string | null>(null);
   const previousProcessStatusRef = useRef<ProcessStatus | null>(null);
   const terminalUsageReportedRef = useRef<Set<string>>(new Set());
@@ -81,12 +87,12 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
   const [shellError, setShellError] = useState<string | null>(null);
   const userRole = normalizeDesktopUserRole(desktopAuth.session?.userRole);
   const permittedRoutes = useMemo(
-    () => filterRoutesByRole(routes, userRole),
-    [userRole],
+    () => filterRoutesByRole(platformRoutes, userRole),
+    [userRole, platformRoutes],
   );
   const permittedAppRoutes = useMemo(
-    () => filterRoutesByRole(appRoutes, userRole),
-    [userRole],
+    () => filterRoutesByRole([appRoutes[0], ...platformRoutes], userRole),
+    [userRole, platformRoutes],
   );
   const visibleRoutes = useMemo(
     () =>
@@ -216,6 +222,10 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
   }, [reportTerminalUsageIfNeeded]);
 
   const refreshAll = useCallback(async () => {
+    if (isWhatsApp) {
+      window.dispatchEvent(new Event("account-matrix:refresh-whatsapp"));
+      return;
+    }
     setRefreshing(true);
     setShellError(null);
     try {
@@ -227,7 +237,7 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
     } finally {
       setRefreshing(false);
     }
-  }, [refreshBrowserStatuses, refreshTask]);
+  }, [isWhatsApp, refreshBrowserStatuses, refreshTask]);
 
   useEffect(() => {
     window.location.hash = activeKey;
@@ -260,8 +270,10 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
   }, [availableAppRoutes, defaultRouteKey]);
 
   useEffect(() => {
-    void refreshAll();
-  }, []);
+    if (isWhatsApp) setWhatsappVisited(true);
+    else void refreshAll();
+    setShellError(null);
+  }, [isWhatsApp, refreshAll]);
 
   useEffect(() => {
     if (!desktopAuth.session) return;
@@ -292,13 +304,15 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
   }, [desktopAuth.session, refreshTask]);
 
   useEffect(() => {
+    if (isWhatsApp) return;
     const id = window.setInterval(() => {
       void refreshTask().catch(handleBackgroundError(setShellError));
     }, TASK_POLL_MS);
     return () => window.clearInterval(id);
-  }, [refreshTask]);
+  }, [refreshTask, isWhatsApp]);
 
   useEffect(() => {
+    if (isWhatsApp) return;
     let stopped = false;
     let timer: number;
     const poll = async () => {
@@ -308,7 +322,11 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
     };
     timer = window.setTimeout(poll, BROWSER_STATUS_POLL_MS);
     return () => { stopped = true; window.clearTimeout(timer); };
-  }, [refreshBrowserStatuses]);
+  }, [refreshBrowserStatuses, isWhatsApp]);
+
+  const whatsappVisible = isWhatsApp && Boolean(whatsappViewByRoute[activeRoute.key]);
+  const lastWhatsappView = useRef("overview");
+  if (whatsappVisible) lastWhatsappView.current = whatsappViewByRoute[activeRoute.key];
 
   return (
     <Layout className="app-shell">
@@ -352,6 +370,7 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
           <Tooltip title="退出登录">
             <Button
               className="app-sider-logout"
+              aria-label="退出登录"
               type="text"
               icon={<LogOut size={16} />}
               onClick={desktopAuth.logout}
@@ -373,7 +392,7 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
                 }
               }}
             />
-            <Space size={12} wrap>
+            {!isWhatsApp && <Space size={12} wrap>
               <Tooltip title={bitbrowserTooltip(bitbrowserStatus)}>
                 <span>
                   <StatusTag
@@ -394,7 +413,7 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
                 status={processTone(processStatus)}
                 label={processLabel(processStatus)}
               />
-            </Space>
+            </Space>}
           </Space>
           <Space size={12}>
             {canOpenNotifications ? (
@@ -420,6 +439,7 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
               title={themeMode === "dark" ? "切换为浅色模式" : "切换为深色模式"}
             >
               <Switch
+                aria-label="深色模式"
                 checked={themeMode === "dark"}
                 checkedChildren={<Moon size={14} />}
                 unCheckedChildren={<Sun size={14} />}
@@ -437,7 +457,7 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
             </Button>
           </Space>
         </Header>
-        <Content ref={contentRef} className="app-content">
+        <Content ref={contentRef} className={`app-content${whatsappVisible ? " app-content-embedded" : ""}`}>
           {shellError ? (
             <Alert
               className="shell-alert"
@@ -459,7 +479,23 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
               description="当前网络或授权服务暂时不可用，已保留当前登录状态，系统会自动重试。"
             />
           ) : null}
-          <RouteScopeFrame
+          {whatsappVisited && <WhatsAppWorkspace
+            initialUrl={whatsappWorkspaceUrl}
+            sessionContext={desktopAuth.session?.whatsappContext}
+            requestSsoTicket={desktopAuth.session ? (nonce, workspaceOrigin) => issueDesktopWhatsAppTicket({
+              session: desktopAuth.session!, apiBaseUrl: desktopAuth.apiBaseUrl,
+              nonce, workspaceOrigin, parentOrigin: window.location.origin,
+            }) : undefined}
+            visible={whatsappVisible}
+            view={lastWhatsappView.current}
+            themeMode={themeMode}
+            onViewChange={(view) => {
+              if (!whatsappVisible) return;
+              const key = Object.entries(whatsappViewByRoute).find(([, value]) => value === view)?.[0];
+              if (key && visibleRouteKeys.has(key)) setActiveKey(key);
+            }}
+          />}
+          {!whatsappVisible && <RouteScopeFrame
             routeKey={activeRoute.key}
             routeLabel={activeRoute.label}
             scope={activeRoute.scope}
@@ -468,7 +504,7 @@ export function AppShell({ themeMode, onThemeModeChange }: AppShellProps) {
             <BrowserStatusContext.Provider value={browserStatuses}>
               {activeRoute.element}
             </BrowserStatusContext.Provider>
-          </RouteScopeFrame>
+          </RouteScopeFrame>}
         </Content>
       </Layout>
     </Layout>

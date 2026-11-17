@@ -64,7 +64,7 @@ assert.match(
   /implementation:\s*['"]reserved['"]/,
   "reserved platforms must use the reserved module factory",
 );
-for (const platform of ["instagram", "whatsapp", "douyin"]) {
+for (const platform of ["instagram", "douyin"]) {
   assert.match(
     read(`platforms/${platform}/index.ts`),
     /createReservedPlatformModule/,

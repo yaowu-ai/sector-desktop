@@ -235,4 +235,32 @@ export const routes: AppRoute[] = [
   { key: 'settings', label: '系统设置', icon: Settings, element: <SettingsPage />, scope: 'system' },
 ]
 
-export const appRoutes: AppRoute[] = [platformSettingsRoute, ...routes]
+// Hosted routes reuse the desktop menu; business pages stay in the WA service.
+export const whatsappViewByRoute: Record<string, string> = {
+  home: 'overview',
+  accounts: 'dashboard',
+  tasks: 'tasks',
+  comments: 'rules',
+  records: 'logs',
+  'whatsapp-diagnostics': 'diagnostics',
+  'whatsapp-experience': 'experience',
+  'whatsapp-settings': 'settings',
+}
+
+const whatsappExtraRoutes: AppRoute[] = [
+  { key: 'whatsapp-diagnostics', label: '运行管理', icon: Gauge, element: <></>, scope: 'current_platform' },
+  { key: 'whatsapp-experience', label: '经验分享', icon: FileText, element: <></>, scope: 'current_platform' },
+  { key: 'whatsapp-settings', label: '工作空间设置', icon: Settings, element: <></>, scope: 'current_platform' },
+]
+
+export const whatsappRoutes: AppRoute[] = [
+  ...['home', 'accounts', 'tasks', 'comments', 'records'].map(key => {
+    const route = routes.find(item => item.key === key)!
+    const labels: Record<string, string> = { home: '总览', comments: '规则模板', diagnostic: '运行管理' }
+    return { ...route, label: labels[key] ?? route.label }
+  }),
+  ...whatsappExtraRoutes,
+  ...routes.filter(route => route.scope === 'system'),
+]
+
+export const appRoutes: AppRoute[] = [platformSettingsRoute, ...routes, ...whatsappExtraRoutes]

@@ -97,6 +97,7 @@ export interface PlatformDefinition {
   status: PlatformStatus
   enabled: boolean
   automaticExecutionSupported: boolean
+  integration?: 'hosted_web'
   accountPrefix: string
   summary: string
   capabilities: Record<PlatformCapability, CapabilityStatus>
@@ -107,7 +108,7 @@ export interface PlatformDefinition {
 
 export interface PlatformModuleManifest {
   definition: PlatformDefinition
-  implementation: 'executable' | 'reserved'
+  implementation: 'executable' | 'reserved' | 'embedded'
   pageEntry: string
   serviceEntry: string
   reservationReason?: string

@@ -28,6 +28,9 @@ const CUSTOMER_ROUTE_KEYS = new Set([
   'stats',
   'profile-stats',
   'gmail',
+  'whatsapp-settings',
+  'whatsapp-experience',
+  'whatsapp-diagnostics',
 ])
 
 export function normalizeDesktopUserRole(role: unknown): DesktopUserRole {
@@ -66,8 +69,9 @@ export function filterRoutesByPlatformAvailability<
   T extends Pick<AppRoute, 'key'>,
 >(
   routes: T[],
-  platform: Pick<PlatformDefinition, 'status' | 'automaticExecutionSupported'>,
+  platform: Pick<PlatformDefinition, 'status' | 'automaticExecutionSupported' | 'integration'>,
 ) {
+  if (platform.integration === 'hosted_web') return routes
   const platformCanExecute =
     platform.status === 'supported' && platform.automaticExecutionSupported
 

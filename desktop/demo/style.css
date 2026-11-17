@@ -1,0 +1,30 @@
+.wa-demo-label {
+  position: fixed;
+  z-index: 2;
+  top: 20px;
+  left: 440px;
+  max-width: calc(100vw - 720px);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--wa-demo-muted, #667892);
+  font: 12px/24px "PingFang SC", "Microsoft YaHei", sans-serif;
+  pointer-events: none;
+}
+[data-theme="dark"] { --wa-demo-muted: #a9b9d0; }
+.wa-demo-controls {
+  position: fixed;
+  z-index: 30;
+  right: 20px;
+  bottom: 16px;
+  display: grid;
+  gap: 6px;
+  padding: 14px 18px;
+  color: var(--wa-demo-muted, #667892);
+  background: var(--color-bg-container, #fff);
+  border: 1px solid #dce4f0;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px #172b4d12;
+  font: 12px/18px "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+[data-theme="dark"] .wa-demo-controls { background: #111d31; border-color: #33465e; }

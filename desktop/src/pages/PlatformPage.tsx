@@ -2,6 +2,7 @@ import { Alert, Button, Card, Col, Descriptions, Modal, Row, Space, Table, Tag, 
 import type { ColumnsType } from 'antd/es/table'
 import { Ban, CheckCircle2, Chrome, Clock3, FileJson, PlayCircle, PlugZap, ShieldAlert } from 'lucide-react'
 import { useState } from 'react'
+import { usePlatformContext } from '../app/PlatformContext'
 
 import { PageHeader } from '../components/PageHeader'
 import { StatusTag } from '../components/StatusTag'
@@ -14,6 +15,7 @@ import {
 import type { PlatformCapabilityStatus, PlatformSupportStatus } from '../services/types'
 
 export function PlatformPage() {
+  const { setCurrentPlatform } = usePlatformContext()
   const [configPlatform, setConfigPlatform] = useState<PlatformDefinition | null>(null)
 
   const columns: ColumnsType<PlatformDefinition> = [
@@ -69,7 +71,11 @@ export function PlatformPage() {
           <Button icon={<FileJson size={16} />} onClick={() => setConfigPlatform(platform)}>
             默认配置
           </Button>
-          {platform.automaticExecutionSupported ? (
+          {platform.integration === 'hosted_web' ? (
+            <Button icon={<PlugZap size={16} />} onClick={() => { setCurrentPlatform(platform.id); goRoute('home') }}>
+              打开工作空间
+            </Button>
+          ) : platform.automaticExecutionSupported ? (
             <Button icon={<PlayCircle size={16} />} onClick={() => goRoute('tasks')}>
               查看任务
             </Button>
@@ -100,7 +106,7 @@ export function PlatformPage() {
           type="info"
           showIcon
           message="TikTok 已允许启动真实自动化任务"
-          description="其他平台的业务页面和服务入口保持预留，待对应平台模块实现后再开启。"
+          description="WhatsApp 已接入独立养号网页，任务由原托管服务执行；其余预留平台等待接入。"
         />
 
       <Row gutter={[16, 16]}>
@@ -200,7 +206,7 @@ function PlatformAccessDetails({ platform }: { platform: PlatformDefinition }) {
           </Typography.Text>
         </Space>
         <Tag color={platform.automaticExecutionSupported ? 'blue' : 'default'} className="platform-access-execution-tag">
-          {platform.automaticExecutionSupported ? '可启动自动执行' : '仅预留配置入口'}
+          {platform.integration === 'hosted_web' ? '托管网页工作空间' : platform.automaticExecutionSupported ? '可启动自动执行' : '仅预留配置入口'}
         </Tag>
       </div>
 
@@ -257,6 +263,15 @@ function AccessDetailItem({
 }
 
 function platformAccessDetails(platform: PlatformDefinition) {
+  if (platform.integration === 'hosted_web') {
+    return {
+      browser: '在当前桌面工作区显示养号网页，支持扫码、手机号配对和账号管理。',
+      runner: '养号任务由独立托管服务调度，关闭桌面窗口后服务器继续运行。',
+      runnerChips: ['托管服务'],
+      api: '配置养号服务地址和允许嵌入的桌面端来源，使用原组织账号登录。',
+      apiChips: ['独立工作空间'],
+    }
+  }
   if (platform.id === 'tiktok') {
     return {
       browser: '使用 Bit浏览器 Local API 和账号绑定 profile_id。',

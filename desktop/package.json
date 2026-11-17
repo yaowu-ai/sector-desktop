@@ -5,6 +5,9 @@
   "packageManager": "pnpm@11.15.1",
   "type": "module",
   "scripts": {
+    "demo:whatsapp": "node demo/start.mjs",
+    "test:whatsapp-workspace": "node tests/whatsapp_workspace_checks.cjs",
+    "test:whatsapp-sso": "node tests/whatsapp_sso_checks.cjs",
     "dev": "vite",
     "build": "node scripts/build.mjs",
     "build:test": "node scripts/build.mjs test",
