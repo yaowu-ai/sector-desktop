@@ -2,6 +2,7 @@
 import random
 import re
 import time
+from urllib.parse import urlsplit
 
 from human_mouse import MouseState, human_click_locator
 from platforms.tiktok.actions import (
@@ -87,6 +88,33 @@ def follow_target_profile(page, handle):
     return "fail"
 
 
+def _target_video_open_state(page, handle, video_id):
+    """Confirm navigation landed on the requested target video before actions."""
+    current_url = str(getattr(page, "url", "") or "")
+    try:
+        parsed = urlsplit(current_url)
+    except ValueError:
+        return False, "invalid_url"
+
+    expected_handle = str(handle or "").strip().lstrip("@").casefold()
+    actual_path = parsed.path.rstrip("/")
+    match = re.fullmatch(r"/@([^/?#]+)/video/(\d+)", actual_path, flags=re.IGNORECASE)
+    if (
+        parsed.netloc.casefold() not in {"tiktok.com", "www.tiktok.com"}
+        or not match
+        or match.group(1).casefold() != expected_handle
+        or match.group(2) != str(video_id)
+    ):
+        return False, "url_mismatch"
+
+    try:
+        if page.locator("video").count() == 0:
+            return False, "video_element_not_found"
+    except Exception:
+        return False, "video_element_check_failed"
+    return True, "ok"
+
+
 def _comment_on_video_page(page, mouse_state, text):
     """Type and post a comment on an open /video/ page."""
     box = _focus_comment_box(page)
@@ -134,6 +162,18 @@ def engage_target_video(page, handle, video_id, comment_pool, like_prob=0.9, com
     page.goto(f"https://www.tiktok.com/@{handle}/video/{video_id}", timeout=60000)
     human_pause(3, 6)
 
+    opened, open_reason = _target_video_open_state(page, handle, video_id)
+    if not opened:
+        return {
+            "opened": False,
+            "open_reason": open_reason,
+            "liked": False,
+            "like_attempted": False,
+            "like_reason": "not_attempted",
+            "commented": False,
+            "comment_attempted": False,
+        }
+
     viewport = page.viewport_size or {"width": 1280, "height": 800}
     mouse_state = MouseState(viewport["width"] // 2, viewport["height"] // 2)
 
@@ -156,6 +196,7 @@ def engage_target_video(page, handle, video_id, comment_pool, like_prob=0.9, com
         human_pause(1.0, 2.5)
 
     return {
+        "opened": True,
         "liked": liked,
         "like_attempted": like_attempted,
         "like_reason": like_reason,
