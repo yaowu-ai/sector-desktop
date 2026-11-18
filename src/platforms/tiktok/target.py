@@ -99,6 +99,21 @@ def run_target_engagement(page, account, config, conn):
                     f"{handle}/{video_id}: {exc}",
                 )
                 continue
+            if not result.get("opened", True):
+                reason = result.get("open_reason", "unknown")
+                session_log(
+                    f"{account_id} | target {handle}/{video_id} | OPEN FAIL: {reason}",
+                    platform,
+                )
+                log_action(
+                    conn,
+                    platform,
+                    account_id,
+                    "target_engage",
+                    "error",
+                    f"{handle}/{video_id}: video_open_failed reason={reason}",
+                )
+                continue
             record_target_engagement(
                 conn,
                 platform,
