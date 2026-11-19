@@ -2,17 +2,19 @@
 import random
 import re
 import time
-from urllib.parse import urlsplit
 
 from human_mouse import MouseState, human_click_locator
 from platforms.tiktok.actions import (
-    _close_comment_panel,
-    _find_active_button,
-    _focus_comment_box,
     _human_type,
     human_pause,
-    try_like_with_detail,
 )
+from platforms.tiktok.target_page import (
+    MAX_PROFILE_SCROLLS, navigate_target_page, profile_follow_button,
+    recover_target_page, target_like_button, target_page_state,
+    target_url_matches, toggle_state, unique_visible, video_link_id,
+)
+
+COMMENTS_NAME = re.compile(r"^(Comments|评论|評論)(?:\s*\(?\d+\)?)?$", re.I)
 
 
 def _video_id_from_href(href):
@@ -23,146 +25,140 @@ def _video_id_from_href(href):
 
 def fetch_recent_videos(page, handle, max_items=12, scan_limit=60):
     """Recent video ids on @handle's profile, newest-first by snowflake id."""
-    page.goto(f"https://www.tiktok.com/@{handle}", timeout=60000)
-    human_pause(3, 5)
+    if not target_url_matches(page.url, handle):
+        opened, reason = navigate_target_page(page, handle)
+        if not opened:
+            raise RuntimeError(f"target_profile_open_failed reason={reason}")
 
-    anchors = page.locator('a[href*="/video/"]')
-    n = anchors.count()
-    seen = set()
-    for i in range(min(n, scan_limit)):
-        try:
-            href = anchors.nth(i).get_attribute("href", timeout=500) or ""
-        except Exception:
-            continue
-        vid = _video_id_from_href(href)
-        if vid:
-            seen.add(vid)
+    # Following can insert a suggested-accounts row above the video grid.
+    tab = unique_visible(page.get_by_role("tab", name=re.compile(r"^(Videos|视频|影片)$", re.I)))
+    if tab is None:
+        tab = unique_visible(page.get_by_text(re.compile(r"^(Videos|视频|影片)$", re.I)))
+    if tab is not None:
+        tab.scroll_into_view_if_needed(timeout=2000)
+        tab.click(timeout=2000)
 
-    ids = sorted(seen, key=lambda x: int(x), reverse=True)
-    return ids[:max_items]
-
-
-def _profile_follow_text(page):
-    """Text of the profile's follow/following button, lowercased."""
-    btn = page.locator('[data-e2e="follow-button"]').first
-    if btn.count() == 0:
-        return None
-    try:
-        return (btn.inner_text(timeout=500) or "").strip().lower()
-    except Exception:
-        return ""
-
-
-def _already_following_profile(page):
-    """True if the profile clearly shows a following state."""
-    if page.locator('[data-e2e="following-button"]').first.count():
-        return True
-    txt = _profile_follow_text(page)
-    return txt is not None and "following" in txt
+    for attempt in range(MAX_PROFILE_SCROLLS + 1):
+        anchors = page.locator('a[href*="/video/"]')
+        seen = set()
+        for i in range(min(anchors.count(), scan_limit)):
+            try:
+                vid = video_link_id(anchors.nth(i).get_attribute("href", timeout=500), handle)
+                if vid:
+                    seen.add(vid)
+            except Exception:
+                continue
+        if seen:
+            return sorted(seen, key=int, reverse=True)[:max_items]
+        if attempt < MAX_PROFILE_SCROLLS:
+            viewport = page.viewport_size or {"width": 1280, "height": 800}
+            page.mouse.move(viewport["width"] // 2, viewport["height"] // 2)
+            page.mouse.wheel(0, int(viewport["height"] * 0.75))
+            page.wait_for_timeout(800)
+    return []
 
 
 def follow_target_profile(page, handle):
     """Follow @handle from its profile page once."""
-    if f"/@{handle}" not in (page.url or ""):
-        page.goto(f"https://www.tiktok.com/@{handle}", timeout=60000)
-        human_pause(3, 5)
-
+    if not target_url_matches(page.url, handle):
+        opened, _ = navigate_target_page(page, handle)
+        if not opened:
+            return "unknown"
     viewport = page.viewport_size or {"width": 1280, "height": 800}
     mouse_state = MouseState(viewport["width"] // 2, viewport["height"] // 2)
-
-    if _already_following_profile(page):
+    btn = profile_follow_button(page, handle)
+    if btn is None:
+        return "unknown"
+    state = toggle_state(btn, "follow")
+    if state is True:
         return "already"
-
-    btn = page.locator('[data-e2e="follow-button"]').first
-    if btn.count() == 0:
-        return "fail"
-
+    if state is None:
+        return "unknown"
+    btn.scroll_into_view_if_needed(timeout=2000)
+    if not btn.is_enabled() or toggle_state(btn, "follow") is not False:
+        return "unknown"
     if not human_click_locator(page, btn, mouse_state):
         return "fail"
     human_pause(0.6, 1.5)
-
-    if _already_following_profile(page):
-        return "followed"
-    if page.locator('[data-e2e="follow-button"]').first.count() == 0:
+    btn = profile_follow_button(page, handle)
+    if btn is not None and toggle_state(btn, "follow") is True:
         return "followed"
     return "fail"
 
 
 def _target_video_open_state(page, handle, video_id):
     """Confirm navigation landed on the requested target video before actions."""
-    current_url = str(getattr(page, "url", "") or "")
-    try:
-        parsed = urlsplit(current_url)
-    except ValueError:
-        return False, "invalid_url"
+    return target_page_state(page, handle, video_id)
 
-    expected_handle = str(handle or "").strip().lstrip("@").casefold()
-    actual_path = parsed.path.rstrip("/")
-    match = re.fullmatch(r"/@([^/?#]+)/video/(\d+)", actual_path, flags=re.IGNORECASE)
-    if (
-        parsed.netloc.casefold() not in {"tiktok.com", "www.tiktok.com"}
-        or not match
-        or match.group(1).casefold() != expected_handle
-        or match.group(2) != str(video_id)
-    ):
-        return False, "url_mismatch"
 
-    try:
-        if page.locator("video").count() == 0:
-            return False, "video_element_not_found"
-    except Exception:
-        return False, "video_element_check_failed"
-    return True, "ok"
+def _like_target_video(page, mouse_state):
+    btn = target_like_button(page)
+    if btn is None:
+        return False, "button_not_found", False
+    state = toggle_state(btn, "like")
+    if state is True:
+        return False, "already_liked", False
+    if state is None:
+        return False, "state_unknown", False
+    if not btn.is_enabled() or toggle_state(btn, "like") is not False:
+        return False, "state_unknown", False
+    if not human_click_locator(page, btn, mouse_state):
+        return False, "click_failed", True
+    human_pause(0.5, 1.0)
+    btn = target_like_button(page)
+    liked = btn is not None and toggle_state(btn, "like") is True
+    return liked, "liked" if liked else "state_unconfirmed", True
 
 
 def _comment_on_video_page(page, mouse_state, text):
     """Type and post a comment on an open /video/ page."""
-    box = _focus_comment_box(page)
-    if box is None:
-        icon = _find_active_button(page, '[data-e2e="comment-icon"]')
-        if icon is not None:
-            human_click_locator(page, icon, mouse_state)
-            human_pause(1.5, 3.0)
-            box = _focus_comment_box(page)
+    tab = unique_visible(page.get_by_role("tab", name=COMMENTS_NAME))
+    if tab is None:
+        tab = unique_visible(page.get_by_text(COMMENTS_NAME))
+    if tab is not None and tab.get_attribute("aria-selected") != "true":
+        tab.click(timeout=2000)
+    editors = page.locator(
+        '[data-e2e="comment-input"] [contenteditable="true"], '
+        '[data-e2e="comment-input"][contenteditable="true"], '
+        'textarea[placeholder*="comment" i], textarea[placeholder*="评论"], '
+        'textarea[placeholder*="評論"]'
+    )
+    try:
+        editors.first.wait_for(state="visible", timeout=2500)
+    except Exception:
+        return False
+    box = unique_visible(editors)
     if box is None:
         return False
-
+    if not human_click_locator(page, box, mouse_state):
+        return False
+    # Do not overwrite an existing draft or submit to an unrelated editor.
+    if (box.input_value() if box.evaluate("el => el.tagName === 'TEXTAREA'")
+            else box.inner_text(timeout=500)).strip():
+        return False
     human_pause(0.4, 1.0)
     _human_type(page, text)
     human_pause(0.6, 1.5)
-
-    posted = False
-    post = page.locator('[data-e2e="comment-post"]').first
-    if post.count():
-        disabled = (post.get_attribute("aria-disabled") in ("true", "")) or (
-            post.get_attribute("disabled") is not None
-        )
-        if not disabled and human_click_locator(page, post, mouse_state):
-            posted = True
-    if not posted:
-        try:
-            page.keyboard.press("Enter")
-            posted = True
-        except Exception:
-            posted = False
-
+    post = unique_visible(page.locator('[data-e2e="comment-post"]'))
+    if post is not None:
+        if post.get_attribute("aria-disabled") == "true" or not post.is_enabled():
+            return False
+        # An uncertain click must never be followed by a second submission.
+        if not human_click_locator(page, post, mouse_state):
+            return False
+    else:
+        box.press("Enter", timeout=2000)
     human_pause(1.0, 2.0)
-    if posted:
-        try:
-            remaining = (box.inner_text(timeout=500) or "").strip()
-            posted = remaining == "" or remaining != text
-        except Exception:
-            pass
-    _close_comment_panel(page)
-    return posted
+    try:
+        remaining = box.input_value() if box.evaluate("el => el.tagName === 'TEXTAREA'") else box.inner_text(timeout=500)
+        return not remaining.strip()
+    except Exception:
+        return False
 
 
 def engage_target_video(page, handle, video_id, comment_pool, like_prob=0.9, comment_prob=0.5):
     """Open one target video, watch a while, then maybe like/comment."""
-    page.goto(f"https://www.tiktok.com/@{handle}/video/{video_id}", timeout=60000)
-    human_pause(3, 6)
-
-    opened, open_reason = _target_video_open_state(page, handle, video_id)
+    opened, open_reason = _open_target_video(page, handle, video_id)
     if not opened:
         return {
             "opened": False,
@@ -179,17 +175,20 @@ def engage_target_video(page, handle, video_id, comment_pool, like_prob=0.9, com
 
     time.sleep(random.uniform(5, 15))
 
+    if not target_url_matches(page.url, handle, video_id):
+        return {"opened": False, "open_reason": "video_changed", "liked": False, "commented": False}
+
     liked = False
     like_attempted = False
     like_reason = "not_attempted"
     if random.random() < like_prob:
-        like_attempted = True
-        liked, like_reason = try_like_with_detail(page, mouse_state)
+        liked, like_reason, like_attempted = _like_target_video(page, mouse_state)
         human_pause(0.5, 1.5)
 
     commented = False
     comment_attempted = False
-    if comment_pool and random.random() < comment_prob:
+    if (comment_pool and random.random() < comment_prob
+            and target_url_matches(page.url, handle, video_id)):
         comment_attempted = True
         text = random.choice(comment_pool)
         commented = _comment_on_video_page(page, mouse_state, text)
@@ -203,3 +202,25 @@ def engage_target_video(page, handle, video_id, comment_pool, like_prob=0.9, com
         "commented": commented,
         "comment_attempted": comment_attempted,
     }
+
+
+def _open_target_video(page, handle, video_id):
+    if target_url_matches(page.url, handle):
+        anchors = page.locator('a[href*="/video/"]')
+        for i in range(min(anchors.count(), 60)):
+            link = anchors.nth(i)
+            if video_link_id(link.get_attribute("href", timeout=500), handle) != str(video_id):
+                continue
+            try:
+                link.scroll_into_view_if_needed(timeout=2000)
+                # Keep the session on its existing page even for target=_blank links.
+                if link.get_attribute("target") == "_blank":
+                    return navigate_target_page(page, handle, video_id)
+                link.click(timeout=3000)
+                human_pause(3, 6)
+                if target_url_matches(page.url, handle, video_id):
+                    return recover_target_page(page, handle, video_id)
+            except Exception:
+                pass
+            break
+    return navigate_target_page(page, handle, video_id)

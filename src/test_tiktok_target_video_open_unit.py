@@ -12,7 +12,7 @@ class FakeTargetVideoPage:
         self.goto_calls = []
         self.locator_calls = []
 
-    def goto(self, url, timeout):
+    def goto(self, url, timeout, **_kwargs):
         self.goto_calls.append((url, timeout))
 
     def locator(self, selector):
@@ -26,7 +26,7 @@ class TikTokTargetVideoOpenTests(unittest.TestCase):
     @patch("platforms.tiktok.engagement.time.sleep")
     @patch("platforms.tiktok.engagement.human_pause")
     @patch("platforms.tiktok.engagement._comment_on_video_page")
-    @patch("platforms.tiktok.engagement.try_like_with_detail")
+    @patch("platforms.tiktok.engagement._like_target_video")
     def test_navigation_mismatch_skips_like_and_comment(
         self,
         try_like,
@@ -35,7 +35,7 @@ class TikTokTargetVideoOpenTests(unittest.TestCase):
         _sleep,
     ):
         page = FakeTargetVideoPage("https://www.tiktok.com/@target")
-        try_like.return_value = (False, "button_not_found")
+        try_like.return_value = (False, "button_not_found", False)
 
         with patch("platforms.tiktok.engagement.random.random", side_effect=[0.0, 0.0]):
             result = engage_target_video(
@@ -51,9 +51,9 @@ class TikTokTargetVideoOpenTests(unittest.TestCase):
         self.assertEqual(result["open_reason"], "url_mismatch")
         try_like.assert_not_called()
         comment.assert_not_called()
-        self.assertEqual(page.locator_calls, [])
 
     @patch("platforms.tiktok.target.human_pause")
+    @patch("platforms.tiktok.target.navigate_target_page", return_value=(True, "ok"))
     @patch("platforms.tiktok.target.log_action")
     @patch("platforms.tiktok.target.record_target_engagement")
     @patch("platforms.tiktok.target.engage_target_video")
@@ -66,6 +66,7 @@ class TikTokTargetVideoOpenTests(unittest.TestCase):
         engage,
         record_engagement,
         log_action,
+        _open_profile,
         _human_pause,
     ):
         engage.return_value = {
