@@ -110,14 +110,20 @@ def target_like_button(page):
 
 def toggle_state(button, kind):
     """Return True/False/None; unreadable or conflicting state never permits a click."""
-    snapshot = button.evaluate("""el => ({
-      pressed: el.getAttribute('aria-pressed'),
-      label: (el.getAttribute('aria-label') || '').trim(),
-      text: (el.innerText || '').trim(),
-      marker: el.getAttribute('data-e2e') || '',
-      fills: Array.from(el.querySelectorAll('svg, svg path')).slice(0, 8)
-        .map(node => getComputedStyle(node).fill.toLowerCase().replace(/\\s/g, ''))
-    })""")
+    snapshot = button.evaluate("""el => {
+      const selector = '[data-e2e="like-icon"], [data-e2e="browse-like-icon"]';
+      const heart = el.matches(selector) ? el : el.querySelector(selector);
+      return {
+        pressed: el.getAttribute('aria-pressed'),
+        label: (el.getAttribute('aria-label') || '').trim(),
+        text: (el.innerText || '').trim(),
+        marker: el.getAttribute('data-e2e') || '',
+        fills: Array.from(el.querySelectorAll('svg, svg path')).slice(0, 8)
+          .map(node => getComputedStyle(node).fill.toLowerCase().replace(/\\s/g, '')),
+        heart_fills: heart ? Array.from(heart.querySelectorAll('svg, path, use')).slice(0, 8)
+          .map(node => getComputedStyle(node).fill.toLowerCase().replace(/\\s/g, '')) : []
+      };
+    }""")
     yes, no = False, False
     label = snapshot["label"].casefold()
     pressed = snapshot["pressed"]
@@ -130,7 +136,13 @@ def toggle_state(button, kind):
         red = any(fill in {"rgb(254,44,85)", "rgb(255,44,85)", "rgb(255,59,92)",
                            "#fe2c55", "#ff2c55", "#ff3b5c"} for fill in fills)
         yes |= red
-        if not yes and not no and any(fill in {"rgb(255,255,255)", "#ffffff"} for fill in fills):
+        # Generic white SVGs can belong to comment/share controls or to an
+        # unrecognised heart variant; only the identified heart proves unliked.
+        heart_fills = snapshot.get("heart_fills", [])
+        if (not yes and not no and heart_fills
+                and all(fill in {"rgb(255,255,255)", "#ffffff", "none", "rgba(0,0,0,0)"}
+                        for fill in heart_fills)
+                and any(fill in {"rgb(255,255,255)", "#ffffff"} for fill in heart_fills)):
             no = True
     else:
         text = re.sub(r"[\s✓✔]+", "", snapshot["text"].casefold())

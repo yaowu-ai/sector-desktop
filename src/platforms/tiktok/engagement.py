@@ -5,9 +5,11 @@ import time
 
 from human_mouse import MouseState, human_click_locator
 from platforms.tiktok.actions import (
-    _human_type,
+    choose_comment_text,
     human_pause,
+    log_comment_source_event,
 )
+from platforms.tiktok.video_info import capture_active_video_info
 from platforms.tiktok.target_page import (
     MAX_PROFILE_SCROLLS, navigate_target_page, profile_follow_button,
     recover_target_page, target_like_button, target_page_state,
@@ -91,7 +93,9 @@ def _target_video_open_state(page, handle, video_id):
     return target_page_state(page, handle, video_id)
 
 
-def _like_target_video(page, mouse_state):
+def _like_target_video(page, mouse_state, *, attempted_likes=None, video_key=None):
+    if attempted_likes is not None and video_key in attempted_likes:
+        return False, "already_attempted", False
     btn = target_like_button(page)
     if btn is None:
         return False, "button_not_found", False
@@ -102,8 +106,14 @@ def _like_target_video(page, mouse_state):
         return False, "state_unknown", False
     if not btn.is_enabled() or toggle_state(btn, "like") is not False:
         return False, "state_unknown", False
-    if not human_click_locator(page, btn, mouse_state):
-        return False, "click_failed", True
+    if attempted_likes is not None:
+        attempted_likes.add(video_key)
+    try:
+        # Resolve and hit-test this exact element at click time, never stale x/y.
+        btn.click(timeout=2000)
+    except Exception:
+        # The browser may have received an uncertain click; never click again.
+        return False, "click_unconfirmed", True
     human_pause(0.5, 1.0)
     btn = target_like_button(page)
     liked = btn is not None and toggle_state(btn, "like") is True
@@ -130,21 +140,30 @@ def _comment_on_video_page(page, mouse_state, text):
     box = unique_visible(editors)
     if box is None:
         return False
-    if not human_click_locator(page, box, mouse_state):
-        return False
     # Do not overwrite an existing draft or submit to an unrelated editor.
     if (box.input_value() if box.evaluate("el => el.tagName === 'TEXTAREA'")
             else box.inner_text(timeout=500)).strip():
         return False
     human_pause(0.4, 1.0)
-    _human_type(page, text)
+    try:
+        # Element-bound input avoids page-level key events reaching video shortcuts
+        # when the comment editor loses focus during typing.
+        box.fill(text, timeout=2500)
+        focused = box.evaluate("el => el === document.activeElement || el.contains(document.activeElement)")
+        typed = box.input_value() if box.evaluate("el => el.tagName === 'TEXTAREA'") else box.inner_text(timeout=500)
+        if not focused or typed.strip() != text.strip():
+            return False
+    except Exception:
+        return False
     human_pause(0.6, 1.5)
     post = unique_visible(page.locator('[data-e2e="comment-post"]'))
     if post is not None:
         if post.get_attribute("aria-disabled") == "true" or not post.is_enabled():
             return False
         # An uncertain click must never be followed by a second submission.
-        if not human_click_locator(page, post, mouse_state):
+        try:
+            post.click(timeout=2000)
+        except Exception:
             return False
     else:
         box.press("Enter", timeout=2000)
@@ -156,7 +175,11 @@ def _comment_on_video_page(page, mouse_state, text):
         return False
 
 
-def engage_target_video(page, handle, video_id, comment_pool, like_prob=0.9, comment_prob=0.5):
+def engage_target_video(
+    page, handle, video_id, comment_pool, like_prob=0.9, comment_prob=0.5,
+    *, ai_comment_config=None, conn=None, platform="tiktok", account_id=None,
+    attempted_likes=None,
+):
     """Open one target video, watch a while, then maybe like/comment."""
     opened, open_reason = _open_target_video(page, handle, video_id)
     if not opened:
@@ -182,17 +205,34 @@ def engage_target_video(page, handle, video_id, comment_pool, like_prob=0.9, com
     like_attempted = False
     like_reason = "not_attempted"
     if random.random() < like_prob:
-        liked, like_reason, like_attempted = _like_target_video(page, mouse_state)
+        liked, like_reason, like_attempted = _like_target_video(
+            page, mouse_state, attempted_likes=attempted_likes,
+            video_key=(platform, account_id, str(video_id)),
+        )
         human_pause(0.5, 1.5)
 
     commented = False
     comment_attempted = False
-    if (comment_pool and random.random() < comment_prob
+    ai_comment_config = ai_comment_config or {}
+    ai_enabled = bool(ai_comment_config.get("enabled"))
+    if ((comment_pool or ai_enabled) and random.random() < comment_prob
             and target_url_matches(page.url, handle, video_id)):
-        comment_attempted = True
-        text = random.choice(comment_pool)
-        commented = _comment_on_video_page(page, mouse_state, text)
-        human_pause(1.0, 2.5)
+        video_info = capture_active_video_info(page) if ai_enabled else {}
+        text, source_event = choose_comment_text(comment_pool, video_info, ai_comment_config, platform)
+        log_comment_source_event(conn, platform, account_id, source_event)
+        # Generation may take a few seconds; never submit onto a different video.
+        if text and target_url_matches(page.url, handle, video_id):
+            comment_attempted = True
+            commented = _comment_on_video_page(page, mouse_state, text)
+            human_pause(1.0, 2.5)
+
+    if liked and comment_attempted:
+        btn = target_like_button(page) if target_url_matches(page.url, handle, video_id) else None
+        final_state = toggle_state(btn, "like") if btn is not None else None
+        if final_state is not True:
+            liked = False
+            like_reason = ("state_reverted_after_comment" if final_state is False
+                           else "state_unconfirmed_after_comment")
 
     return {
         "opened": True,
