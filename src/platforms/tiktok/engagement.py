@@ -12,7 +12,7 @@ from platforms.tiktok.actions import (
 from platforms.tiktok.video_info import capture_active_video_info
 from platforms.tiktok.target_page import (
     MAX_PROFILE_SCROLLS, navigate_target_page, profile_follow_button,
-    recover_target_page, target_like_button, target_page_state,
+    recover_target_page, target_like_button, target_like_click_point, target_page_state,
     target_url_matches, toggle_state, unique_visible, video_link_id,
 )
 
@@ -99,21 +99,50 @@ def _like_target_video(page, mouse_state, *, attempted_likes=None, video_key=Non
     btn = target_like_button(page)
     if btn is None:
         return False, "button_not_found", False
-    state = toggle_state(btn, "like")
-    if state is True:
-        return False, "already_liked", False
-    if state is None:
-        return False, "state_unknown", False
-    if not btn.is_enabled() or toggle_state(btn, "like") is not False:
-        return False, "state_unknown", False
-    if attempted_likes is not None:
-        attempted_likes.add(video_key)
+    control = None
+    attempted = False
     try:
-        # Resolve and hit-test this exact element at click time, never stale x/y.
-        btn.click(timeout=2000)
+        # Pin the original node: a re-render must not retarget a fresh locator.
+        control = btn.element_handle(timeout=1000)
+        if control is None:
+            return False, "button_not_found", False
+        state = toggle_state(control, "like")
+        if state is True:
+            return False, "already_liked", False
+        if state is None or not control.is_enabled():
+            return False, "state_unknown", False
+        original_url = page.url
+        control.scroll_into_view_if_needed(timeout=1000)
+        point = target_like_click_point(control)
+        if point is None:
+            return False, "target_not_interactable", False
+        page.mouse.move(point["x"], point["y"])
+        mouse_state.update(point["x"], point["y"])
+        state = toggle_state(control, "like")
+        if state is True:
+            return False, "already_liked", False
+        if state is None or not control.is_enabled():
+            return False, "state_unknown", False
+        if page.url != original_url or target_like_click_point(control, point) is None:
+            return False, "target_changed", False
+        if attempted_likes is not None:
+            attempted_likes.add(video_key)
+        attempted = True
+        # Mouse down/up each send one protocol command, without locator.click's
+        # action retry loop. Always release once, even if down's acknowledgement
+        # is lost; never send a second press to compensate for an uncertain result.
+        try:
+            page.mouse.down(button="left")
+        finally:
+            page.mouse.up(button="left")
     except Exception:
-        # The browser may have received an uncertain click; never click again.
-        return False, "click_unconfirmed", True
+        return False, "click_unconfirmed" if attempted else "preparation_failed", attempted
+    finally:
+        if control is not None:
+            try:
+                control.dispose()
+            except Exception:
+                pass
     human_pause(0.5, 1.0)
     btn = target_like_button(page)
     liked = btn is not None and toggle_state(btn, "like") is True
