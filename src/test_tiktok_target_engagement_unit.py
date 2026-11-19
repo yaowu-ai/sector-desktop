@@ -233,6 +233,7 @@ class TargetControlTests(unittest.TestCase):
                             (self.control(), "state_unknown")]:
             with patch.object(engagement, "target_like_button", return_value=btn):
                 self.assertEqual(engagement._like_target_video(MagicMock(), MagicMock()), (False, reason, False))
+            btn.click.assert_not_called()
         click.assert_not_called()
 
     @patch.object(engagement, "human_click_locator")
@@ -248,41 +249,44 @@ class TargetControlTests(unittest.TestCase):
     @patch.object(engagement, "human_pause")
     @patch.object(engagement, "human_click_locator", return_value=True)
     def test_a_like_click_is_verified_and_never_repeated(self, click, _pause):
+        button = self.control(label="Like")
         with patch.object(engagement, "target_like_button", side_effect=[
-            self.control(label="Like"), self.control(label="Unlike"),
+            button, self.control(label="Unlike"),
         ]):
             self.assertEqual(engagement._like_target_video(MagicMock(), MagicMock()), (True, "liked", True))
-        click.assert_called_once()
+        button.click.assert_called_once_with(timeout=2000)
+        click.assert_not_called()
 
     @patch.object(engagement, "human_pause")
-    @patch.object(engagement, "_human_type")
-    @patch.object(engagement, "human_click_locator", return_value=True)
-    def test_comments_tab_is_selected_before_typing_and_submits_once(self, click, typing, _pause):
+    @patch.object(engagement, "human_click_locator")
+    def test_comments_tab_is_selected_before_typing_and_submits_once(self, click, _pause):
         page, tab, box, post = MagicMock(), MagicMock(), MagicMock(), MagicMock()
         tab.get_attribute.return_value = "false"
         post.get_attribute.return_value = None
-        box.evaluate.return_value = False
-        box.inner_text.side_effect = ["", ""]
+        box.evaluate.side_effect = lambda script: "activeElement" in script
+        box.inner_text.side_effect = ["", "hello", ""]
         events = []
         tab.click.side_effect = lambda **k: events.append("tab")
-        typing.side_effect = lambda *a: events.append("type")
+        box.fill.side_effect = lambda *a, **k: events.append("type")
         with patch.object(engagement, "unique_visible", side_effect=[tab, box, post]):
             self.assertTrue(engagement._comment_on_video_page(page, MagicMock(), "hello"))
         self.assertEqual(events, ["tab", "type"])
-        self.assertEqual(click.call_count, 2)  # Focus editor, then submit once.
+        click.assert_not_called()
+        box.fill.assert_called_once_with("hello", timeout=2500)
+        post.click.assert_called_once_with(timeout=2000)
         box.press.assert_not_called()
 
     @patch.object(engagement, "human_pause")
-    @patch.object(engagement, "_human_type")
-    @patch.object(engagement, "human_click_locator", side_effect=[True, False])
-    def test_uncertain_comment_submit_does_not_fall_back_to_enter(self, _click, _type, _pause):
+    def test_uncertain_comment_submit_does_not_fall_back_to_enter(self, _pause):
         page, box, post = MagicMock(), MagicMock(), MagicMock()
-        box.evaluate.return_value = False
-        box.inner_text.return_value = ""
+        box.evaluate.side_effect = lambda script: "activeElement" in script
+        box.inner_text.side_effect = ["", "hello"]
         post.get_attribute.return_value = None
+        post.click.side_effect = TimeoutError("submission outcome unknown")
         with patch.object(engagement, "unique_visible", side_effect=[None, None, box, post]):
             self.assertFalse(engagement._comment_on_video_page(page, MagicMock(), "hello"))
         box.press.assert_not_called()
+        post.click.assert_called_once_with(timeout=2000)
 
     def test_unrelated_recommended_account_buttons_cannot_supply_profile_control(self):
         with patch.object(target_page, "profile_title", return_value=None):
@@ -314,16 +318,14 @@ class TargetControlTests(unittest.TestCase):
         click.assert_called_once()
 
     @patch.object(engagement, "human_pause")
-    @patch.object(engagement, "_human_type")
-    @patch.object(engagement, "human_click_locator", return_value=True)
-    def test_disabled_comment_submit_never_presses_enter(self, click, _type, _pause):
+    def test_disabled_comment_submit_never_presses_enter(self, _pause):
         page, box, post = MagicMock(), MagicMock(), MagicMock()
-        box.evaluate.return_value = False
-        box.inner_text.return_value = ""
+        box.evaluate.side_effect = lambda script: "activeElement" in script
+        box.inner_text.side_effect = ["", "hello"]
         post.get_attribute.return_value = "true"
         with patch.object(engagement, "unique_visible", side_effect=[None, None, box, post]):
             self.assertFalse(engagement._comment_on_video_page(page, MagicMock(), "hello"))
-        self.assertEqual(click.call_count, 1)
+        post.click.assert_not_called()
         box.press.assert_not_called()
 
     @patch.object(engagement, "human_pause")

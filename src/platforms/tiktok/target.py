@@ -10,7 +10,7 @@ from core.runtime import (
     record_target_follow,
     session_log,
 )
-from platform_config import comments_config, target_engagement_config
+from platform_config import ai_comment_config, comments_config, target_engagement_config
 from platforms.tiktok.actions import human_pause
 from platforms.tiktok.engagement import (
     engage_target_video,
@@ -33,12 +33,14 @@ def run_target_engagement(page, account, config, conn):
     max_per_run = int(tcfg.get("max_videos_per_run", 3))
     like_p = float(tcfg.get("like_probability", 0.9))
     comment_p = float(tcfg.get("comment_probability", 0.5))
+    ai_comment_cfg = ai_comment_config(config)
     do_follow = bool(tcfg.get("follow", False))
     follow_p = float(tcfg.get("follow_probability", 0.5))
     comment_files = comments_config(config, platform)
     pool = load_comment_file(
         tcfg.get("comments_file") or comment_files.get("target_file", "comments_brand.txt")
     )
+    attempted_likes = set()
 
     for handle in handles:
         try:
@@ -100,7 +102,11 @@ def run_target_engagement(page, account, config, conn):
 
         for video_id in sorted(todo, key=lambda value: int(value)):
             try:
-                result = engage_target_video(page, handle, video_id, pool, like_p, comment_p)
+                result = engage_target_video(
+                    page, handle, video_id, pool, like_p, comment_p,
+                    ai_comment_config=ai_comment_cfg, conn=conn, platform=platform,
+                    account_id=account_id, attempted_likes=attempted_likes,
+                )
             except Exception as exc:
                 session_log(f"{account_id} | target {handle}/{video_id} | ERR: {exc}", platform)
                 log_action(
