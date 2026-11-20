@@ -207,6 +207,7 @@ class TargetControlTests(unittest.TestCase):
     def control(pressed=None, label="", text="", marker="", fills=()):
         btn = MagicMock()
         btn.evaluate.return_value = dict(pressed=pressed, label=label, text=text, marker=marker, fills=fills)
+        btn.element_handle.return_value = btn
         return btn
 
     def test_toggle_states_support_labels_icon_fill_and_unknown(self):
@@ -250,11 +251,14 @@ class TargetControlTests(unittest.TestCase):
     @patch.object(engagement, "human_click_locator", return_value=True)
     def test_a_like_click_is_verified_and_never_repeated(self, click, _pause):
         button = self.control(label="Like")
+        page = MagicMock()
         with patch.object(engagement, "target_like_button", side_effect=[
             button, self.control(label="Unlike"),
-        ]):
-            self.assertEqual(engagement._like_target_video(MagicMock(), MagicMock()), (True, "liked", True))
-        button.click.assert_called_once_with(timeout=2000)
+        ]), patch.object(engagement, "target_like_click_point", return_value={"x": 100, "y": 100}):
+            self.assertEqual(engagement._like_target_video(page, MagicMock()), (True, "liked", True))
+        button.click.assert_not_called()
+        page.mouse.down.assert_called_once_with(button="left")
+        page.mouse.up.assert_called_once_with(button="left")
         click.assert_not_called()
 
     @patch.object(engagement, "human_pause")

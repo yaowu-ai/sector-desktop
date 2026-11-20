@@ -108,6 +108,25 @@ def target_like_button(page):
     return unique_visible(root.locator(LIKE_SELECTOR))
 
 
+def target_like_click_point(control, point=None):
+    """Hit-test the pinned node at its visible centre or at a prepared point."""
+    return control.evaluate("""(el, point) => {
+      if (!el.isConnected) return null;
+      const style = getComputedStyle(el);
+      if (style.visibility !== 'visible' || style.display === 'none' ||
+          style.pointerEvents === 'none') return null;
+      const rect = el.getBoundingClientRect();
+      const left = Math.max(0, rect.left), right = Math.min(innerWidth, rect.right);
+      const top = Math.max(0, rect.top), bottom = Math.min(innerHeight, rect.bottom);
+      if (left >= right || top >= bottom) return null;
+      const x = point ? point.x : (left + right) / 2;
+      const y = point ? point.y : (top + bottom) / 2;
+      if (x < left || x >= right || y < top || y >= bottom) return null;
+      const hit = document.elementFromPoint(x, y);
+      return hit && (hit === el || el.contains(hit)) ? {x, y} : null;
+    }""", point)
+
+
 def toggle_state(button, kind):
     """Return True/False/None; unreadable or conflicting state never permits a click."""
     snapshot = button.evaluate("""el => {
