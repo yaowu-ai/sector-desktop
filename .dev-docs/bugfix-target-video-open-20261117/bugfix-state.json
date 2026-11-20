@@ -1,0 +1,257 @@
+{
+  "version": 3,
+  "mode": "code-bugfix",
+  "diagnosis_source": "direct-repository-evidence",
+  "active": false,
+  "phase": "terminal",
+  "terminal_state": "PASS",
+  "repository_root": "E:/YAOWU/yangHao/account-matrix",
+  "direct_evidence_lock": {
+    "schema_version": 1,
+    "kind": "direct-evidence-lock",
+    "producer": "code-bugfix",
+    "lock_id": "target-video-open-guard-20261117-snapshot",
+    "status": "DIRECT_EVIDENCE_LOCKED",
+    "locked_at": "2026-11-17T20:43:00+08:00",
+    "source_context": {
+      "analysis_class": "trivial",
+      "trivial_basis": "A single local interaction helper lacks a post-navigation guard, and the caller records the video regardless of action outcome.",
+      "investigation_boundary": "TikTok target-video navigation, action dispatch, and target engagement watermark recording.",
+      "repository_root": "E:/YAOWU/yangHao/account-matrix",
+      "revision": "8f23139",
+      "providers_used": ["user", "repository"],
+      "external_evidence_required": false,
+      "context7": {"status": "N/A", "reason": "The repair is bounded to existing local Playwright control flow and repository selectors."},
+      "deepwiki": {"status": "N/A", "reason": "No external architecture or framework semantics are required to add the local navigation guard."}
+    },
+    "failure_object": {
+      "trigger_input": "Run TikTok target engagement for an enabled participant and a newly discovered target video.",
+      "state_environment": "The browser remains on a non-video page after the target-video navigation attempt.",
+      "failing_signal": "Target like/comment failures are logged even though the target video was never opened, and the video can still advance to the watermark.",
+      "expected_behavior": {
+        "statement": "Only execute target likes/comments after confirming the requested target video is open; otherwise skip the video without recording engagement or advancing its watermark.",
+        "authority_evidence_ids": ["U1"]
+      },
+      "actual_behavior": "engage_target_video proceeds directly from page.goto and a delay to like/comment lookup; target.py records engagement and target_watermark regardless of whether the page was the requested video.",
+      "affected_boundary": "src/platforms/tiktok/engagement.py:engage_target_video -> src/platforms/tiktok/target.py:run_target_engagement",
+      "nearby_objects_not_accepted": [
+        "TikTok like/comment selector compatibility is a separate issue after the video page is confirmed.",
+        "The scheduler ordering between FYP and target engagement is outside this repair."
+      ]
+    },
+    "evidence": [
+      {
+        "id": "U1",
+        "kind": "user",
+        "provider": "user",
+        "scope": "reported-instance",
+        "summary": "User reports that the target interaction did not actually open the target video and authorizes the repair.",
+        "captured_at": "2026-11-17T20:43:00+08:00",
+        "same_failure_object": true,
+        "same_causal_chain": false,
+        "proves": ["Expected target interaction must be gated on a real target-video page."],
+        "does_not_prove": ["The repository implementation cause or the exact first wrong code step."],
+        "redacted": true,
+        "source_anchor": {"type": "conversation", "ref": "user request and attached execution record"}
+      },
+      {
+        "id": "S1",
+        "kind": "source",
+        "provider": "repository",
+        "scope": "same-class",
+        "summary": "engage_target_video calls page.goto, waits, and immediately dispatches like/comment actions without checking the current URL or video DOM.",
+        "captured_at": "2026-11-17T20:43:00+08:00",
+        "same_failure_object": true,
+        "same_causal_chain": true,
+        "proves": ["The first wrong step is the missing post-navigation target-video guard."],
+        "does_not_prove": ["The exact production redirect or browser response for the reported account."],
+        "redacted": true,
+        "source_anchor": {
+          "type": "file",
+          "ref": "engage_target_video",
+          "path": ".dev-docs/bugfix-target-video-open-20261117/pre-fix-engagement.py",
+          "content_sha256": "af3c116a4b4ac5f28d1c48a8eef2c6ebf226a04d72796d8cfcc24b1bab5acf23"
+        }
+      },
+      {
+        "id": "S2",
+        "kind": "source",
+        "provider": "repository",
+        "scope": "same-class",
+        "summary": "run_target_engagement records target_engagement and target_watermark after engage_target_video returns, without a successful-page or opened-video condition.",
+        "captured_at": "2026-11-17T20:43:00+08:00",
+        "same_failure_object": true,
+        "same_causal_chain": true,
+        "proves": ["An action failure can be persisted as processed progress when navigation is not verified."],
+        "does_not_prove": ["Any unrelated database or UI rendering behavior."],
+        "redacted": true,
+        "source_anchor": {
+          "type": "file",
+          "ref": "run_target_engagement",
+          "path": ".dev-docs/bugfix-target-video-open-20261117/pre-fix-target.py",
+          "content_sha256": "34838d621156201e548ceb8e197b0fac363ffa8358ef518189d63c817d907f18"
+        }
+      },
+      {
+        "id": "T1",
+        "kind": "test",
+        "provider": "repository",
+        "scope": "same-class",
+        "summary": "The focused regression test drives a navigation mismatch and asserts that actions and watermark persistence are skipped; it is RED before the production guard.",
+        "captured_at": "2026-11-17T20:43:00+08:00",
+        "same_failure_object": true,
+        "same_causal_chain": true,
+        "proves": ["Equivalent deterministic reproduction reaches the missing guard and observes the unsafe side effects."],
+        "does_not_prove": ["Live TikTok network or account state."],
+        "redacted": true,
+        "source_anchor": {
+          "type": "file",
+          "ref": "TikTokTargetVideoOpenTests",
+          "path": "src/test_tiktok_target_video_open_unit.py",
+          "content_sha256": "42e910a557d8cd6d13a3db01a5bbc441a43b20cb2f1b933856f374022ed340f2"
+        }
+      }
+    ],
+    "equivalent_reproduction_reason": "A deterministic fake page reproduces the same local branch: navigation returns while the page URL remains a target profile, then the existing code still dispatches actions; the second test reproduces the downstream persistence path without a successful open result.",
+    "claims": [
+      {
+        "id": "RC1",
+        "status": "root-cause",
+        "statement": "The target interaction flow treats page.goto plus a delay as proof that the requested video is open. Because it does not validate the requested URL/video element before action dispatch, it attempts likes/comments on the wrong page and then records the video as processed.",
+        "evidence_ids": ["S1", "S2", "T1"],
+        "does_not_prove": ["TikTok selector changes after a correctly loaded video page."],
+        "consumers": ["causal_chain.first_wrong_step", "repair_handoff", "red", "green", "audit"],
+        "challenge": "If the target-video URL and visible video element are confirmed, this missing guard cannot explain later selector failures; those remain a separate post-open problem.",
+        "would_disprove": "A repository test or live trace showing actions are dispatched only after a verified matching target-video page in the current implementation."
+      }
+    ],
+    "hypotheses": [
+      {
+        "id": "H1",
+        "status": "root-cause",
+        "claim_id": "RC1",
+        "statement": "Missing post-navigation validation allows the target action stage to run on a non-video page.",
+        "challenge": "A verified matching URL plus a visible video element would falsify this as the cause of a no-video-page run.",
+        "would_disprove": "The current function already performs an equivalent verification before like/comment dispatch.",
+        "evidence_for_ids": ["S1", "S2", "T1"],
+        "evidence_against_ids": []
+      }
+    ],
+    "directness_challenge": {
+      "challenge": "The screenshot alone could also reflect selector drift or a TikTok block page, so the direct lock must rely on the local control-flow proof and deterministic test rather than infer a live redirect cause.",
+      "would_disprove": "A current repository guard that verifies the requested video before actions, or a regression test showing no action/persistence on a navigation mismatch without the proposed patch.",
+      "conclusion": "The repair boundary is fully local: regardless of why navigation does not land on the video, the current code must detect that state and prevent misleading actions and watermark advancement.",
+      "evidence_ids": ["S1", "S2", "T1"]
+    },
+    "causal_chain": {
+      "first_wrong_step": "Missing post-navigation target-video verification",
+      "first_wrong_step_edge_id": "E1",
+      "fix_interruption_point": "Validate the normalized target-video URL and a visible video element immediately after the existing navigation wait; return an unopened result before action dispatch.",
+      "edges": [
+        {
+          "id": "E1",
+          "from": "target_video_open_request",
+          "to": "actions_execute_without_open_guard",
+          "relation": "page.goto is followed by action dispatch without verifying the requested video page",
+          "evidence_ids": ["S1", "T1"]
+        },
+        {
+          "id": "E2",
+          "from": "actions_execute_without_open_guard",
+          "to": "misleading_action_failures_and_watermark",
+          "relation": "actions run on the wrong page and the caller persists progress regardless of opened state",
+          "evidence_ids": ["S1", "S2", "T1"]
+        }
+      ]
+    },
+    "contradictions": [],
+    "open_unknowns": [],
+    "repair_handoff": {
+      "readiness": "READY_FOR_DECISION",
+      "consumer": "$code-bugfix",
+      "root_cause_claim_id": "RC1",
+      "repair_boundary": "Add a lightweight target-video URL/video-element guard in engagement.py and make target.py skip action persistence when opened is false.",
+      "regression_observable": "A navigation mismatch produces an unopened result, invokes neither like nor comment, writes no target_engagement, and emits no target_watermark.",
+      "constraints": ["Preserve existing navigation and action timing on successful video opens.", "Do not add retries or broad selector changes.", "Keep failed opens eligible for a future run by leaving the watermark unchanged."],
+      "risk_decisions": []
+    }
+  },
+  "direct_lock_acceptance": {
+    "accepted": true,
+    "accepted_lock_sha256": "d1de9278905bb27156dd57cc962c2ecf1c99b2178c3ec51df85deddab8cff9a3",
+    "source_anchors_current": true,
+    "checked_at": "2026-11-17T20:58:00+08:00"
+  },
+  "repair_authorized": true,
+  "operational_risk": {
+    "cache_invalidation": false,
+    "version_bump": false,
+    "historical_recompute": false,
+    "migration": false,
+    "data_repair": false,
+    "destructive_change": false,
+    "rollout_change": false,
+    "external_call_increase": false
+  },
+  "decision": {
+    "action": "auto-implement",
+    "reason": "The user authorized a surgical local repair, the diagnosis is direct-repository-evidence locked, and the change adds no retries, migrations, packaging, or extra external calls.",
+    "evidence_ids": ["S1", "S2", "T1"],
+    "risk_approved": true,
+    "resolved_lock_risk_ids": []
+  },
+  "red_green": {
+    "red": {
+      "command": "python -m unittest test_tiktok_target_video_open_unit",
+      "result": "RED: existing code returned no opened guard and recorded the open-failure video as engagement/watermark.",
+      "same_failure_object": true,
+      "same_causal_chain": true
+    },
+    "green": {
+      "command": "python -m unittest test_tiktok_target_video_open_unit test_tiktok_navigation_unit test_tiktok_runner_profile_collection_unit",
+      "result": "GREEN: navigation mismatch skips like/comment and engagement/watermark persistence; related TikTok navigation and runner tests pass.",
+      "same_failure_object": true,
+      "same_causal_chain": true
+    }
+  },
+  "verification": [
+    {
+      "command": "python -m unittest test_tiktok_target_video_open_unit test_tiktok_navigation_unit test_tiktok_runner_profile_collection_unit",
+      "passed": true
+    },
+    {
+      "command": "python -m compileall -q src/platforms/tiktok/engagement.py src/platforms/tiktok/target.py",
+      "passed": true
+    },
+    {
+      "command": "git diff --check",
+      "passed": true
+    }
+  ],
+  "changed_files": [
+    {
+      "path": "src/platforms/tiktok/engagement.py",
+      "trace_to_claim_id": "RC1",
+      "summary": "Added a lightweight URL and video-element guard before target like/comment actions."
+    },
+    {
+      "path": "src/platforms/tiktok/target.py",
+      "trace_to_claim_id": "RC1",
+      "summary": "Skips action persistence and watermark advancement when target video opening is not verified."
+    },
+    {
+      "path": "src/test_tiktok_target_video_open_unit.py",
+      "trace_to_claim_id": "RC1",
+      "summary": "Added regression coverage for navigation mismatch and unsafe engagement/watermark persistence."
+    }
+  ],
+  "gates": {
+    "direct_evidence_accepted": true,
+    "decision_closed": true,
+    "regression_closed": true,
+    "repair_closed": true,
+    "verification_closed": true,
+    "audit_closed": true
+  },
+  "blockers": []
+}
