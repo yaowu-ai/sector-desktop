@@ -417,8 +417,8 @@ export function skipAuthIntervention() {
   return invoke<StopResult>('skip_auth_intervention')
 }
 
-export function tailSessionLog(offset: number) {
-  return invoke<LogChunk>('tail_session_log', { request: { offset } })
+export function tailSessionLog(offset: number, generation?: string | null) {
+  return invoke<LogChunk>('tail_session_log', { request: { offset, generation } })
 }
 
 export function clearSessionLog() {

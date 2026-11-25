@@ -2,6 +2,7 @@
 
 mod commands;
 mod paths;
+mod retention;
 mod security;
 mod sqlite;
 mod state;
@@ -23,6 +24,7 @@ fn main() {
                 tauri::Error::Anyhow(anyhow::anyhow!("failed to lock initialization state"))
             })?;
             *init_status = Some(status);
+            retention::start();
             tauri::async_runtime::spawn_blocking(move || {
                 let result = paths::project_paths().and_then(|paths| {
                     sqlite::prepare_actions_db(std::path::Path::new(&paths.actions_db_path))

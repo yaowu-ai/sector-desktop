@@ -441,7 +441,17 @@ pub fn query_fyp_stats(filter: StatsScopeRequest) -> Result<FypStatsSummary, Str
         });
     }
 
-    let platform_expr = platform_select_expr(&conn, "action_log", "account_id")?;
+    let account_rows = collect_fyp_stats(&conn, start_ts.as_deref(), end_ts.as_deref(),
+        platform.as_deref(), account_id)?;
+    let total = total_fyp_stats(&account_rows);
+    Ok(FypStatsSummary { scope, label, by_account: account_rows, total })
+}
+
+fn collect_fyp_stats(conn: &Connection, start_ts: Option<&str>, end_ts: Option<&str>,
+    platform: Option<&str>, account_id: Option<&str>) -> Result<Vec<FypAccountStats>, String> {
+    // Both sources must use one snapshot while maintenance moves rows between them.
+    let _snapshot = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    let platform_expr = platform_select_expr(conn, "action_log", "account_id")?;
     let query = format!(
         "SELECT {}, account_id, action, status, detail
              FROM action_log
@@ -485,6 +495,26 @@ pub fn query_fyp_stats(filter: StatsScopeRequest) -> Result<FypStatsSummary, Str
         }
     }
 
+    if table_exists(conn, "action_stats_archive")? {
+        let mut stmt = conn.prepare("SELECT platform, account_id, kind, SUM(events), SUM(value)
+            FROM action_stats_archive WHERE (?1 IS NULL OR ts >= ?1) AND (?2 IS NULL OR ts <= ?2)
+            AND (?3 IS NULL OR platform=?3) AND (?4 IS NULL OR account_id=?4)
+            GROUP BY platform, account_id, kind").map_err(|e| e.to_string())?;
+        let rows = stmt.query_map(params![start_ts, end_ts, platform, account_id], |r| Ok((
+            r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?,
+            r.get::<_, i64>(3)?.max(0) as usize, r.get::<_, i64>(4)?.max(0) as usize,
+        ))).map_err(|e| e.to_string())?;
+        for row in rows {
+            let (platform, account, kind, events, value) = row.map_err(|e| e.to_string())?;
+            let entry = by_account.entry((platform, account)).or_default();
+            match kind {
+                1 => { entry.ok += events; entry.videos += value; },
+                2 => entry.err += events, 3 => entry.skip += events,
+                4 => entry.likes += value, 5 => entry.follows += value,
+                6 => entry.comments += value, _ => {},
+            }
+        }
+    }
     let mut account_rows = by_account
         .into_iter()
         .map(|((platform, account_id), stats)| FypAccountStats {
@@ -500,14 +530,7 @@ pub fn query_fyp_stats(filter: StatsScopeRequest) -> Result<FypStatsSummary, Str
         })
         .collect::<Vec<_>>();
     account_rows.sort_by(|left, right| left.account_id.cmp(&right.account_id));
-    let total = total_fyp_stats(&account_rows);
-
-    Ok(FypStatsSummary {
-        scope,
-        label,
-        by_account: account_rows,
-        total,
-    })
+    Ok(account_rows)
 }
 
 #[tauri::command]
@@ -1833,6 +1856,33 @@ fn sorted_set(values: HashSet<String>) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn cleanup_preserves_all_time_and_exact_custom_range_statistics() {
+        let dir = std::env::current_dir().unwrap().join(format!("stats-retention-test-{}",
+            chrono::Utc::now().timestamp_nanos_opt().unwrap()));
+        std::fs::create_dir(&dir).unwrap();
+        let path = dir.join("actions.db");
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch("CREATE TABLE action_log(id INTEGER PRIMARY KEY,platform TEXT,account_id TEXT,action TEXT,status TEXT,detail TEXT,ts TEXT);
+            INSERT INTO action_log VALUES
+            (1,'tiktok','a','fyp_browse','ok','videos=12','2026-10-01T12:00:00.001'),
+            (2,'tiktok','a','like','ok','count=4','2026-10-01T12:00:01.001'),
+            (3,'tiktok','a','session','error','long error text','2026-10-01T12:00:02.001'),
+            (4,'tiktok','a','close','ok','','2026-11-25T12:00:03.001'),
+            (5,'instagram','b','fyp_browse','ok','videos=2','2026-10-01T12:00:00.001');").unwrap();
+        let ranges = [(None,None,None), (Some("2026-10-01T12:00:00.500"),Some("2026-10-01T12:00:01.500"),Some("tiktok")),
+            (Some("2026-11-18"),None,Some("tiktok"))];
+        let before: Vec<_> = ranges.iter().map(|(start,end,platform)|
+            serde_json::to_value(collect_fyp_stats(&conn,*start,*end,*platform,None).unwrap()).unwrap()).collect();
+        for _ in 0..2 { crate::retention::clean_database(&path,"2026-11-18",&dir.join("run.lock")).unwrap(); }
+        for (index,(start,end,platform)) in ranges.iter().enumerate() {
+            let after = serde_json::to_value(collect_fyp_stats(&conn,*start,*end,*platform,None).unwrap()).unwrap();
+            assert_eq!(before[index], after);
+        }
+        drop(conn);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn scheduler_filters_match_legacy_query_for_every_optional_filter() {
         let conn = Connection::open_in_memory().unwrap();
