@@ -635,6 +635,7 @@ export interface LogChunk {
   nextOffset: number
   content: string
   exists: boolean
+  generation?: string | null
 }
 
 export interface CommentPool {

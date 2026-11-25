@@ -194,33 +194,20 @@ pub fn start_scheduler(state: State<'_, AppState>) -> Result<SchedulerStartResul
             paths.logs_dir, err
         )
     })?;
-    let mut log_file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_path)
-        .map_err(|err| {
-            format!(
-                "failed to open scheduler log {}: {}",
-                normalize(&log_path),
-                err
-            )
-        })?;
-    writeln!(
-        log_file,
-        "\n===== scheduler start {} =====\ncommand: {:?}\ncurrent_dir: {}",
+    let header = format!(
+        "\n===== scheduler start {} =====\ncommand: {:?}\ncurrent_dir: {}\n",
         Local::now().to_rfc3339(),
         command,
         normalize(&current_dir)
-    )
-    .map_err(|err| format!("failed to write scheduler log header: {}", err))?;
-    let stdout_log = log_file
-        .try_clone()
-        .map_err(|err| format!("failed to clone scheduler log handle: {}", err))?;
+    );
+    crate::retention::append_log(&log_path, header.as_bytes())
+        .map_err(|err| format!("failed to write scheduler log header: {}", err))?;
     let mut command_builder = Command::new(&command[0]);
     command_builder
         .args(&command[1..])
         .current_dir(&current_dir)
         .env("PYTHONUNBUFFERED", "1")
+        .env("AM_SCHEDULER_LOG_PATH", &log_path)
         .env(SCHEDULER_LOGIN_CREDENTIALS_ENV, login_credentials)
         .envs(quota_env)
         .env(
@@ -231,8 +218,10 @@ pub fn start_scheduler(state: State<'_, AppState>) -> Result<SchedulerStartResul
             "AM_SHOW_BROWSER_WINDOW",
             if paths.show_browser_window { "1" } else { "0" },
         )
-        .stdout(Stdio::from(stdout_log))
-        .stderr(Stdio::from(log_file));
+        // The Python runtime owns its rotating log. Inheriting the log handle
+        // would leave it locked by Windows launchers/bootloaders for their lifetime.
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
     hide_console_window(&mut command_builder);
     let child = command_builder.spawn().map_err(|err| {
         format!(

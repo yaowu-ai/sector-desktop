@@ -12,7 +12,7 @@ tauri-build = { version = "2", features = [] }
 anyhow = "1"
 chrono = "0.4"
 reqwest = { version = "0.13.4", features = ["json"] }
-rusqlite = { version = "0.32", features = ["bundled", "backup"] }
+rusqlite = { version = "0.32", features = ["bundled", "backup", "hooks"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
@@ -22,4 +22,4 @@ tauri = { version = "2", features = [] }
 custom-protocol = ["tauri/custom-protocol"]
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_UI_Controls_Dialogs"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_UI_Controls_Dialogs", "Win32_Storage_FileSystem"] }

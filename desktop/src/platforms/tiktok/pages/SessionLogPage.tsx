@@ -57,6 +57,7 @@ export function SessionLogPage() {
   const [keyword, setKeyword] = useState('')
   const [timeRange, setTimeRange] = useState<TimeRange>(null)
   const [logOffset, setLogOffset] = useState(0)
+  const [logGeneration, setLogGeneration] = useState<string | null>()
   const [sessionLog, setSessionLog] = useState('')
   const [logExists, setLogExists] = useState<boolean | null>(null)
   const [refreshing, setRefreshing] = useState(false)
@@ -109,14 +110,15 @@ export function SessionLogPage() {
   )
 
   const refreshLog = useCallback(async () => {
-    const chunk = await tailSessionLog(logOffset)
+    const chunk = await tailSessionLog(logOffset, logGeneration)
     setLogExists(chunk.exists)
     setLogOffset(chunk.nextOffset)
+    setLogGeneration(chunk.generation)
     if (chunk.content) {
       setSessionLog((current) => `${current}${chunk.content}`.slice(-MAX_LOG_LENGTH))
     }
     return chunk
-  }, [logOffset])
+  }, [logOffset, logGeneration])
 
   const reloadLog = async () => {
     setRefreshing(true)
@@ -126,6 +128,7 @@ export function SessionLogPage() {
       setAccounts(snapshot.accounts.filter((account) => account.platform === currentPlatform))
       setLogExists(chunk.exists)
       setLogOffset(chunk.nextOffset)
+      setLogGeneration(chunk.generation)
       setSessionLog((chunk.content ?? '').slice(-MAX_LOG_LENGTH))
     } catch (error) {
       message.error(formatError(error))
@@ -147,6 +150,7 @@ export function SessionLogPage() {
           const result = await clearSessionLog()
           setLogExists(result.cleared)
           setLogOffset(0)
+          setLogGeneration(undefined)
           setSessionLog('')
           message.success('sessions.log 已清空')
         } catch (error) {

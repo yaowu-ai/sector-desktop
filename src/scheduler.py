@@ -20,6 +20,10 @@ from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from log_retention import install_scheduler_logging
+
+install_scheduler_logging()
+
 import requests
 import uvicorn
 import yaml

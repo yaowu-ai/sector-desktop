@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import yaml
+from log_retention import append_session_log
 
 from runtime_config import (
     resolve_comments_path,
@@ -985,8 +986,7 @@ def record_ins_block_cooldown(conn, args, profile_id, reason):
 def session_log(line, platform="tiktok"):
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     full = redact_runtime_text(f"{ts} | {require_platform(platform)} | {line}")
-    with open(SESSION_LOG, "a", encoding="utf-8") as f:
-        f.write(full + "\n")
+    append_session_log(SESSION_LOG, full + "\n")
     print(full)
 
 
