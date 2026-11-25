@@ -11,6 +11,10 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
+from log_retention import install_scheduler_logging
+
+install_scheduler_logging()
+
 import yaml
 
 RUNTIME_VERSION = "0.1.0"

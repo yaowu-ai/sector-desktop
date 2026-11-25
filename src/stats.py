@@ -45,6 +45,7 @@ def aggregate(since=None):
         return {}
 
     conn = sqlite3.connect(LOG_DB)
+    conn.execute("BEGIN")
     if since:
         rows = conn.execute(
             "SELECT account_id, action, status, detail FROM action_log WHERE ts >= ?",
@@ -54,6 +55,7 @@ def aggregate(since=None):
         rows = conn.execute(
             "SELECT account_id, action, status, detail FROM action_log"
         ).fetchall()
+    archived = archived_stats(conn, since)
     conn.close()
 
     stats = {}
@@ -82,7 +84,29 @@ def aggregate(since=None):
         elif action == "comment" and status == "ok":
             s["comments"] += parse_count(detail, "count")
 
+    for account_id, kind, events, value, _handle in archived:
+        s = stats.setdefault(account_id, {
+            "ok": 0, "err": 0, "skip": 0, "videos": 0, "likes": 0,
+            "like_failures": 0, "follows": 0, "comments": 0,
+        })
+        if kind == 1:
+            s["ok"] += events
+            s["videos"] += value
+        elif kind in (2, 3):
+            s[{2: "err", 3: "skip"}[kind]] += events
+        elif kind in (4, 5, 6, 7):
+            s[{4: "likes", 5: "follows", 6: "comments", 7: "like_failures"}[kind]] += value
     return stats
+
+
+def archived_stats(conn, since=None):
+    if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='action_stats_archive'").fetchone():
+        return []
+    return conn.execute(
+        "SELECT account_id, kind, SUM(events), SUM(value), handle FROM action_stats_archive "
+        "WHERE (? IS NULL OR ts >= ?) GROUP BY account_id, kind, handle",
+        (since.isoformat() if since else None,) * 2,
+    ).fetchall()
 
 
 def aggregate_target(since=None):
@@ -95,6 +119,7 @@ def aggregate_target(since=None):
         return {}, {}
 
     conn = sqlite3.connect(LOG_DB)
+    conn.execute("BEGIN")
     try:
         if since:
             rows = conn.execute(
@@ -136,6 +161,7 @@ def aggregate_target(since=None):
             ).fetchall()
     except sqlite3.OperationalError:
         like_failure_rows = []
+    archived = archived_stats(conn, since)
     conn.close()
 
     def _acc(acc):
@@ -170,14 +196,15 @@ def aggregate_target(since=None):
         h["follows"] += 1
         h["accounts"].add(acc)
 
-    for acc, detail in like_failure_rows:
-        handle = parse_value(detail, "handle")
+    failures = [(acc, parse_value(detail, "handle"), 1) for acc, detail in like_failure_rows]
+    failures.extend((acc, handle, events) for acc, kind, events, _value, handle in archived if kind == 8)
+    for acc, handle, events in failures:
         a = _acc(acc)
-        a["like_failures"] += 1
+        a["like_failures"] += events
         if handle:
             a["handles"].add(handle)
             h = _hdl(handle)
-            h["like_failures"] += 1
+            h["like_failures"] += events
             h["accounts"].add(acc)
 
     return by_account, by_handle
