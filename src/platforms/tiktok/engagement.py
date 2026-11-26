@@ -11,12 +11,14 @@ from platforms.tiktok.actions import (
 )
 from platforms.tiktok.video_info import capture_active_video_info
 from platforms.tiktok.target_page import (
-    MAX_PROFILE_SCROLLS, navigate_target_page, profile_follow_button,
+    MAX_PROFILE_SCROLLS, navigate_target_page, observe_target_like_events, profile_follow_button,
     recover_target_page, target_like_button, target_like_click_point, target_page_state,
     target_url_matches, toggle_state, unique_visible, video_link_id,
 )
 
 COMMENTS_NAME = re.compile(r"^(Comments|评论|評論)(?:\s*\(?\d+\)?)?$", re.I)
+LIKE_CONFIRM_SAMPLES = 6
+LIKE_CONFIRM_INTERVAL_MS = 500
 
 
 def _video_id_from_href(href):
@@ -93,13 +95,40 @@ def _target_video_open_state(page, handle, video_id):
     return target_page_state(page, handle, video_id)
 
 
-def _like_target_video(page, mouse_state, *, attempted_likes=None, video_key=None):
+def _confirm_target_like(page, expected_url, diagnostics):
+    """Observe the same video for a short fixed window; never retry a toggle."""
+    seen_liked = False
+    consecutive_liked = 0
+    for _ in range(LIKE_CONFIRM_SAMPLES):
+        try:
+            page.wait_for_timeout(LIKE_CONFIRM_INTERVAL_MS)
+            if page.url != expected_url:
+                return False, "video_changed_during_confirmation"
+            btn = target_like_button(page)
+            state = toggle_state(btn, "like") if btn is not None else None
+        except Exception:
+            state = None
+        diagnostics["states"].append(state)
+        if state is True:
+            seen_liked = True
+            consecutive_liked += 1
+        elif state is False and seen_liked:
+            return False, "state_reverted"
+        else:
+            consecutive_liked = 0
+    return (True, "liked") if consecutive_liked >= 2 else (False, "state_unconfirmed")
+
+
+def _like_target_video(page, mouse_state, *, attempted_likes=None, video_key=None, diagnostics=None):
+    diagnostics = diagnostics if diagnostics is not None else {}
+    diagnostics.update(down_requests=0, up_requests=0, states=[], observed_clicks=None)
     if attempted_likes is not None and video_key in attempted_likes:
         return False, "already_attempted", False
     btn = target_like_button(page)
     if btn is None:
         return False, "button_not_found", False
     control = None
+    event_probe = None
     attempted = False
     try:
         # Pin the original node: a re-render must not retarget a fresh locator.
@@ -125,6 +154,10 @@ def _like_target_video(page, mouse_state, *, attempted_likes=None, video_key=Non
             return False, "state_unknown", False
         if page.url != original_url or target_like_click_point(control, point) is None:
             return False, "target_changed", False
+        try:
+            event_probe = observe_target_like_events(control)
+        except Exception:
+            pass  # Missing diagnostics must not cause another click or block work.
         if attempted_likes is not None:
             attempted_likes.add(video_key)
         attempted = True
@@ -132,21 +165,32 @@ def _like_target_video(page, mouse_state, *, attempted_likes=None, video_key=Non
         # action retry loop. Always release once, even if down's acknowledgement
         # is lost; never send a second press to compensate for an uncertain result.
         try:
+            diagnostics["down_requests"] += 1
             page.mouse.down(button="left")
         finally:
+            diagnostics["up_requests"] += 1
             page.mouse.up(button="left")
+        liked, reason = _confirm_target_like(page, original_url, diagnostics)
+        return liked, reason, True
     except Exception:
         return False, "click_unconfirmed" if attempted else "preparation_failed", attempted
     finally:
+        if event_probe is not None:
+            try:
+                events = event_probe.evaluate("probe => probe.stop()")
+                diagnostics["observed_clicks"] = events.get("click")
+            except Exception:
+                pass
+            finally:
+                try:
+                    event_probe.dispose()
+                except Exception:
+                    pass
         if control is not None:
             try:
                 control.dispose()
             except Exception:
                 pass
-    human_pause(0.5, 1.0)
-    btn = target_like_button(page)
-    liked = btn is not None and toggle_state(btn, "like") is True
-    return liked, "liked" if liked else "state_unconfirmed", True
 
 
 def _comment_on_video_page(page, mouse_state, text):
@@ -233,10 +277,12 @@ def engage_target_video(
     liked = False
     like_attempted = False
     like_reason = "not_attempted"
+    like_diagnostics = {}
     if random.random() < like_prob:
         liked, like_reason, like_attempted = _like_target_video(
             page, mouse_state, attempted_likes=attempted_likes,
             video_key=(platform, account_id, str(video_id)),
+            diagnostics=like_diagnostics,
         )
         human_pause(0.5, 1.5)
 
@@ -255,19 +301,24 @@ def engage_target_video(
             commented = _comment_on_video_page(page, mouse_state, text)
             human_pause(1.0, 2.5)
 
-    if liked and comment_attempted:
-        btn = target_like_button(page) if target_url_matches(page.url, handle, video_id) else None
-        final_state = toggle_state(btn, "like") if btn is not None else None
+    if liked:
+        try:
+            btn = target_like_button(page) if target_url_matches(page.url, handle, video_id) else None
+            final_state = toggle_state(btn, "like") if btn is not None else None
+        except Exception:
+            final_state = None
         if final_state is not True:
             liked = False
-            like_reason = ("state_reverted_after_comment" if final_state is False
-                           else "state_unconfirmed_after_comment")
+            phase = "comment" if comment_attempted else "confirmation"
+            like_reason = (f"state_reverted_after_{phase}" if final_state is False
+                           else f"state_unconfirmed_after_{phase}")
 
     return {
         "opened": True,
         "liked": liked,
         "like_attempted": like_attempted,
         "like_reason": like_reason,
+        "like_diagnostics": like_diagnostics,
         "commented": commented,
         "comment_attempted": comment_attempted,
     }

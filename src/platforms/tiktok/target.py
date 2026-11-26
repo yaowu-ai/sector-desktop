@@ -157,6 +157,21 @@ def run_target_engagement(page, account, config, conn):
             if result.get("like_attempted") and not result["liked"] and not already_liked:
                 counts["like_failures"] += 1
             counts["comments"] += int(result["commented"])
+            like_diagnostics = result.get("like_diagnostics") or {}
+            like_detail = (
+                f"{handle}/{video_id}"
+                + ("" if result["liked"] else f" reason={result.get('like_reason', 'unknown')}")
+            )
+            if like_diagnostics:
+                states = ",".join("liked" if value is True else "unliked" if value is False else "unknown"
+                                  for value in like_diagnostics.get("states", []))
+                observed = like_diagnostics.get("observed_clicks")
+                like_detail += (
+                    f" down_requests={like_diagnostics.get('down_requests', 0)}"
+                    f" up_requests={like_diagnostics.get('up_requests', 0)}"
+                    f" observed_clicks={observed if observed is not None else 'unknown'}"
+                    f" states={states or 'none'}"
+                )
             if result.get("like_attempted") and not already_liked:
                 log_action(
                     conn,
@@ -164,11 +179,7 @@ def run_target_engagement(page, account, config, conn):
                     account_id,
                     "target_like",
                     "ok" if result["liked"] else "fail",
-                    (
-                        f"{handle}/{video_id}"
-                        if result["liked"]
-                        else f"{handle}/{video_id} reason={result.get('like_reason', 'unknown')}"
-                    ),
+                    like_detail,
                 )
             else:
                 log_action(conn, platform, account_id, "target_like", "skip",
