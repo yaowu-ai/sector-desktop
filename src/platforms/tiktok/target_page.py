@@ -127,11 +127,35 @@ def target_like_click_point(control, point=None):
     }""", point)
 
 
+def observe_target_like_events(control):
+    """Count actual events on the pinned button without intercepting them."""
+    return control.evaluate_handle("""el => {
+      const doc = el.ownerDocument;
+      const counts = {pointerdown: 0, pointerup: 0, click: 0};
+      const listen = event => {
+        if (event.isTrusted && event.composedPath().includes(el)) counts[event.type]++;
+      };
+      for (const name of Object.keys(counts)) doc.addEventListener(name, listen, true);
+      let timer;
+      const stop = () => {
+        clearTimeout(timer);
+        for (const name of Object.keys(counts)) doc.removeEventListener(name, listen, true);
+        return counts;
+      };
+      timer = setTimeout(stop, 10000);
+      return {stop};
+    }""")
+
+
 def toggle_state(button, kind):
     """Return True/False/None; unreadable or conflicting state never permits a click."""
     snapshot = button.evaluate("""el => {
       const selector = '[data-e2e="like-icon"], [data-e2e="browse-like-icon"]';
       const heart = el.matches(selector) ? el : el.querySelector(selector);
+      let heartNodes = heart ? Array.from(heart.querySelectorAll('path, use')) : [];
+      if (heart && heart.matches('path, use')) heartNodes.unshift(heart);
+      if (heart && !heartNodes.length)
+        heartNodes = heart.matches('svg') ? [heart] : Array.from(heart.querySelectorAll('svg'));
       return {
         pressed: el.getAttribute('aria-pressed'),
         label: (el.getAttribute('aria-label') || '').trim(),
@@ -139,8 +163,8 @@ def toggle_state(button, kind):
         marker: el.getAttribute('data-e2e') || '',
         fills: Array.from(el.querySelectorAll('svg, svg path')).slice(0, 8)
           .map(node => getComputedStyle(node).fill.toLowerCase().replace(/\\s/g, '')),
-        heart_fills: heart ? Array.from(heart.querySelectorAll('svg, path, use')).slice(0, 8)
-          .map(node => getComputedStyle(node).fill.toLowerCase().replace(/\\s/g, '')) : []
+        heart_fills: heartNodes.slice(0, 8)
+          .map(node => getComputedStyle(node).fill.toLowerCase().replace(/\\s/g, ''))
       };
     }""")
     yes, no = False, False
@@ -150,19 +174,20 @@ def toggle_state(button, kind):
         yes, no = pressed == "true", pressed == "false"
     if kind == "like":
         yes |= bool(re.fullmatch(r"(unlike|remove like|取消点赞|取消讚|取消喜欢|取消喜歡)", label))
-        no |= bool(re.fullmatch(r"(like|like video|点赞|讚|喜欢|喜歡)", label))
-        fills = snapshot["fills"]
-        red = any(fill in {"rgb(254,44,85)", "rgb(255,44,85)", "rgb(255,59,92)",
-                           "#fe2c55", "#ff2c55", "#ff3b5c"} for fill in fills)
-        yes |= red
-        # Generic white SVGs can belong to comment/share controls or to an
-        # unrecognised heart variant; only the identified heart proves unliked.
+        # TikTok can keep the label "Like" after liking. It is a control name,
+        # not sufficient evidence that another toggle is safe.
+        red_fills = {"rgb(254,44,85)", "rgb(255,44,85)", "rgb(255,59,92)",
+                     "#fe2c55", "#ff2c55", "#ff3b5c"}
+        white_fills = {"rgb(255,255,255)", "#ffffff"}
+        empty_fills = {"none", "rgba(0,0,0,0)"}
         heart_fills = snapshot.get("heart_fills", [])
-        if (not yes and not no and heart_fills
-                and all(fill in {"rgb(255,255,255)", "#ffffff", "none", "rgba(0,0,0,0)"}
-                        for fill in heart_fills)
-                and any(fill in {"rgb(255,255,255)", "#ffffff"} for fill in heart_fills)):
-            no = True
+        yes |= any(fill in red_fills for fill in list(snapshot["fills"]) + list(heart_fills))
+        # Treat a new/animated colour format as unknown even if aria-pressed
+        # still says false. This deliberately prevents toggling off a red heart.
+        if any(fill not in red_fills | white_fills | empty_fills for fill in heart_fills):
+            return None
+        no |= bool(heart_fills) and all(fill in white_fills | empty_fills for fill in heart_fills) \
+            and any(fill in white_fills for fill in heart_fills)
     else:
         text = re.sub(r"[\s✓✔]+", "", snapshot["text"].casefold())
         values = {label, text}

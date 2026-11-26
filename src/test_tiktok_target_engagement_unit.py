@@ -216,7 +216,7 @@ class TargetControlTests(unittest.TestCase):
             (self.control(label="Unlike"), "like", True),
             (self.control(fills=["rgb(254,44,85)"]), "like", True),
             (self.control(pressed="false"), "like", False),
-            (self.control(label="Like"), "like", False),
+            (self.control(label="Like"), "like", None),
             (self.control(), "like", None),
             (self.control(pressed="false", fills=["rgb(254,44,85)"]), "like", None),
             (self.control(text="Following ✓"), "follow", True),
@@ -250,10 +250,10 @@ class TargetControlTests(unittest.TestCase):
     @patch.object(engagement, "human_pause")
     @patch.object(engagement, "human_click_locator", return_value=True)
     def test_a_like_click_is_verified_and_never_repeated(self, click, _pause):
-        button = self.control(label="Like")
+        button = self.control(pressed="false", label="Like")
         page = MagicMock()
-        with patch.object(engagement, "target_like_button", side_effect=[
-            button, self.control(label="Unlike"),
+        with patch.object(engagement, "target_like_button", side_effect=[button] + [
+            self.control(label="Unlike") for _ in range(engagement.LIKE_CONFIRM_SAMPLES)
         ]), patch.object(engagement, "target_like_click_point", return_value={"x": 100, "y": 100}):
             self.assertEqual(engagement._like_target_video(page, MagicMock()), (True, "liked", True))
         button.click.assert_not_called()

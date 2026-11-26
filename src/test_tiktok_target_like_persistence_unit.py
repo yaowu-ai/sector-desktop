@@ -28,6 +28,18 @@ class Control:
     def dispose(self):
         pass
 
+    def evaluate_handle(self, script):
+        start = len(self.page.events)
+        probe = MagicMock()
+        def stop(_script):
+            events = self.page.events[start:]
+            return {"pointerdown": events.count(("down", "left")),
+                    "pointerup": events.count(("up", "left")),
+                    "click": events.count(("click", "like"))}
+        probe.evaluate.side_effect = stop
+        self.page.probes.append(probe)
+        return probe
+
     def is_enabled(self):
         return True
 
@@ -146,6 +158,7 @@ class TargetVideoPage:
         self.draft = ""
         self.comments = []
         self.events = []
+        self.probes = []
         self.lose_focus, self.move_editor = lose_focus, move_editor
         self.like = Control(self, "like", {"x": 680, "y": 265, "width": 30, "height": 30})
         self.editor = Control(self, "editor", {"x": 690, "y": 580, "width": 200, "height": 35})
@@ -160,6 +173,9 @@ class TargetVideoPage:
 
     def get_by_text(self, *args, **kwargs):
         return MagicMock()
+
+    def wait_for_timeout(self, milliseconds):
+        pass
 
 
 class TargetLikePersistenceTests(unittest.TestCase):
