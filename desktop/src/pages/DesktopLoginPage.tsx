@@ -11,6 +11,8 @@ import {
 import { LockKeyhole, Server, UserRound } from "lucide-react";
 import { useState } from "react";
 
+import loginBackground from "../assets/login/desktop-bg.png";
+
 interface DesktopLoginPageProps {
   apiBaseUrl: string;
   error: string | null;
@@ -58,16 +60,16 @@ export function DesktopLoginPage({
   };
 
   return (
-    <div className="desktop-login-page">
+    <div
+      className="desktop-login-page"
+      style={{ backgroundImage: `url(${loginBackground})` }}
+    >
       <Card className="desktop-login-card">
         <Space direction="vertical" size={20} className="full-width">
-          <div>
-            <Typography.Title level={2} style={{ marginBottom: 4 }}>
-              星域桌面端
+          <div className="desktop-login-header">
+            <Typography.Title level={2} className="desktop-login-title">
+              欢迎登陆星域
             </Typography.Title>
-            <Typography.Text type="secondary">
-              登录产品账号后使用本机养号工具。
-            </Typography.Text>
           </div>
           {error ? <Alert type="error" showIcon message={error} /> : null}
           <Form
